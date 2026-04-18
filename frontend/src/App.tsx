@@ -121,17 +121,6 @@ function App() {
                   />
                 </svg>
               </button>
-                    <ProtocolSidebar currentStep={currentStep} isOpen={showProtocolSidebar} onClose={() => setShowProtocolSidebar(false)} />
-      
-      {/* TOGGLE BUTTON RESTORED */}
-      <div className=" ">
-        <button 
-          onClick={() => setShowProtocolSidebar(!showProtocolSidebar)} 
-          className="px-4 py-2 bg-blue-600 text-white rounded shadow-lg hover:bg-blue-700 transition-all text-sm font-bold uppercase tracking-wider"
-        >
-          {showProtocolSidebar ? "Hide" : "Show"} Protocol
-        </button>
-      </div>
               {/*!simulationState?.isStarted ? (
                 <button
                   onClick={handleStartSimulation}

@@ -149,6 +149,107 @@
   transform: scale(1.1);
 }
 
+/* InteractiveLabCanvas.css */
+
+/* Main container */
+.lab-canvas-container {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #003e63;
+  font-family: 'Inter', system-ui, sans-serif;
+}
+
+/* Scrollable wrapper for the canvas */
+.canvas-wrapper {
+  width: 100%;
+  height: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: #64748b #1e2937;
+}
+
+.canvas-wrapper::-webkit-scrollbar {
+  height: 8px;
+}
+
+.canvas-wrapper::-webkit-scrollbar-track {
+  background: #1e2937;
+}
+
+.canvas-wrapper::-webkit-scrollbar-thumb {
+  background: #64748b;
+  border-radius: 4px;
+}
+
+.canvas-wrapper::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* The canvas itself */
+.lab-canvas {
+  display: block;
+  image-rendering: crisp-edges;           /* Sharp edges for lab equipment */
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+  border-radius: 4px;
+  cursor: default;
+}
+
+/* Make canvas look more "physical" */
+.lab-canvas:hover {
+  box-shadow: 0 15px 40px rgba(0, 0, 0, 0.5);
+}
+
+/* Protocol toggle button - modern lab style */
+.protocol-toggle-btn {
+  position: fixed;
+  top: 16px;
+  right: 20px;
+  z-index: 50;
+  padding: 10px 20px;
+  background: linear-gradient(135deg, #3b82f6, #2563eb);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-weight: 700;
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  box-shadow: 0 4px 15px rgba(37, 99, 235, 0.3);
+  transition: all 0.2s ease;
+  cursor: pointer;
+}
+
+.protocol-toggle-btn:hover {
+  background: linear-gradient(135deg, #2563eb, #1d4ed8);
+  transform: translateY(-1px);
+  box-shadow: 0 6px 20px rgba(37, 99, 235, 0.4);
+}
+
+.protocol-toggle-btn:active {
+  transform: translateY(1px);
+}
+
+/* Optional: Add subtle grid or lab floor texture to background */
+.lab-canvas-container::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: 
+    linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px);
+  background-size: 40px 40px;
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* Improve modal and sidebar appearance if needed */
+.ApparatusDetailModal, .ProtocolSidebar {
+  z-index: 100;
+}
+
 .step-indicator.upcoming {
   background: #ecf0f1;
   color: #7f8c8d;
