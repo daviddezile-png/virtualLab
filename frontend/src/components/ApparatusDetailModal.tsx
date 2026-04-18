@@ -355,6 +355,97 @@ const ApparatusDetailModal: React.FC<ApparatusDetailModalProps> = ({
           </div>
         );
 
+      case "hotplate":
+        return (
+          <div className="space-y-6">
+            <div className="bg-gray-50 p-4 rounded-lg">
+              <h3 className="font-semibold text-gray-900 mb-2">
+                Hotplate Status
+              </h3>
+              <div className="grid grid-cols-2 gap-4 text-sm">
+                <div>
+                  <span className="text-gray-600">Current Temperature:</span>
+                  <span className="ml-2 font-semibold">
+                    {currentData?.temperature || "25"}°C
+                  </span>
+                </div>
+                <div>
+                  <span className="text-gray-600">Power Status:</span>
+                  <span className="ml-2 font-semibold">
+                    {currentData?.power || "Off"}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-gray-600">Maximum Temperature:</span>
+                  <span className="ml-2 font-semibold">
+                    {currentData?.maxTemp || "300"}°C
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-red-50 p-4 rounded-lg">
+              <h3 className="font-semibold text-red-900 mb-2">
+                Safety Features
+              </h3>
+              <div className="space-y-2 text-sm">
+                <div className="flex items-center">
+                  <div className="w-2 h-2 bg-red-500 rounded-full mr-2"></div>
+                  <span className="font-medium">Overheat Protection</span>
+                </div>
+                <div className="flex items-center">
+                  <div className="w-2 h-2 bg-red-500 rounded-full mr-2"></div>
+                  <span className="font-medium">Auto Shut-off</span>
+                </div>
+                <div className="flex items-center">
+                  <div className="w-2 h-2 bg-red-500 rounded-full mr-2"></div>
+                  <span className="font-medium">Temperature Lock</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-green-50 p-4 rounded-lg">
+              <h3 className="font-semibold text-green-900 mb-2">
+                Temperature Controls
+              </h3>
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <span className="text-gray-600">Set Temperature:</span>
+                  <input
+                    type="range"
+                    min="25"
+                    max="300"
+                    defaultValue={currentData?.temperature || "25"}
+                    className="w-32 h-2"
+                    onChange={(e) => {
+                      const temp = parseInt(e.target.value);
+                      console.log(`Setting temperature to ${temp}°C`);
+                    }}
+                  />
+                  <span className="ml-2 font-semibold">
+                    {currentData?.temperature || "25"}°C
+                  </span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-gray-600">Power:</span>
+                  <button
+                    onClick={() => {
+                      console.log("Toggling hotplate power");
+                    }}
+                    className={`px-4 py-2 rounded font-medium transition-colors ${
+                      currentData?.power === "On"
+                        ? "bg-green-600 text-white hover:bg-green-700"
+                        : "bg-gray-600 text-white hover:bg-gray-700"
+                    }`}
+                  >
+                    {currentData?.power === "On" ? "Turn Off" : "Turn On"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+
       case "microscope":
         return (
           <div className="space-y-6">
