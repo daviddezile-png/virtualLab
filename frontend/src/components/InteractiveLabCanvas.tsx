@@ -1,9 +1,18 @@
 import React, { useRef, useEffect, useState, useCallback } from "react";
-import classNames from "classnames";
 import { SimulationStep } from "../simulation/model";
 import ApparatusDetailModal from "./ApparatusDetailModal";
 import ProtocolSidebar from "./ProtocolSidebar";
+import EvaluationPanel from "./EvaluationPanel";
 import { getInitialApparatus, Apparatus } from "./apparatusData";
+
+// Maps source bottle ID → composition key
+const BOTTLE_INGREDIENT: Record<string, string> = {
+  "distilled-water-bottle":        "water",
+  "container-stearic-acid":        "stearicAcid",
+  "container-liquid-paraffin":     "liquidParaffin",
+  "container-glycerin":            "glycerin",
+  "container-koh-triethanolamine": "koh",
+};
 
 const parseRgba = (color: string): [number, number, number, number] => {
   const m = color.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?\)/);
@@ -23,10 +32,61 @@ const drawBeaker = (
   liquidTemperature: number = 25,
   frame: number = 0,
   isStirring: boolean = false,
+  solidStearicGrams: number = 0,
+  tiltAngle: number = 0,
+  emulsificationProgress: number = 0,
 ) => {
+  ctx.save();
+  if (tiltAngle !== 0) {
+    ctx.translate(x + w / 2, y);
+    ctx.rotate(tiltAngle);
+    ctx.translate(-(x + w / 2), -y);
+  }
   const radius = 5;
   const usableHeight = h * 0.7;
   const bottomPadding = h * 0.15;
+  const solidFloorY = y + h - bottomPadding; // bottom of usable area
+
+  // 0. Draw solid stearic acid chunks (before liquid so liquid renders on top)
+  if (solidStearicGrams > 0) {
+    const chunkH = Math.min(h * 0.28, 4 + solidStearicGrams * 0.6);
+    const chunkY = solidFloorY - chunkH;
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.roundRect(x + 3, chunkY, w - 6, chunkH + 4, [0, 0, radius, radius]);
+    ctx.clip();
+
+    // Base wax fill
+    ctx.fillStyle = "rgba(255, 250, 238, 0.97)";
+    ctx.fillRect(x + 3, chunkY, w - 6, chunkH + 4);
+
+    // Individual wax chunk rectangles with gaps
+    const numChunks = Math.max(3, Math.floor((w - 10) / 10));
+    const chunkW = (w - 10) / numChunks;
+    ctx.fillStyle = "rgba(240, 228, 210, 0.80)";
+    for (let i = 0; i < numChunks; i++) {
+      const cx2 = x + 5 + i * chunkW;
+      const ch2 = chunkH * (0.55 + ((i * 3) % 5) * 0.09);
+      ctx.beginPath();
+      ctx.roundRect(cx2, chunkY + (chunkH - ch2), chunkW - 2, ch2, 2);
+      ctx.fill();
+    }
+
+    // Wax surface sheen
+    ctx.fillStyle = "rgba(255,255,255,0.30)";
+    ctx.beginPath();
+    ctx.roundRect(x + 5, chunkY, (w - 10) * 0.42, 3, 1);
+    ctx.fill();
+
+    ctx.restore();
+
+    // Gram label above the solid pile
+    ctx.fillStyle = "#92400e";
+    ctx.font = `bold 7px Arial`;
+    ctx.textAlign = "center";
+    ctx.fillText(`${solidStearicGrams.toFixed(1)}g`, x + w / 2, chunkY - 3);
+  }
 
   // 1. Draw Liquid First (so glass is on top)
   if (currentVol > 0) {
@@ -152,7 +212,82 @@ const drawBeaker = (
     }
   }
 
-  // 2. Glass Body
+  // 2. Cream formation overlay
+  if (emulsificationProgress > 0 && currentVol > 0) {
+    const tE = Math.max(0, (emulsificationProgress - 20) / 80); // ease-in after 20%
+
+    const fillH2 = usableHeight * Math.min(currentVol / maxVol, 1);
+    const liqY2  = y + h - bottomPadding - fillH2;
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.roundRect(x + 2, liqY2, w - 4, y + h - radius - liqY2, [0, 0, radius, radius]);
+    ctx.clip();
+
+    if (emulsificationProgress >= 100) {
+      // ── FULLY FORMED — opaque cream fill ──
+      const cGrad = ctx.createLinearGradient(x, liqY2, x, y + h - radius);
+      cGrad.addColorStop(0, "rgba(255, 253, 250, 0.97)");
+      cGrad.addColorStop(0.3, "rgba(252, 249, 244, 0.95)");
+      cGrad.addColorStop(1, "rgba(245, 240, 232, 0.98)");
+      ctx.fillStyle = cGrad;
+      ctx.fillRect(x + 2, liqY2, w - 4, y + h - radius - liqY2);
+
+      // Glossy surface sheen
+      ctx.fillStyle = "rgba(255, 255, 255, 0.60)";
+      ctx.beginPath();
+      ctx.ellipse(x + w / 2, liqY2 + 4, (w - 10) / 2, 5, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Cream texture dots
+      ctx.fillStyle = "rgba(240, 232, 218, 0.45)";
+      for (let i = 0; i < 8; i++) {
+        const cx2 = x + 5 + ((i * 17) % (w - 10));
+        const cy2 = liqY2 + 8 + ((i * 11) % (fillH2 - 16));
+        ctx.beginPath();
+        ctx.ellipse(cx2, cy2, 3 + i % 3, 2, i * 0.4, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    } else if (emulsificationProgress > 20) {
+      // ── FORMING — cloudy/milky overlay ──
+      ctx.fillStyle = `rgba(255, 252, 248, ${tE * 0.75})`;
+      ctx.fillRect(x + 2, liqY2, w - 4, y + h - radius - liqY2);
+
+      // Animated swirling white streaks
+      ctx.strokeStyle = `rgba(255, 255, 255, ${tE * 0.55})`;
+      ctx.lineWidth = 2.5;
+      ctx.lineCap = "round";
+      const midY = liqY2 + (y + h - radius - liqY2) / 2;
+      ctx.beginPath();
+      ctx.arc(x + w / 2, midY, (w - 12) / 3, frame * 0.14, frame * 0.14 + Math.PI * 1.3);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(x + w / 2, midY, (w - 12) / 5, -frame * 0.11, -frame * 0.11 + Math.PI);
+      ctx.stroke();
+      ctx.lineCap = "butt";
+    }
+
+    ctx.restore();
+
+    // Label above the beaker
+    ctx.textAlign = "center";
+    if (emulsificationProgress >= 100) {
+      // Cream badge
+      ctx.fillStyle = "rgba(120, 60, 5, 0.95)";
+      ctx.beginPath();
+      ctx.roundRect(x + w / 2 - 38, liqY2 - 20, 76, 16, 4);
+      ctx.fill();
+      ctx.fillStyle = "#fef3c7";
+      ctx.font = "bold 7px Arial";
+      ctx.fillText("✓ VANISHING CREAM", x + w / 2, liqY2 - 9);
+    } else if (emulsificationProgress > 20) {
+      ctx.fillStyle = `rgba(120, 80, 20, ${tE * 0.9})`;
+      ctx.font = "bold 7px Arial";
+      ctx.fillText(`EMULSIFYING ${Math.round(emulsificationProgress)}%`, x + w / 2, liqY2 - 5);
+    }
+  }
+
+  // 3. Glass Body
   const glassGradient = ctx.createLinearGradient(x, y, x + w, y);
   glassGradient.addColorStop(0, "rgba(200, 230, 255, 0.3)");
   glassGradient.addColorStop(0.5, "rgba(230, 245, 255, 0.1)");
@@ -183,6 +318,39 @@ const drawBeaker = (
     ctx.stroke();
     ctx.fillText(`${i * step}`, x + 12, markY + 3);
   }
+
+  // 4. Live temperature badge — shown whenever liquid is above ambient
+  if (liquidTemperature > 26 && currentVol > 0) {
+    const tempStr = `${Math.round(liquidTemperature)}°C`;
+    const isHot   = liquidTemperature >= 60;
+    const isVHot  = liquidTemperature >= 90;
+    const badgeColor  = isVHot  ? "rgba(220,38,38,0.92)"
+                      : isHot   ? "rgba(234,88,12,0.92)"
+                      :           "rgba(202,138,4,0.92)";
+    const badgeY = y - 22;
+    const badgeW = 40;
+    const badgeH = 16;
+    const badgeX = x + w / 2 - badgeW / 2;
+
+    // Badge background
+    ctx.fillStyle = badgeColor;
+    ctx.beginPath();
+    ctx.roundRect(badgeX, badgeY, badgeW, badgeH, 4);
+    ctx.fill();
+
+    // Temperature text
+    ctx.fillStyle = "white";
+    ctx.font = "bold 9px monospace";
+    ctx.textAlign = "center";
+    ctx.fillText(tempStr, x + w / 2, badgeY + 11);
+
+    // "HOLDING" label when temperature is stable (not actively heating/cooling)
+    ctx.fillStyle = "rgba(255,255,255,0.60)";
+    ctx.font = "6px Arial";
+    ctx.fillText("ACTUAL", x + w / 2, badgeY - 2);
+  }
+
+  ctx.restore();
 };
 
 const drawCylinder = (
@@ -301,6 +469,7 @@ const drawBottle = (
   tiltAngle: number = 0,
   liquidColor: string = "rgba(56, 189, 248, 0.5)",
   lidColor: string = "#0ea5e9",
+  isSolid: boolean = false,
 ) => {
   ctx.save();
   if (tiltAngle !== 0) {
@@ -313,26 +482,69 @@ const drawBottle = (
   const bodyY = y + neckHeight;
   const isWater = name.toLowerCase().includes("water");
 
-  // 1. Liquid Level
+  // 1. Content (liquid or solid)
   if (currentVol > 0) {
     const fillLevel = currentVol / maxVol;
-    const liquidH = bodyHeight * fillLevel;
-    ctx.fillStyle = liquidColor;
-    ctx.beginPath();
-    ctx.roundRect(x, bodyY + (bodyHeight - liquidH), w, liquidH, [0, 0, 8, 8]);
-    ctx.fill();
+    const fillH = bodyHeight * fillLevel;
+    const fillY = bodyY + (bodyHeight - fillH);
+
+    if (isSolid) {
+      // Wax-like solid: creamy white base
+      ctx.fillStyle = "rgba(255, 250, 240, 0.97)";
+      ctx.beginPath();
+      ctx.roundRect(x + 2, fillY, w - 4, fillH, [0, 0, 6, 6]);
+      ctx.fill();
+
+      // Wavy chunky surface to show it's a solid
+      ctx.save();
+      ctx.beginPath();
+      ctx.roundRect(x + 2, fillY, w - 4, fillH, [0, 0, 6, 6]);
+      ctx.clip();
+
+      // Horizontal wax layering lines
+      ctx.strokeStyle = "rgba(220, 210, 195, 0.6)";
+      ctx.lineWidth = 1;
+      for (let ly = fillY + 4; ly < bodyY + bodyHeight - 4; ly += 7) {
+        ctx.beginPath();
+        ctx.moveTo(x + 4, ly);
+        ctx.lineTo(x + w - 4, ly);
+        ctx.stroke();
+      }
+
+      // Irregular chunks on top surface
+      ctx.fillStyle = "rgba(240, 232, 218, 0.85)";
+      for (let ci = 0; ci < 5; ci++) {
+        const cx2 = x + 4 + ci * ((w - 8) / 5);
+        const ch = 5 + (ci % 3) * 3;
+        ctx.beginPath();
+        ctx.roundRect(cx2, fillY, (w - 8) / 5 - 1, ch, 2);
+        ctx.fill();
+      }
+
+      // Waxy sheen
+      ctx.fillStyle = "rgba(255, 255, 255, 0.22)";
+      ctx.beginPath();
+      ctx.roundRect(x + 4, fillY, w * 0.3, fillH * 0.6, 2);
+      ctx.fill();
+      ctx.restore();
+    } else {
+      ctx.fillStyle = liquidColor;
+      ctx.beginPath();
+      ctx.roundRect(x, fillY, w, fillH, [0, 0, 8, 8]);
+      ctx.fill();
+    }
   }
 
   // 2. Bottle Body
   ctx.strokeStyle = "rgba(255, 255, 255, 0.8)";
   ctx.lineWidth = 1.5;
-  ctx.fillStyle = isWater ? "rgba(255,255,255,0.1)" : "#f8fafc";
+  ctx.fillStyle = isWater ? "rgba(255,255,255,0.1)" : "rgba(248,250,252,0.18)";
   ctx.beginPath();
   ctx.roundRect(x, bodyY, w, bodyHeight, [0, 0, 8, 8]);
   ctx.fill();
   ctx.stroke();
 
-  // 3. Neck & Cap (Only draw cap if hasLid is true)
+  // 3. Neck & Cap
   if (hasLid) {
     ctx.fillStyle = lidColor;
     ctx.fillRect(x + w * 0.3, y, w * 0.4, neckHeight);
@@ -341,10 +553,226 @@ const drawBottle = (
   // 4. Label
   ctx.fillStyle = "white";
   ctx.fillRect(x + 5, bodyY + 10, w - 10, 25);
-  ctx.fillStyle = "black";
+  ctx.fillStyle = "#1e293b";
   ctx.font = "bold 8px Arial";
   ctx.textAlign = "center";
   ctx.fillText(name.split(" ")[0], x + w / 2, bodyY + 25);
+  if (isSolid) {
+    ctx.fillStyle = "#7c4a00";
+    ctx.font = "6px Arial";
+    ctx.fillText("SOLID", x + w / 2, bodyY + 34);
+  }
+  ctx.restore();
+};
+
+// ── Ingredient density map (g/mL) ──
+const DENSITY: Record<string, number> = {
+  water: 1.0,
+  stearicAcid: 0.847,
+  liquidParaffin: 0.88,
+  glycerin: 1.261,
+  koh: 1.1,
+};
+
+const calcBeakerWeight = (a: { data?: { composition?: Record<string,number>; solidStearicGrams?: number } }): number => {
+  const comp = (a.data?.composition ?? {}) as Record<string, number>;
+  let w = 0;
+  for (const [k, v] of Object.entries(comp)) w += v * (DENSITY[k] ?? 1.0);
+  w += a.data?.solidStearicGrams ?? 0;
+  return Math.round(w * 10) / 10;
+};
+
+const drawSpatula = (
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  load: number = 0,
+) => {
+  ctx.save();
+  const cx = x + w / 2;
+
+  // Shadow
+  ctx.shadowColor = "rgba(0,0,0,0.18)";
+  ctx.shadowBlur = 4;
+  ctx.shadowOffsetX = 1;
+
+  // Handle — stainless steel rod
+  const handleW = Math.max(w * 0.30, 3.5);
+  const bladeH  = h * 0.22;
+  const handleH = h - bladeH;
+  const handleGrad = ctx.createLinearGradient(cx - handleW, 0, cx + handleW, 0);
+  handleGrad.addColorStop(0,   "rgba(160, 175, 190, 0.70)");
+  handleGrad.addColorStop(0.3, "rgba(230, 240, 248, 0.55)");
+  handleGrad.addColorStop(0.7, "rgba(210, 225, 238, 0.30)");
+  handleGrad.addColorStop(1,   "rgba(145, 165, 182, 0.72)");
+  ctx.fillStyle = handleGrad;
+  ctx.strokeStyle = "rgba(200, 215, 230, 0.88)";
+  ctx.lineWidth = 0.8;
+  ctx.beginPath();
+  ctx.roundRect(cx - handleW / 2, y, handleW, handleH, 2);
+  ctx.fill();
+  ctx.stroke();
+
+  // Inner reflection
+  ctx.fillStyle = "rgba(255,255,255,0.28)";
+  ctx.beginPath();
+  ctx.roundRect(cx - handleW / 2 + 1, y + 6, handleW * 0.28, handleH - 12, 1);
+  ctx.fill();
+
+  ctx.shadowBlur = 0;
+  ctx.shadowOffsetX = 0;
+
+  // Blade — wider flat rectangle
+  const bladeW = w * 0.90;
+  const bladeY = y + handleH - 2;
+  const bladeGrad = ctx.createLinearGradient(cx - bladeW / 2, 0, cx + bladeW / 2, 0);
+  bladeGrad.addColorStop(0,   "rgba(160, 175, 190, 0.80)");
+  bladeGrad.addColorStop(0.5, "rgba(235, 245, 252, 0.60)");
+  bladeGrad.addColorStop(1,   "rgba(150, 168, 185, 0.82)");
+  ctx.fillStyle = bladeGrad;
+  ctx.strokeStyle = "rgba(200, 215, 230, 0.88)";
+  ctx.lineWidth = 0.8;
+  ctx.beginPath();
+  ctx.roundRect(cx - bladeW / 2, bladeY, bladeW, bladeH, [0, 0, 3, 3]);
+  ctx.fill();
+  ctx.stroke();
+
+  // Wax load on blade when carrying solid
+  if (load > 0) {
+    const loadAlpha = Math.min(load / 20, 1);
+    ctx.fillStyle = `rgba(255, 250, 240, ${0.82 + loadAlpha * 0.15})`;
+    ctx.beginPath();
+    ctx.ellipse(cx, bladeY + bladeH * 0.45, bladeW * 0.38, bladeH * 0.38, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // Wax texture
+    ctx.fillStyle = "rgba(240, 230, 215, 0.65)";
+    for (let i = 0; i < 3; i++) {
+      ctx.beginPath();
+      ctx.ellipse(cx + (i - 1) * 3, bladeY + bladeH * 0.4, 2.5, 1.5, i * 0.4, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    // Load label
+    ctx.fillStyle = "#92400e";
+    ctx.font = `bold 5px Arial`;
+    ctx.textAlign = "center";
+    ctx.fillText(`${load}g`, cx, bladeY + bladeH * 0.88);
+  }
+
+  // "SPATULA" rotated label
+  ctx.save();
+  ctx.translate(cx + handleW / 2 + 7, y + handleH / 2);
+  ctx.rotate(-Math.PI / 2);
+  ctx.fillStyle = "rgba(255,255,255,0.45)";
+  ctx.font = "5px Arial";
+  ctx.textAlign = "center";
+  ctx.fillText("SPATULA", 0, 0);
+  ctx.restore();
+
+  ctx.restore();
+};
+
+const drawWeightBalance = (
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  weightReading: number = 0,
+  hasItem: boolean = false,
+) => {
+  ctx.save();
+
+  const baseH    = h * 0.40;
+  const platformH = 8;
+  const platformY = y + h - baseH - platformH;
+  const baseY    = y + h - baseH;
+
+  // Body shadow
+  ctx.shadowColor = "rgba(0,0,0,0.30)";
+  ctx.shadowBlur  = 10;
+  ctx.shadowOffsetY = 4;
+
+  // Base body
+  const baseGrad = ctx.createLinearGradient(x, baseY, x + w, baseY);
+  baseGrad.addColorStop(0,   "#c8d4e0");
+  baseGrad.addColorStop(0.5, "#e8f0f8");
+  baseGrad.addColorStop(1,   "#b8c8d8");
+  ctx.fillStyle = baseGrad;
+  ctx.beginPath();
+  ctx.roundRect(x, baseY, w, baseH, [0, 0, 6, 6]);
+  ctx.fill();
+  ctx.shadowBlur = 0;
+  ctx.shadowOffsetY = 0;
+
+  // LCD display panel
+  const dispM  = 6;
+  const dispH  = baseH * 0.62;
+  const dispW  = w - dispM * 2;
+  const dispX  = x + dispM;
+  const dispY2 = baseY + (baseH - dispH) / 2;
+  ctx.fillStyle = "#060e14";
+  ctx.beginPath();
+  ctx.roundRect(dispX, dispY2, dispW, dispH, 4);
+  ctx.fill();
+
+  // Display content
+  ctx.textAlign = "center";
+  const dispCX = dispX + dispW / 2;
+
+  // "g" unit top-right
+  ctx.fillStyle = "rgba(0,230,118,0.55)";
+  ctx.font = `${Math.floor(dispH * 0.20)}px monospace`;
+  ctx.fillText("g", dispX + dispW * 0.88, dispY2 + dispH * 0.32);
+
+  // Weight value
+  const weightStr = weightReading.toFixed(2);
+  ctx.fillStyle = hasItem ? "#00e676" : "#2d6a4f";
+  ctx.font = `bold ${Math.floor(dispH * 0.42)}px monospace`;
+  ctx.fillText(weightStr, dispCX - 4, dispY2 + dispH * 0.66);
+
+  // "NET WT" label
+  ctx.fillStyle = "rgba(0,230,118,0.40)";
+  ctx.font = `${Math.floor(dispH * 0.16)}px Arial`;
+  ctx.fillText("NET WT", dispCX, dispY2 + dispH * 0.88);
+
+  // TARE button
+  const btnW = 22; const btnH = 10;
+  const btnX = x + w - btnW - 6; const btnY = baseY + baseH - btnH - 5;
+  ctx.fillStyle = "#374151";
+  ctx.beginPath();
+  ctx.roundRect(btnX, btnY, btnW, btnH, 3);
+  ctx.fill();
+  ctx.fillStyle = "#9ca3af";
+  ctx.font = "5px Arial";
+  ctx.textAlign = "center";
+  ctx.fillText("TARE", btnX + btnW / 2, btnY + 7);
+
+  // ON indicator dot
+  ctx.fillStyle = "#22c55e";
+  ctx.beginPath();
+  ctx.arc(x + 10, baseY + 10, 3.5, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Weighing platform
+  const platGrad = ctx.createLinearGradient(x, platformY, x, platformY + platformH);
+  platGrad.addColorStop(0, "#e2ecf5");
+  platGrad.addColorStop(1, "#c5d6e8");
+  ctx.fillStyle = platGrad;
+  ctx.strokeStyle = "rgba(180,200,220,0.7)";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.roundRect(x + 8, platformY, w - 16, platformH, [3, 3, 0, 0]);
+  ctx.fill();
+  ctx.stroke();
+
+  // Shimmer on platform
+  ctx.fillStyle = "rgba(255,255,255,0.30)";
+  ctx.beginPath();
+  ctx.roundRect(x + 10, platformY + 1, (w - 20) * 0.45, 3, 1);
+  ctx.fill();
+
   ctx.restore();
 };
 
@@ -1104,6 +1532,176 @@ const drawViscosityGauge = (
   ctx.restore();
 };
 
+const drawIceBucket = (
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  iceLevel: number = 100,
+) => {
+  ctx.save();
+
+  const topW    = w;
+  const botW    = w * 0.74;
+  const botX    = x + (w - botW) / 2;
+
+  // Shadow
+  ctx.shadowColor  = "rgba(0,0,0,0.35)";
+  ctx.shadowBlur   = 14;
+  ctx.shadowOffsetY = 6;
+
+  // Bucket body (trapezoid)
+  const bodyGrad = ctx.createLinearGradient(x, y, x + w, y);
+  bodyGrad.addColorStop(0,   "#b0c4d8");
+  bodyGrad.addColorStop(0.45, "#dde9f5");
+  bodyGrad.addColorStop(1,   "#8fa8be");
+  ctx.fillStyle = bodyGrad;
+  ctx.beginPath();
+  ctx.moveTo(x, y);
+  ctx.lineTo(x + topW, y);
+  ctx.lineTo(botX + botW, y + h);
+  ctx.lineTo(botX, y + h);
+  ctx.closePath();
+  ctx.fill();
+  ctx.shadowBlur = 0; ctx.shadowOffsetY = 0;
+
+  // Ice and water contents
+  if (iceLevel > 0) {
+    const fillH  = (h - 18) * 0.85 * (iceLevel / 100);
+    const fillY  = y + h - 10 - fillH;
+    const prog   = (y + h - 10 - fillY) / (h - 18); // 0..1 fill ratio
+    const lW     = topW - 2 * prog * (topW - botW) / 2;
+    const lX     = x + (topW - lW) / 2;
+
+    ctx.save();
+    // Clip to inside the bucket
+    ctx.beginPath();
+    ctx.moveTo(x + 3, y + 3);
+    ctx.lineTo(x + topW - 3, y + 3);
+    ctx.lineTo(botX + botW - 3, y + h - 3);
+    ctx.lineTo(botX + 3, y + h - 3);
+    ctx.closePath();
+    ctx.clip();
+
+    // Cold water layer at bottom
+    ctx.fillStyle = "rgba(186, 230, 253, 0.55)";
+    ctx.fillRect(lX, fillY + fillH * 0.65, lW, fillH * 0.38);
+
+    // Ice chunks
+    const cols   = 4;
+    const rows   = Math.max(1, Math.ceil(iceLevel / 30));
+    const cW2    = lW / cols - 4;
+    const cH2    = fillH / (rows + 1) * 0.55;
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        const ix = lX + 2 + c * (lW / cols) + (r % 2 === 0 ? 3 : 0);
+        const iy = fillY + 4 + r * (fillH / rows);
+        ctx.fillStyle = `rgba(224, 242, 254, ${0.80 + (c % 2) * 0.12})`;
+        ctx.beginPath();
+        ctx.roundRect(ix, iy, cW2, cH2, 3);
+        ctx.fill();
+        // Shine on each cube
+        ctx.fillStyle = "rgba(255,255,255,0.55)";
+        ctx.beginPath();
+        ctx.roundRect(ix + 2, iy + 2, cW2 * 0.38, cH2 * 0.32, 1);
+        ctx.fill();
+      }
+    }
+    ctx.restore();
+  }
+
+  // Rim (top edge)
+  ctx.strokeStyle = "rgba(148, 163, 184, 0.95)";
+  ctx.lineWidth   = 3;
+  ctx.beginPath();
+  ctx.moveTo(x, y);
+  ctx.lineTo(x + topW, y);
+  ctx.stroke();
+
+  // Side outline
+  ctx.strokeStyle = "rgba(148, 163, 184, 0.50)";
+  ctx.lineWidth   = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(x, y);
+  ctx.lineTo(botX, y + h);
+  ctx.moveTo(x + topW, y);
+  ctx.lineTo(botX + botW, y + h);
+  ctx.stroke();
+
+  // Handle arcs
+  ctx.strokeStyle = "rgba(148, 163, 184, 0.70)";
+  ctx.lineWidth   = 2;
+  ctx.beginPath();
+  ctx.arc(x + w * 0.22, y - 4, 8, Math.PI, 0);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(x + w * 0.78, y - 4, 8, Math.PI, 0);
+  ctx.stroke();
+
+  // "ICE BUCKET" label
+  ctx.fillStyle   = "#334155";
+  ctx.font        = "bold 9px Arial";
+  ctx.textAlign   = "center";
+  ctx.fillText("ICE BUCKET", x + w / 2, y + 13);
+
+  // 0°C badge
+  ctx.fillStyle   = "#0ea5e9";
+  ctx.font        = "bold 8px Arial";
+  ctx.fillText("0 °C", x + w / 2, y + h - 5);
+
+  ctx.restore();
+};
+
+// ── Step alert types ──────────────────────────────────────────────────────────
+interface StepNotif {
+  id: number;
+  message: string;
+  detail?: string;
+  type: "success" | "warning" | "error" | "info";
+}
+
+const NOTIF_STYLE: Record<StepNotif["type"], { bg: string; border: string; icon: string; color: string }> = {
+  success: { bg: "rgba(5,46,22,0.97)",  border: "#16a34a", icon: "✓", color: "#4ade80" },
+  warning: { bg: "rgba(28,18,0,0.97)",  border: "#ca8a04", icon: "⚠", color: "#fbbf24" },
+  error:   { bg: "rgba(45,10,10,0.97)", border: "#dc2626", icon: "✗", color: "#f87171" },
+  info:    { bg: "rgba(7,20,40,0.97)",  border: "#3b82f6", icon: "ℹ", color: "#60a5fa" },
+};
+
+const StepAlerts: React.FC<{ items: StepNotif[] }> = ({ items }) => {
+  if (!items.length) return null;
+  return (
+    <div style={{
+      position: "absolute", top: 70, left: "50%", transform: "translateX(-50%)",
+      zIndex: 150, display: "flex", flexDirection: "column", gap: 7,
+      width: "min(500px, 92vw)", pointerEvents: "none",
+    }}>
+      {items.map((n) => {
+        const s = NOTIF_STYLE[n.type];
+        return (
+          <div key={n.id} style={{
+            background: s.bg, border: `1.5px solid ${s.border}`,
+            borderRadius: 10, padding: "10px 14px",
+            display: "flex", alignItems: "flex-start", gap: 10,
+            boxShadow: `0 4px 20px rgba(0,0,0,0.55), 0 0 0 1px ${s.border}22`,
+          }}>
+            <span style={{
+              flexShrink: 0, width: 24, height: 24, borderRadius: "50%",
+              background: `${s.border}33`, border: `1.5px solid ${s.border}`,
+              display: "flex", alignItems: "center", justifyContent: "center",
+              color: s.color, fontSize: 13, fontWeight: 800,
+            }}>{s.icon}</span>
+            <div>
+              <div style={{ color: s.color, fontWeight: 700, fontSize: 13 }}>{n.message}</div>
+              {n.detail && <div style={{ color: "#94a3b8", fontSize: 11, marginTop: 2 }}>{n.detail}</div>}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+};
+
 interface InteractiveLabCanvasProps {
   currentStep: SimulationStep;
   onApparatusClick?: (apparatus: Apparatus) => void;
@@ -1113,7 +1711,22 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
   currentStep,
   onApparatusClick,
 }) => {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const canvasRef     = useRef<HTMLCanvasElement>(null);
+  const holdStirRef   = useRef<{ rodId: string; targetId: string } | null>(null);
+  const draggingRef   = useRef<{ id: string; offsetX: number; offsetY: number } | null>(null);
+  const prevAppRef    = useRef<Apparatus[]>([]);
+  const notifIdRef    = useRef(0);
+  const milestoneRef  = useRef<Set<string>>(new Set()); // prevents duplicate one-shot alerts
+  const [notifications, setNotifications] = useState<StepNotif[]>([]);
+
+  const addNotif = useCallback((message: string, type: StepNotif["type"], detail?: string) => {
+    const id = ++notifIdRef.current;
+    setNotifications((prev) => [{ id, message, type, detail }, ...prev].slice(0, 4));
+    setTimeout(() => setNotifications((prev) => prev.filter((n) => n.id !== id)), 5000);
+  }, []);
+
+  // Snapshot target beaker composition when a pour starts, so we can diff at pour-end
+  const pourStartRef = useRef<Record<string, Record<string, number>>>({});
   const [selectedApparatus, setSelectedApparatus] = useState<Apparatus | null>(
     null,
   );
@@ -1145,8 +1758,8 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
     getInitialApparatus(LEFT_GAP, shelfY, TABLE_Y),
   );
   const [hoveredId, setHoveredId] = useState<string | null>(null);
-  const [pouringSource, setPouringSource] = useState<string | null>(null);
-  const [pouringTarget, setPouringTarget] = useState<string | null>(null);
+  const [showEvaluationPanel, setShowEvaluationPanel] = useState(false);
+  const [selectedPourAmount, setSelectedPourAmount] = useState(0);
   const [showPourModal, setShowPourModal] = useState<{
     sourceId: string;
     targetId: string;
@@ -1155,6 +1768,8 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
   const [showLidModal, setShowLidModal] = useState<{ id: string } | null>(null);
   const [showHotPlateModal, setShowHotPlateModal] = useState(false);
   const [hotPlateFrame, setHotPlateFrame] = useState(0);
+  const [showScoopModal, setShowScoopModal] = useState<{ spatulaId: string; sourceId: string; maxGrams: number } | null>(null);
+  const [selectedScoopGrams, setSelectedScoopGrams] = useState(5);
 
   const drawApparatus = useCallback(
     (ctx: CanvasRenderingContext2D) => {
@@ -1316,7 +1931,7 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
           const currentVol = item.data?.currentVolume || 0;
           const liquidColor =
             item.data?.liquidColor || "rgba(56, 189, 248, 0.6)";
-          drawBeaker(ctx, x, y, width, height, maxVol, currentVol, liquidColor, item.data?.liquidTemperature ?? 25, hotPlateFrame, item.data?.isStirring ?? false);
+          drawBeaker(ctx, x, y, width, height, maxVol, currentVol, liquidColor, item.data?.liquidTemperature ?? 25, hotPlateFrame, item.data?.isStirring ?? false, item.data?.solidStearicGrams ?? 0, tiltAngle, item.data?.emulsificationProgress ?? 0);
         } else if (type === "cylinder") {
           const maxVol = item.data?.maxVolume || 100;
           const currentVol = item.data?.currentVolume || 0;
@@ -1331,7 +1946,8 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
           const lidColor = item.data?.lidColor || "#0ea5e9";
           drawBottle(
             ctx, x, y, width, height, maxVol, name,
-            item.data?.hasLid, currentVol, tiltAngle, liquidColor, lidColor,
+            item.data?.hasLid ?? false, currentVol, tiltAngle, liquidColor, lidColor,
+            item.data?.isSolid ?? false,
           );
         } else if (type === "thermometer") {
           drawThermometer(ctx, x, y, width, height, item.data?.readingTemperature ?? 25);
@@ -1341,6 +1957,22 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
           drawPhMeter(ctx, x, y, width, height, item.data?.phReading ?? 7.0);
         } else if (type === "viscositygauge") {
           drawViscosityGauge(ctx, x, y, width, height, item.data?.viscosityReading ?? 0, item.data?.isViscosityActive ?? false, hotPlateFrame);
+        } else if (type === "spatula") {
+          drawSpatula(ctx, x, y, width, height, item.data?.spatulaLoad ?? 0);
+        } else if (type === "weightbalance") {
+          // Platform top matches drawWeightBalance: y + h*0.60 - 8
+          const platformTop = item.y + item.height * 0.60 - 8;
+          const beakerOnPlate = apparatus.find(
+            (a) =>
+              (a.type === "beaker" || a.type === "cylinder") &&
+              a.x + a.width / 2 >= item.x + 8 &&
+              a.x + a.width / 2 <= item.x + item.width - 8 &&
+              Math.abs((a.y + a.height) - platformTop) < 18,
+          );
+          const wt = beakerOnPlate ? calcBeakerWeight(beakerOnPlate) : 0;
+          drawWeightBalance(ctx, x, y, width, height, wt, !!beakerOnPlate);
+        } else if (type === "icebucket") {
+          drawIceBucket(ctx, x, y, width, height, item.data?.iceLevel ?? 100);
         } else if (type === "hotplate") {
           drawHotPlate(
             ctx, x, y, width, height,
@@ -1550,12 +2182,44 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
               centerX <= hp.x + hp.width;
             const curT = a.data?.liquidTemperature ?? 25;
             if (onHP) {
-              const maxT = hp.data?.targetTemperature ?? 200;
-              if (curT < maxT - 0.5)
-                return { ...a, data: { ...a.data, liquidTemperature: Math.min(curT + 0.7, maxT) } };
-            } else if (curT > 25) {
-              // Beaker removed from plate — cool slowly toward ambient
-              return { ...a, data: { ...a.data, liquidTemperature: Math.max(25, curT - 0.25) } };
+              const targetT = hp.data?.targetTemperature ?? 200;
+
+              if (curT < targetT - 0.3) {
+                // ── Heat up toward target ──────────────────────────────────
+                const newTemp = Math.min(curT + 0.3, targetT);
+                const newData: typeof a.data = {
+                  ...a.data,
+                  liquidTemperature: newTemp,
+                  maxTemperatureReached: Math.max(a.data?.maxTemperatureReached ?? 25, newTemp),
+                };
+                // Melt solid stearic acid above 70°C
+                if (curT >= 70 && (a.data?.solidStearicGrams ?? 0) > 0) {
+                  const grams     = a.data!.solidStearicGrams!;
+                  const meltedVol = grams / 0.847;
+                  newData.solidStearicGrams = 0;
+                  newData.currentVolume     = Math.min((a.data?.maxVolume ?? 500), (a.data?.currentVolume ?? 0) + meltedVol);
+                  newData.liquidColor       = "rgba(255, 248, 220, 0.85)";
+                  newData.composition       = {
+                    ...(a.data?.composition ?? {}),
+                    stearicAcid: ((a.data?.composition?.stearicAcid) ?? 0) + meltedVol,
+                  };
+                  newData.pH        = a.data?.pH ?? 3.5;
+                  newData.viscosity = a.data?.viscosity ?? 15;
+                }
+                return { ...a, data: newData };
+
+              } else if (curT > targetT + 0.3) {
+                // ── Cool down toward target (user lowered the set temperature) ──
+                return {
+                  ...a,
+                  data: {
+                    ...a.data,
+                    liquidTemperature: Math.max(targetT, curT - 0.2),
+                  },
+                };
+              }
+              // Within ±0.3°C of target → hold steady
+            // Temperature stays constant when not on hot plate — only ice bucket cools
             }
           }
           return a;
@@ -1565,39 +2229,117 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
     return () => clearInterval(interval);
   }, [hotPlateIsOn]);
 
-  // Cool beakers down when hot plate is switched off
+  // Set pour slider to maximum every time the pour modal opens
   useEffect(() => {
-    if (hotPlateIsOn) return;
-    const cooling = setInterval(() => {
+    if (!showPourModal) return;
+    const source = apparatus.find((a) => a.id === showPourModal.sourceId);
+    const target = apparatus.find((a) => a.id === showPourModal.targetId);
+    if (!source || !target) return;
+    const available   = source.data?.currentVolume ?? 0;
+    const targetSpace = (target.data?.maxVolume ?? 0) - (target.data?.currentVolume ?? 0);
+    const max = Math.min(available, targetSpace);
+    setSelectedPourAmount(Math.round(max * 10) / 10);
+  }, [showPourModal]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Ice bucket cooling — slowly drops beaker temperature when placed inside the bucket
+  useEffect(() => {
+    const interval = setInterval(() => {
       setApparatus((prev) => {
-        const hasHeat = prev.some(
-          (a) =>
-            (a.type === "beaker" || a.type === "cylinder") &&
-            (a.data?.liquidTemperature ?? 25) > 26,
-        );
-        if (!hasHeat) return prev;
-        return prev.map((a) => {
-          if (
-            (a.type === "beaker" || a.type === "cylinder") &&
-            (a.data?.liquidTemperature ?? 25) > 25
-          ) {
+        const bucket = prev.find((a) => a.type === "icebucket");
+        if (!bucket) return prev;
+
+        let iceDepleted = false;
+        const next = prev.map((a) => {
+          if (a.type === "beaker" || a.type === "cylinder") {
+            const cx  = a.x + a.width / 2;
+            const bot = a.y + a.height;
+            const inBucket =
+              cx  >= bucket.x + 10 && cx  <= bucket.x + bucket.width - 10 &&
+              bot >= bucket.y + 20  && bot <= bucket.y + bucket.height + 10;
+            if (!inBucket) return a;
+
+            const curT = a.data?.liquidTemperature ?? 25;
+            if (curT <= 0) return a;
+            iceDepleted = true;
             return {
               ...a,
               data: {
                 ...a.data,
-                liquidTemperature: Math.max(
-                  25,
-                  (a.data?.liquidTemperature ?? 25) - 0.4,
-                ),
+                liquidTemperature: Math.max(0, curT - 0.6),
+                minCoolingTemp: Math.min(a.data?.minCoolingTemp ?? 100, curT),
               },
             };
           }
           return a;
         });
+
+        // Melt ice a little each tick a beaker is inside
+        if (iceDepleted) {
+          return next.map((a) =>
+            a.type === "icebucket"
+              ? { ...a, data: { ...a.data, iceLevel: Math.max(0, (a.data?.iceLevel ?? 100) - 0.15) } }
+              : a,
+          );
+        }
+        return next;
       });
     }, 100);
-    return () => clearInterval(cooling);
-  }, [hotPlateIsOn]);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Stirring timer — count total seconds stirred in any beaker
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setApparatus((prev) =>
+        prev.map((a) => {
+          if ((a.type !== "beaker" && a.type !== "cylinder") || !a.data?.isStirring) return a;
+          return { ...a, data: { ...a.data, stirringSeconds: (a.data?.stirringSeconds ?? 0) + 1 } };
+        }),
+      );
+    }, 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Emulsification — advance progress while stirring with both phases present
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setApparatus((prev) =>
+        prev.map((a) => {
+          if ((a.type !== "beaker" && a.type !== "cylinder") || !a.data?.isStirring) return a;
+
+          const comp    = (a.data?.composition ?? {}) as Record<string, number>;
+          const hasOil  = (comp.stearicAcid ?? 0) > 2 || (comp.liquidParaffin ?? 0) > 2;
+          const hasAq   = (comp.water ?? 0) > 10;
+          if (!hasOil || !hasAq) return a;
+
+          const progress = a.data?.emulsificationProgress ?? 0;
+          if (progress >= 100) return a;
+
+          const temp    = a.data?.liquidTemperature ?? 25;
+          const rate    = temp >= 60 ? 3.5 : 1.5; // faster at correct temperature
+          const newProg = Math.min(100, progress + rate);
+
+          // Interpolate liquidColor from current toward cream white
+          const tC = Math.max(0, (newProg - 20) / 80);
+          const r  = Math.round(210 + 45 * tC);
+          const g  = Math.round(195 + 57 * tC);
+          const b  = Math.round(170 + 78 * tC);
+          const al = (0.62 + 0.33 * tC).toFixed(2);
+          const newColor = `rgba(${r},${g},${b},${al})`;
+
+          return {
+            ...a,
+            data: {
+              ...a.data,
+              emulsificationProgress: newProg,
+              liquidColor: newColor,
+            },
+          };
+        }),
+      );
+    }, 200);
+    return () => clearInterval(interval);
+  }, []);
 
   // Thermometer thermal lag — slowly drift readingTemperature toward the liquid it's dipped into
   useEffect(() => {
@@ -1618,13 +2360,13 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
             probeBottom <= a.y + a.height,
         );
 
-        // When probe is outside any beaker, drift back to ambient
+        // Probe in beaker → track liquid temperature quickly (max 2°C per tick)
+        // Probe outside → drift back to ambient 25°C
         const targetTemp = beakerUnder?.data?.liquidTemperature ?? 25;
-        const current = thermo.data?.readingTemperature ?? 25;
-        if (Math.abs(current - targetTemp) < 0.05) return prev;
+        const current    = thermo.data?.readingTemperature ?? 25;
+        if (Math.abs(current - targetTemp) < 0.1) return prev;
 
-        // ~0.25 °C per tick → realistic lag (heating faster, cooling a touch slower)
-        const rate = current < targetTemp ? 0.25 : 0.18;
+        const rate = beakerUnder ? 2.0 : 0.8;   // fast when dipped, slow when removed
         const next =
           current < targetTemp
             ? Math.min(current + rate, targetTemp)
@@ -1636,7 +2378,7 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
             : a,
         );
       });
-    }, 120);
+    }, 80);   // check every 80 ms
     return () => clearInterval(interval);
   }, []);
 
@@ -1657,12 +2399,24 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
             probeBottom >= a.y && probeBottom <= a.y + a.height,
         );
 
-        // When outside a beaker drift to neutral 7.0
-        const targetPH = beakerUnder?.data?.pH ?? 7.0;
+        // Compute pH from composition (same formula as evaluation engine)
+        // so the meter reading matches the final evaluation result
+        let targetPH = 7.0;
+        if (beakerUnder) {
+          const comp = (beakerUnder.data?.composition ?? {}) as Record<string, number>;
+          const total = Object.values(comp).reduce((s, v) => s + (v || 0), 0);
+          if (total > 5) {
+            const kohPct = ((comp.koh ?? 0) / total) * 100;
+            targetPH = Math.max(4, Math.min(12, 5 + kohPct * 0.8));
+          } else {
+            targetPH = beakerUnder.data?.pH ?? 7.0;
+          }
+        }
+
         const current = meter.data?.phReading ?? 7.0;
         if (Math.abs(current - targetPH) < 0.005) return prev;
 
-        const rate = 0.04; // ~0.04 pH units per tick → realistic electrode lag
+        const rate = 0.04;
         const next =
           current < targetPH
             ? Math.min(current + rate, targetPH)
@@ -1693,7 +2447,20 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
             probeBottom >= a.y && probeBottom <= a.y + a.height,
         );
 
-        const targetVisc = beakerUnder?.data?.viscosity ?? 0;
+        // Compute viscosity from composition (same formula as evaluation engine)
+        let targetVisc = 0;
+        if (beakerUnder) {
+          const comp = (beakerUnder.data?.composition ?? {}) as Record<string, number>;
+          const total = Object.values(comp).reduce((s, v) => s + (v || 0), 0);
+          if (total > 5) {
+            const stearicPct  = ((comp.stearicAcid  ?? 0) / total) * 100;
+            const paraffinPct = ((comp.liquidParaffin ?? 0) / total) * 100;
+            const waterPct    = ((comp.water ?? 0) / total) * 100;
+            targetVisc = Math.max(1, stearicPct * 70 + paraffinPct * 45 - waterPct * 5);
+          } else {
+            targetVisc = beakerUnder.data?.viscosity ?? 0;
+          }
+        }
         const current = gauge.data?.viscosityReading ?? 0;
         if (Math.abs(current - targetVisc) < 0.5) return prev;
 
@@ -1707,6 +2474,117 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
     }, 80);
     return () => clearInterval(interval);
   }, []);
+
+  // ── Step-alert monitor ───────────────────────────────────────────────────────
+  useEffect(() => {
+    const prev = prevAppRef.current;
+    if (!prev.length) { prevAppRef.current = apparatus; return; }
+    const ms = milestoneRef.current;
+    const hit = (key: string) => { if (ms.has(key)) return false; ms.add(key); return true; };
+
+    apparatus.forEach((curr) => {
+      const p = prev.find((a) => a.id === curr.id);
+      if (!p) return;
+
+      // ── Hot plate ──────────────────────────────────────────────────────────
+      if (curr.type === "hotplate") {
+        if (!p.data?.isOn && curr.data?.isOn) {
+          const tgt = curr.data.targetTemperature ?? 200;
+          if (tgt >= 70 && tgt <= 80)
+            addNotif("Hot plate ON — target temperature correct", "success", `Set to ${tgt}°C (ideal 70–80°C)`);
+          else
+            addNotif("Hot plate ON — check target temperature", "warning", `Set to ${tgt}°C — ideal range is 70–80°C`);
+        }
+        if (p.data?.isOn && !curr.data?.isOn)
+          addNotif("Hot plate switched OFF", "info", "Temperature holds in beakers — only ice bucket will cool them");
+      }
+
+      // ── Pour lifecycle — snapshot on start, alert on end ──────────────────
+      if (curr.type === "bottle" || curr.type === "cylinder" || curr.type === "beaker") {
+        // Pour started → snapshot the target beaker's current composition
+        if (!p.data?.isPouring && curr.data?.isPouring && curr.data?.pouringTargetId) {
+          const tid = curr.data.pouringTargetId;
+          const tgt = apparatus.find((a) => a.id === tid);
+          pourStartRef.current[tid] = { ...(tgt?.data?.composition ?? {}) } as Record<string, number>;
+        }
+
+        // Pour ended → only check ingredient amounts when source is a BOTTLE
+        // Beaker-to-beaker mixing is a process step — never warn on ingredient amounts
+        if (p.data?.isPouring && !curr.data?.isPouring && curr.type === "bottle") {
+          const tid = p.data?.pouringTargetId;
+          if (tid && pourStartRef.current[tid] !== undefined) {
+            const tgt       = apparatus.find((a) => a.id === tid);
+            const endComp   = (tgt?.data?.composition ?? {}) as Record<string, number>;
+            const startComp = pourStartRef.current[tid];
+            delete pourStartRef.current[tid];
+
+            const checkPour = (
+              key: string, label: string, min: number, max: number, unit: string,
+            ) => {
+              const added = +((endComp[key] ?? 0) - (startComp[key] ?? 0)).toFixed(1);
+              if (added < 0.05) return;
+              if (added >= min && added <= max)
+                addNotif(`✓ ${label}: ${added} ${unit}`, "success",
+                  `Correct amount — ideal ${min}–${max} ${unit}`);
+              else if (added < min)
+                addNotif(`⚠ ${label}: only ${added} ${unit} — too little`, "warning",
+                  `Ideal is ${min}–${max} ${unit}`);
+              else
+                addNotif(`⚠ ${label}: ${added} ${unit} — too much`, "warning",
+                  `Ideal is ${min}–${max} ${unit}`);
+            };
+
+            checkPour("water",         "Distilled water",       65, 75, "mL");
+            checkPour("liquidParaffin","Liquid paraffin",         5, 10, "mL");
+            checkPour("glycerin",      "Glycerin",                2,  5, "mL");
+            checkPour("koh",           "KOH & Triethanolamine", 0.5,  2, "mL");
+          }
+        } else if (p.data?.isPouring && !curr.data?.isPouring && curr.type === "beaker") {
+          // Beaker-to-beaker mix completed — give a positive mixing confirmation
+          addNotif("Phases combined ✓", "success", "Continue stirring to complete emulsification");
+          delete pourStartRef.current[p.data?.pouringTargetId ?? ""];
+        }
+      }
+
+      // ── Beaker / cylinder — temperature milestones & solid deposit ─────────
+      if (curr.type === "beaker" || curr.type === "cylinder") {
+        const prevT = p.data?.liquidTemperature ?? 25;
+        const currT = curr.data?.liquidTemperature ?? 25;
+        const name  = curr.name;
+
+        if (prevT < 70 && currT >= 70 && hit(`melt-${curr.id}`))
+          addNotif(`${name} — stearic acid melting`, "info", "Solid turning to liquid at 70°C ✓");
+
+        if (prevT < 75 && currT >= 75 && hit(`target75-${curr.id}`))
+          addNotif(`✓ ${name} reached 75°C`, "success", "Correct temperature for emulsification");
+
+        if (prevT < 80 && currT >= 80 && hit(`over80-${curr.id}`))
+          addNotif(`⚠ ${name} exceeded 80°C`, "warning", `Now ${Math.round(currT)}°C — ideal max is 80°C`);
+
+        if (prevT > 40 && currT <= 40 && hit(`cooled-${curr.id}`))
+          addNotif(`✓ ${name} cooled to ≤40°C`, "success", "Cooling step completed correctly");
+
+        // Solid stearic acid deposited by spatula (instant, not a pour animation)
+        const prevSolid = p.data?.solidStearicGrams ?? 0;
+        const currSolid = curr.data?.solidStearicGrams ?? 0;
+        if (currSolid > prevSolid) {
+          const added = +(currSolid - prevSolid).toFixed(1);
+          if (added >= 15 && added <= 22)
+            addNotif(`✓ Stearic acid: ${added} g`, "success", "Correct amount (ideal 15–22 g)");
+          else if (added < 15)
+            addNotif(`⚠ Stearic acid: ${added} g — too little`, "warning", "Ideal is 15–22 g");
+          else
+            addNotif(`⚠ Stearic acid: ${added} g — too much`, "warning", "Ideal is 15–22 g");
+        }
+      }
+
+      // ── Stirring rod ───────────────────────────────────────────────────────
+      if (curr.type === "stirringrod" && !p.data?.isStirring && curr.data?.isStirring)
+        addNotif("Stirring in progress", "info", "Hold for at least 30 seconds for full emulsification");
+    });
+
+    prevAppRef.current = apparatus;
+  }, [apparatus, addNotif]);
 
   // Animation frame — runs whenever hot plate is on OR stirring is active
   useEffect(() => {
@@ -1737,16 +2615,42 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
       (a) => x >= a.x && x <= a.x + a.width && y >= a.y && y <= a.y + a.height,
     );
     if (clicked) {
+      // Stirring rod — live-detect whether tip is inside a beaker with liquid
+      if (clicked.type === "stirringrod") {
+        const probeBottom = clicked.y + clicked.height;
+        const probeCX     = clicked.x + clicked.width / 2;
+        const beakerUnder = apparatus.find(
+          (a) =>
+            (a.type === "beaker" || a.type === "cylinder") &&
+            probeCX     >= a.x && probeCX     <= a.x + a.width &&
+            probeBottom >= a.y && probeBottom <= a.y + a.height &&
+            (a.data?.currentVolume ?? 0) > 0,
+        );
+        if (beakerUnder) {
+          // Tip is inside liquid → hold to stir, rod stays fixed
+          holdStirRef.current = { rodId: clicked.id, targetId: beakerUnder.id };
+          setApparatus((prev) =>
+            prev.map((a) =>
+              a.id === clicked.id || a.id === beakerUnder.id
+                ? { ...a, data: { ...a.data, isStirring: true, stirringTargetId: beakerUnder.id } }
+                : a,
+            ),
+          );
+          e.preventDefault();
+          window.addEventListener("mouseup", handleMouseUp);
+          return; // locked — no drag
+        }
+        // Tip is outside any beaker → fall through to drag so user can reposition rod
+      }
+
       // If lid is present, show lid modal
       if (clicked.data?.hasLid) {
         setShowLidModal({ id: clicked.id });
         return;
       }
-      setDragging({
-        id: clicked.id,
-        offsetX: x - clicked.x,
-        offsetY: y - clicked.y,
-      });
+      const dragState = { id: clicked.id, offsetX: x - clicked.x, offsetY: y - clicked.y };
+      draggingRef.current = dragState;
+      setDragging(dragState);
       e.preventDefault();
       window.addEventListener("mousemove", handleMouseMove);
       window.addEventListener("mouseup", handleMouseUp);
@@ -1754,8 +2658,9 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
   };
 
   const handleMouseMove = useCallback(
-    (e: MouseEvent) => {
-      if (!dragging) return;
+    (e: { clientX: number; clientY: number }) => {
+      const drag = draggingRef.current;   // always fresh — no stale closure
+      if (!drag) return;
       const rect = canvasRef.current?.getBoundingClientRect();
       if (!rect) return;
       const x = e.clientX - rect.left;
@@ -1763,64 +2668,108 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
       const snapDistance = 50;
       setApparatus((prev) => {
         const hotPlate = prev.find((a) => a.type === "hotplate");
+        const balance   = prev.find((a) => a.type === "weightbalance");
+        const iceBucket = prev.find((a) => a.type === "icebucket");
+        const balancePlatformY = balance
+          ? balance.y + balance.height * 0.60 - 8
+          : null;
         return prev.map((app) => {
-          if (app.id === dragging.id) {
-            let newY = y - dragging.offsetY;
-            // Snap to table surface
-            if (Math.abs(newY + app.height - TABLE_Y) < snapDistance) {
-              newY = TABLE_Y - app.height;
-            }
-            // Snap to shelf
-            if (Math.abs(newY + app.height - shelfY) < snapDistance) {
-              newY = shelfY - app.height;
-            }
-            // Snap beakers / cylinders onto the hot plate heating surface
-            if (hotPlate && (app.type === "beaker" || app.type === "cylinder")) {
-              const newX = x - dragging.offsetX;
+          if (app.id === drag.id) {
+            let newY = y - drag.offsetY;
+            let snapped = false;
+
+            if (app.type === "beaker" || app.type === "cylinder") {
+              const newX    = x - drag.offsetX;
               const centerX = newX + app.width / 2;
+
+              // 1. Snap into ice bucket (highest priority)
               if (
-                centerX >= hotPlate.x &&
-                centerX <= hotPlate.x + hotPlate.width &&
+                !snapped && iceBucket &&
+                centerX >= iceBucket.x + 15 && centerX <= iceBucket.x + iceBucket.width - 15 &&
+                Math.abs(newY + app.height - (iceBucket.y + iceBucket.height - 8)) < snapDistance
+              ) {
+                newY    = iceBucket.y + iceBucket.height - 8 - app.height;
+                snapped = true;
+              }
+
+              // 2. Snap onto weight balance platform
+              if (
+                !snapped && balance && balancePlatformY !== null &&
+                centerX >= balance.x + 8 && centerX <= balance.x + balance.width - 8 &&
+                Math.abs(newY + app.height - balancePlatformY) < snapDistance
+              ) {
+                newY    = balancePlatformY - app.height;
+                snapped = true;
+              }
+
+              // 3. Snap onto hot plate surface
+              if (
+                !snapped && hotPlate &&
+                centerX >= hotPlate.x && centerX <= hotPlate.x + hotPlate.width &&
                 Math.abs(newY + app.height - hotPlate.y) < snapDistance
               ) {
-                newY = hotPlate.y - app.height;
+                newY    = hotPlate.y - app.height;
+                snapped = true;
               }
             }
-            return { ...app, x: x - dragging.offsetX, y: newY };
+
+            // 3. Snap to table surface (lowest priority — only if nothing else matched)
+            if (!snapped && Math.abs(newY + app.height - TABLE_Y) < snapDistance)
+              newY = TABLE_Y - app.height;
+
+            // 4. Snap to shelf
+            if (Math.abs(newY + app.height - shelfY) < snapDistance)
+              newY = shelfY - app.height;
+
+            return { ...app, x: x - drag.offsetX, y: newY };
           }
           return app;
         });
       });
     },
-    [dragging, TABLE_Y, shelfY],
+    [TABLE_Y, shelfY],   // dragging removed — we read from ref instead
   );
 
   const handleMouseUp = useCallback(() => {
+    // Release hold-to-stir
+    if (holdStirRef.current) {
+      const { rodId, targetId } = holdStirRef.current;
+      holdStirRef.current = null;
+      setApparatus((prev) =>
+        prev.map((a) =>
+          a.id === rodId || a.id === targetId
+            ? { ...a, data: { ...a.data, isStirring: false } }
+            : a,
+        ),
+      );
+      window.removeEventListener("mouseup", handleMouseUp);
+      return;
+    }
+
     if (dragging) {
       // Check if dropped over a valid target (beaker or cylinder, lid off)
       const dragged = apparatus.find((a) => a.id === dragging.id);
       if (
         dragged &&
         !dragged.data?.hasLid &&
+        (dragged.data?.currentVolume ?? 0) > 0 &&
         (dragged.type === "bottle" ||
           dragged.type === "container" ||
-          dragged.type === "cylinder")
+          dragged.type === "cylinder" ||
+          dragged.type === "beaker")
       ) {
-        const dragRect = {
-          x: dragged.x,
-          y: dragged.y,
-          w: dragged.width,
-          h: dragged.height,
-        };
+        const srcCX = dragged.x + dragged.width / 2;
+        const srcBottom = dragged.y + dragged.height;
         const target = apparatus.find(
           (a) =>
             (a.type === "beaker" || a.type === "cylinder") &&
             !a.data?.hasLid &&
             a.id !== dragged.id &&
-            dragRect.x + dragRect.w > a.x &&
-            dragRect.x < a.x + a.width &&
-            dragRect.y + dragRect.h > a.y &&
-            dragRect.y < a.y + a.height,
+            (a.data?.currentVolume ?? 0) < (a.data?.maxVolume ?? 500) &&
+            // centres within 120 px horizontally
+            Math.abs(srcCX - (a.x + a.width / 2)) < 120 &&
+            // bottoms within 60 px vertically (same surface)
+            Math.abs(srcBottom - (a.y + a.height)) < 60,
         );
         if (target) {
           setShowPourModal({ sourceId: dragged.id, targetId: target.id });
@@ -1845,7 +2794,55 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
           ),
         );
       }
+
+      // Spatula drop — auto-scoop from bottle OR auto-deposit into beaker
+      if (dragged && dragged.type === "spatula") {
+        const bladeCX = dragged.x + dragged.width / 2;
+        const bladeY  = dragged.y + dragged.height;
+        const currentLoad = dragged.data?.spatulaLoad ?? 0;
+
+        if (currentLoad > 0) {
+          // Loaded — deposit into beaker if blade is inside one
+          const beakerTarget = apparatus.find(
+            (a) =>
+              (a.type === "beaker" || a.type === "cylinder") &&
+              bladeCX >= a.x && bladeCX <= a.x + a.width &&
+              bladeY  >= a.y && bladeY  <= a.y + a.height,
+          );
+          if (beakerTarget) {
+            const grams = currentLoad;
+            setApparatus((prev) =>
+              prev.map((a) => {
+                if (a.id === dragged.id)
+                  return { ...a, data: { ...a.data, spatulaLoad: 0, spatulaLoadSourceId: null } };
+                if (a.id === beakerTarget.id)
+                  return { ...a, data: { ...a.data, solidStearicGrams: (a.data?.solidStearicGrams ?? 0) + grams } };
+                return a;
+              }),
+            );
+          }
+        } else {
+          // Empty — if blade overlaps the stearic acid bottle, open the amount picker
+          const bottle = apparatus.find(
+            (a) =>
+              a.id === "container-stearic-acid" &&
+              (a.data?.isSolid) &&
+              (a.data?.currentVolume ?? 0) > 0 &&
+              bladeCX >= a.x && bladeCX <= a.x + a.width &&
+              bladeY  >= a.y && bladeY  <= a.y + a.height,
+          );
+          if (bottle) {
+            const available = Math.floor((bottle.data?.currentVolume ?? 0) * (bottle.data?.density ?? 0.847));
+            if (available > 0) {
+              const maxScoop = Math.min(available, 50);
+              setSelectedScoopGrams(Math.min(18, maxScoop));
+              setShowScoopModal({ spatulaId: dragged.id, sourceId: bottle.id, maxGrams: maxScoop });
+            }
+          }
+        }
+      }
     }
+    draggingRef.current = null;
     setDragging(null);
     window.removeEventListener("mousemove", handleMouseMove);
     window.removeEventListener("mouseup", handleMouseUp);
@@ -1853,6 +2850,7 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
 
   return (
     <div className="lab-canvas-container">
+      <StepAlerts items={notifications} />
       <div className="canvas-wrapper custom-scrollbar">
         <canvas
           ref={canvasRef}
@@ -1861,7 +2859,7 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
           className="lab-canvas"
           onMouseDown={handleMouseDown}
           onMouseMove={handleMouseMove}
-          onMouseUp={handleMouseUp}
+          onMouseUp={() => handleMouseUp()}
           onMouseLeave={() => setHoveredId(null)}
           onMouseMoveCapture={(e) => {
             const rect = canvasRef.current?.getBoundingClientRect();
@@ -1883,6 +2881,8 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
             if (!rect) return;
             const x = e.clientX - rect.left;
             const y = e.clientY - rect.top;
+            // Spatula click is handled by drag-drop in mouseUp — skip here
+
             // Viscosity gauge click — activate spindle measurement
             const viscGauge = apparatus.find(
               (a) =>
@@ -1922,33 +2922,7 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
               }
             }
 
-            // Stirring rod checked first — it may overlap a beaker
-            const stirRod = apparatus.find(
-              (a) =>
-                a.type === "stirringrod" &&
-                x >= a.x && x <= a.x + a.width &&
-                y >= a.y && y <= a.y + a.height,
-            );
-            if (stirRod && stirRod.data?.stirringTargetId) {
-              const targetId = stirRod.data.stirringTargetId;
-              setApparatus((prev) =>
-                prev.map((a) => {
-                  if (a.id === stirRod.id || a.id === targetId)
-                    return { ...a, data: { ...a.data, isStirring: true } };
-                  return a;
-                }),
-              );
-              setTimeout(() => {
-                setApparatus((prev) =>
-                  prev.map((a) => {
-                    if (a.id === stirRod.id || a.id === targetId)
-                      return { ...a, data: { ...a.data, isStirring: false } };
-                    return a;
-                  }),
-                );
-              }, 2500);
-              return;
-            }
+            // Stirring rod click is handled by hold-to-stir in mouseDown — skip here
 
             const clicked = apparatus.find(
               (a) =>
@@ -2054,7 +3028,10 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
           const available = source.data?.currentVolume || 0;
           const targetMax = target.data?.maxVolume || 0;
           const targetCurrent = target.data?.currentVolume || 0;
-          const maxPour = Math.min(available, targetMax - targetCurrent, 100);
+          const maxPour = Math.min(available, targetMax - targetCurrent);
+          // currentAmount is driven by the useEffect that resets to maxPour on open
+          const currentAmount = selectedPourAmount > 0 && selectedPourAmount <= maxPour
+            ? selectedPourAmount : maxPour;
           return (
             <div
               style={{
@@ -2085,29 +3062,42 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
                   <b>{target.name}</b>?
                 </p>
                 <div className="mb-4">
-                  <input
-                    type="range"
-                    min={1}
-                    max={maxPour}
-                    defaultValue={maxPour}
-                    id="pourAmount"
-                    style={{ width: 200 }}
-                    disabled={isAnimatingPour}
-                  />
-                  <span className="ml-2 font-mono">{maxPour} mL</span>
+                  <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                    <input
+                      type="range"
+                      min={1}
+                      max={maxPour}
+                      value={currentAmount}
+                      style={{ flex: 1 }}
+                      disabled={isAnimatingPour}
+                      onChange={(e) => setSelectedPourAmount(Number(e.target.value))}
+                    />
+                    <span
+                      style={{
+                        minWidth: 70,
+                        background: "#1e3a5f",
+                        color: "#7dd3fc",
+                        fontFamily: "monospace",
+                        fontWeight: 700,
+                        fontSize: 16,
+                        borderRadius: 8,
+                        padding: "4px 10px",
+                        textAlign: "center",
+                      }}
+                    >
+                      {currentAmount} mL
+                    </span>
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "#94a3b8", marginTop: 4 }}>
+                    <span>1 mL</span>
+                    <span>{maxPour} mL</span>
+                  </div>
                 </div>
                 <button
                   className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 mr-2"
                   disabled={isAnimatingPour}
                   onClick={() => {
-                    const amount = parseInt(
-                      (
-                        document.getElementById(
-                          "pourAmount",
-                        ) as HTMLInputElement
-                      )?.value || "0",
-                      10,
-                    );
+                    const amount = currentAmount;
                     setIsAnimatingPour(true);
                     // Animate pouring with tilt and real-time volume
                     let progress = 0;
@@ -2133,24 +3123,54 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
                             };
                           }
                           if (a.id === target.id) {
-                            const prevVol = a.data?.currentVolume || 0;
-                            const addVol  = amount / steps;
-                            const newVol  = Math.min(a.data?.maxVolume || 1000, prevVol + addVol);
-                            // Blend pH and viscosity proportionally when mixing
+                            const prevVol  = a.data?.currentVolume || 0;
+                            const addVol   = amount / steps;
+                            const newVol   = Math.min(a.data?.maxVolume || 1000, prevVol + addVol);
+
+                            // ── Temperature: blend source heat into target ──
+                            const srcTemp  = source.data?.liquidTemperature ?? 25;
+                            const tgtTemp  = a.data?.liquidTemperature ?? 25;
+                            const blendedTemp = prevVol > 0
+                              ? (prevVol * tgtTemp + addVol * srcTemp) / newVol
+                              : srcTemp;
+
+                            // ── Composition: transfer from bottle key OR proportional from beaker ──
+                            const ingredientKey = BOTTLE_INGREDIENT[source.id];
+                            const prevComp = (a.data?.composition ?? {}) as Record<string, number>;
+                            let newComp: Record<string, number>;
+                            if (ingredientKey) {
+                              // Source is a chemical bottle — one specific ingredient
+                              newComp = { ...prevComp, [ingredientKey]: (prevComp[ingredientKey] ?? 0) + addVol };
+                            } else {
+                              // Source is a beaker/cylinder — spread its composition proportionally
+                              const srcInPrev = prev.find((s) => s.id === source.id);
+                              const srcComp   = (srcInPrev?.data?.composition ?? {}) as Record<string, number>;
+                              const srcVol    = srcInPrev?.data?.currentVolume ?? amount;
+                              const frac      = srcVol > 0 ? addVol / srcVol : 0;
+                              newComp = { ...prevComp };
+                              for (const [k, v] of Object.entries(srcComp)) {
+                                newComp[k] = (newComp[k] ?? 0) + (v as number) * frac;
+                              }
+                            }
+
+                            // ── pH & viscosity: volume-weighted blend (fallback) ──
                             const srcPH   = source.data?.pH ?? 7.0;
                             const srcVisc = source.data?.viscosity ?? 1;
                             const tgtPH   = a.data?.pH ?? srcPH;
                             const tgtVisc = a.data?.viscosity ?? srcVisc;
                             const blendedPH   = prevVol > 0 ? (prevVol * tgtPH   + addVol * srcPH)   / newVol : srcPH;
                             const blendedVisc = prevVol > 0 ? (prevVol * tgtVisc + addVol * srcVisc) / newVol : srcVisc;
+
                             return {
                               ...a,
                               data: {
                                 ...a.data,
                                 currentVolume: newVol,
                                 liquidColor: source.data?.liquidColor || "rgba(56, 189, 248, 0.6)",
+                                liquidTemperature: blendedTemp,
                                 pH: blendedPH,
                                 viscosity: blendedVisc,
+                                composition: newComp,
                               },
                             };
                           }
@@ -2161,22 +3181,29 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
                         setTimeout(animate, 18);
                       } else {
                         setApparatus((prev) =>
-                          prev.map((a) =>
-                            a.id === source.id
-                              ? {
-                                  ...a,
-                                  data: {
-                                    ...a.data,
-                                    isPouring: false,
-                                    pouringTargetId: null,
-                                    pouringProgress: 0,
-                                  },
-                                }
-                              : a,
-                          ),
+                          prev.map((a) => {
+                            if (a.id === source.id) {
+                              return {
+                                ...a,
+                                data: {
+                                  ...a.data,
+                                  isPouring: false,
+                                  pouringTargetId: null,
+                                  pouringProgress: 0,
+                                },
+                              };
+                            }
+                            // Record pour history on the target beaker
+                            if (a.id === target.id) {
+                              const hist = [...(a.data?.pouringSourceHistory ?? [])];
+                              if (!hist.includes(source.id)) hist.push(source.id);
+                              return { ...a, data: { ...a.data, pouringSourceHistory: hist } };
+                            }
+                            return a;
+                          }),
                         );
                         setIsAnimatingPour(false);
-                        setShowPourModal(null);
+                        setShowPourModal(null); setSelectedPourAmount(0);
                       }
                     };
                     animate();
@@ -2389,6 +3416,88 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
       >
         {showProtocolSidebar ? "Hide Protocol" : "Show Protocol"}
       </button>
+
+      {/* Spatula Scoop Modal */}
+      {showScoopModal && (() => {
+        const src = apparatus.find((a) => a.id === showScoopModal.sourceId);
+        if (!src) return null;
+        return (
+          <div style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.35)",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center" }}>
+            <div style={{ background:"white",borderRadius:14,padding:32,minWidth:340,boxShadow:"0 8px 40px #0003" }}>
+              <h2 style={{ fontWeight:700,fontSize:18,marginBottom:8 }}>Scoop Stearic Acid</h2>
+              <p style={{ color:"#475569",fontSize:14,marginBottom:20 }}>
+                Use the spatula to measure <b>solid stearic acid</b> into the beaker.<br/>
+                Available: <b>{Math.round((src.data?.currentVolume ?? 0) * (src.data?.density ?? 0.847))} g</b>
+              </p>
+              <div style={{ marginBottom:20 }}>
+                <div style={{ display:"flex",alignItems:"center",gap:14,marginBottom:8 }}>
+                  <input type="range" min={1} max={showScoopModal.maxGrams} value={selectedScoopGrams}
+                    style={{ flex:1 }}
+                    onChange={(e) => setSelectedScoopGrams(+e.target.value)} />
+                  <span style={{ minWidth:64,background:"#1e3a5f",color:"#7dd3fc",fontFamily:"monospace",fontWeight:700,fontSize:16,borderRadius:8,padding:"4px 10px",textAlign:"center" }}>
+                    {selectedScoopGrams} g
+                  </span>
+                </div>
+                <div style={{ display:"flex",justifyContent:"space-between",fontSize:11,color:"#94a3b8" }}>
+                  <span>1 g</span><span>{showScoopModal.maxGrams} g</span>
+                </div>
+              </div>
+              <div style={{ display:"flex",gap:12 }}>
+                <button
+                  style={{ flex:1,background:"#92400e",color:"white",border:"none",borderRadius:8,padding:"10px 0",fontWeight:700,fontSize:14,cursor:"pointer" }}
+                  onClick={() => {
+                    const grams = selectedScoopGrams;
+                    const volRemoved = grams / (src.data?.density ?? 0.847);
+                    setApparatus((prev) => prev.map((a) => {
+                      if (a.id === showScoopModal.sourceId)
+                        return { ...a, data: { ...a.data, currentVolume: Math.max(0, (a.data?.currentVolume ?? 0) - volRemoved) } };
+                      if (a.id === showScoopModal.spatulaId)
+                        return { ...a, data: { ...a.data, spatulaLoad: grams, spatulaLoadSourceId: showScoopModal.sourceId } };
+                      return a;
+                    }));
+                    setShowScoopModal(null);
+                  }}
+                >
+                  Scoop {selectedScoopGrams} g
+                </button>
+                <button
+                  style={{ padding:"10px 20px",background:"#e2e8f0",border:"none",borderRadius:8,cursor:"pointer",fontWeight:600 }}
+                  onClick={() => setShowScoopModal(null)}
+                >Cancel</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Evaluate Formulation Button */}
+      <button
+        onClick={() => setShowEvaluationPanel(true)}
+        style={{
+          position: "absolute",
+          bottom: 24,
+          right: 24,
+          background: "linear-gradient(135deg, #1d4ed8, #7c3aed)",
+          color: "white",
+          border: "none",
+          borderRadius: 12,
+          padding: "12px 22px",
+          fontWeight: 700,
+          fontSize: 14,
+          cursor: "pointer",
+          boxShadow: "0 4px 20px rgba(109,40,217,0.45)",
+          letterSpacing: 0.5,
+          zIndex: 50,
+        }}
+      >
+        ⚗ Evaluate Formulation
+      </button>
+
+      <EvaluationPanel
+        isOpen={showEvaluationPanel}
+        onClose={() => setShowEvaluationPanel(false)}
+        apparatus={apparatus}
+      />
     </div>
   );
 };
