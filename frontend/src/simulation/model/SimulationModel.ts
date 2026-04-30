@@ -217,7 +217,25 @@ export class SimulationModel {
   public stopHeating(beakerId: string): boolean {
     this.axonProperties.setProperty('is_heating', false);
     this.stopTemperatureSimulation(beakerId);
-    
+
+    // After stopping heating, check if both phases are within allowed temperature range
+    const oilBeaker = this.beakers.get('oil_phase');
+    const waterBeaker = this.beakers.get('water_phase');
+    if (oilBeaker && waterBeaker) {
+      const oilTemp = oilBeaker.temperature.current;
+      const waterTemp = waterBeaker.temperature.current;
+      const tempDiff = Math.abs(oilTemp - waterTemp);
+      // Acceptable range: 70-80°C, difference <= 5°C
+      if (
+        oilTemp >= 70 && oilTemp <= 80 &&
+        waterTemp >= 70 && waterTemp <= 80 &&
+        tempDiff <= 5
+      ) {
+        // Clear any previous temperature mismatch errors
+        this.state.errors = this.state.errors.filter(e => e.code !== 'temperature_mismatch');
+      }
+    }
+
     this.telemetryManager.logAction('heating_stopped', SimulationStep.HEATING, { beakerId });
     return true;
   }

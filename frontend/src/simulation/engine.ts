@@ -138,12 +138,19 @@ export function evaluateFormulation(input: FormulationInput): EvaluationResult {
     pH_score * 1 +
     viscosity_score * 1;
 
-  // Step 9 — Result
-  let result: "PASS" | "AVERAGE" | "FAIL";
-  if (final_score >= 8 && stability === "stable") {
+  // Step 9 — Result (strict)
+  let result: "PASS" | "FAIL";
+  // Only PASS if all critical steps are perfect
+  if (
+    ingredient_score === 4 &&
+    temperature_score === 1 &&
+    emulsification_score === 1 &&
+    cooling_score === 1 &&
+    pH_score === 1 &&
+    viscosity_score === 1 &&
+    stability === "stable"
+  ) {
     result = "PASS";
-  } else if (final_score >= 5) {
-    result = "AVERAGE";
   } else {
     result = "FAIL";
   }
@@ -152,8 +159,6 @@ export function evaluateFormulation(input: FormulationInput): EvaluationResult {
   const appearance =
     result === "PASS"
       ? "Smooth white cream"
-      : result === "AVERAGE"
-      ? "Slightly unstable or dull cream"
       : "Phase separation or grainy texture";
 
   // Step 11 — Feedback
