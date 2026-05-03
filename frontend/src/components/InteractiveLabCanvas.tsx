@@ -3,7 +3,7 @@ import { SimulationStep } from "../simulation/model";
 import ApparatusDetailModal from "./ApparatusDetailModal";
 import ProtocolSidebar from "./ProtocolSidebar";
 import EvaluationPanel from "./EvaluationPanel";
-import { getInitialApparatus, Apparatus } from "./apparatusData";
+import { getInitialApparatus, getInitialApparatusColdCream, Apparatus } from "./apparatusData";
 
 // Maps source bottle ID → composition key
 const BOTTLE_INGREDIENT: Record<string, string> = {
@@ -12,6 +12,7 @@ const BOTTLE_INGREDIENT: Record<string, string> = {
   "container-liquid-paraffin":     "liquidParaffin",
   "container-glycerin":            "glycerin",
   "container-koh-triethanolamine": "koh",
+  "container-borax":               "borax",   // cold cream
 };
 
 const parseRgba = (color: string): [number, number, number, number] => {
@@ -589,8 +590,19 @@ const drawSpatula = (
   w: number,
   h: number,
   load: number = 0,
+  pressingIntoSolid: boolean = false,
 ) => {
   ctx.save();
+
+  // Tilt entire spatula when pressing into solid (whole instrument inclines ~18°)
+  if (pressingIntoSolid) {
+    const pivotX = x + w / 2;
+    const pivotY = y + h * 0.35;           // pivot near upper third of handle
+    ctx.translate(pivotX, pivotY);
+    ctx.rotate(0.32);                       // ~18° clockwise — leaning into solid
+    ctx.translate(-pivotX, -pivotY);
+  }
+
   const cx = x + w / 2;
 
   // Shadow
@@ -624,13 +636,18 @@ const drawSpatula = (
   ctx.shadowBlur = 0;
   ctx.shadowOffsetX = 0;
 
-  // Blade — wider flat rectangle
+  // Blade — wider flat rectangle (drawn inside the bend transform below)
   const bladeW = w * 0.90;
   const bladeY = y + handleH - 2;
   const bladeGrad = ctx.createLinearGradient(cx - bladeW / 2, 0, cx + bladeW / 2, 0);
   bladeGrad.addColorStop(0,   "rgba(160, 175, 190, 0.80)");
   bladeGrad.addColorStop(0.5, "rgba(235, 245, 252, 0.60)");
   bladeGrad.addColorStop(1,   "rgba(150, 168, 185, 0.82)");
+
+  // ── Blade always drawn flat (whole-body tilt handles scooping motion) ───
+  ctx.save();
+
+  // Blade body (drawn relative to pivot)
   ctx.fillStyle = bladeGrad;
   ctx.strokeStyle = "rgba(200, 215, 230, 0.88)";
   ctx.lineWidth = 0.8;
@@ -642,35 +659,35 @@ const drawSpatula = (
   // Wax load on blade when carrying solid
   if (load > 0) {
     const loadAlpha = Math.min(load / 20, 1);
-    ctx.fillStyle = `rgba(255, 250, 240, ${0.82 + loadAlpha * 0.15})`;
+    // Mound of wax sitting on top of the blade
+    ctx.fillStyle = `rgba(255, 250, 240, ${0.85 + loadAlpha * 0.12})`;
     ctx.beginPath();
-    ctx.ellipse(cx, bladeY + bladeH * 0.45, bladeW * 0.38, bladeH * 0.38, 0, 0, Math.PI * 2);
+    ctx.ellipse(cx, bladeY + bladeH * 0.35, bladeW * 0.42 * loadAlpha + bladeW * 0.18,
+      bladeH * 0.55 * loadAlpha + bladeH * 0.15, 0, 0, Math.PI * 2);
     ctx.fill();
-    // Wax texture
-    ctx.fillStyle = "rgba(240, 230, 215, 0.65)";
-    for (let i = 0; i < 3; i++) {
+    // Surface texture — small bumps to look like powdery wax
+    ctx.fillStyle = "rgba(240, 228, 210, 0.72)";
+    for (let i = 0; i < 4; i++) {
+      const bx = cx + (i - 1.5) * (bladeW * 0.12);
+      const by = bladeY + bladeH * 0.28;
       ctx.beginPath();
-      ctx.ellipse(cx + (i - 1) * 3, bladeY + bladeH * 0.4, 2.5, 1.5, i * 0.4, 0, Math.PI * 2);
+      ctx.ellipse(bx, by, 2.2, 1.2, i * 0.5, 0, Math.PI * 2);
       ctx.fill();
     }
-    // Load label
-    ctx.fillStyle = "#92400e";
-    ctx.font = `bold 5px Arial`;
+    // Gram count badge
+    ctx.fillStyle = "rgba(20,10,5,0.55)";
+    ctx.beginPath();
+    ctx.roundRect(cx - 8, bladeY - 10, 16, 9, 3);
+    ctx.fill();
+    ctx.fillStyle = "#fcd34d";
+    ctx.font = `bold 6px Arial`;
     ctx.textAlign = "center";
-    ctx.fillText(`${load}g`, cx, bladeY + bladeH * 0.88);
+    ctx.fillText(`${load}g`, cx, bladeY - 3);
   }
 
-  // "SPATULA" rotated label
-  ctx.save();
-  ctx.translate(cx + handleW / 2 + 7, y + handleH / 2);
-  ctx.rotate(-Math.PI / 2);
-  ctx.fillStyle = "rgba(255,255,255,0.45)";
-  ctx.font = "5px Arial";
-  ctx.textAlign = "center";
-  ctx.fillText("SPATULA", 0, 0);
-  ctx.restore();
+  ctx.restore();   // end blade transform
 
-  ctx.restore();
+  ctx.restore();   // end overall spatula transform
 };
 
 const drawWeightBalance = (
@@ -1025,50 +1042,15 @@ const drawThermometer = (
   w: number,
   h: number,
   readingTemperature: number = 25,
+  isMeasuring: boolean = false,
 ) => {
   ctx.save();
 
-  const dispH = Math.min(h * 0.28, 38);
-  const probeStartY = y + dispH;
-  const probeH = h - dispH - 10;
+  const probeStartY = y;
+  const probeH = h - 10;
   const probeW = Math.max(w * 0.32, 7);
   const probeCX = x + w / 2;
   const bulbR = probeW * 0.95;
-
-  // Display housing shadow
-  ctx.shadowColor = "rgba(0,0,0,0.30)";
-  ctx.shadowBlur = 6;
-  ctx.shadowOffsetY = 2;
-  const dispGrad = ctx.createLinearGradient(x, y, x + w, y);
-  dispGrad.addColorStop(0, "#cdd8e8");
-  dispGrad.addColorStop(0.5, "#eaf0f8");
-  dispGrad.addColorStop(1, "#bac8d8");
-  ctx.fillStyle = dispGrad;
-  ctx.beginPath();
-  ctx.roundRect(x, y, w, dispH, [5, 5, 3, 3]);
-  ctx.fill();
-  ctx.shadowBlur = 0;
-  ctx.shadowOffsetY = 0;
-
-  // LCD screen
-  ctx.fillStyle = "#060e14";
-  ctx.beginPath();
-  ctx.roundRect(x + 2, y + 2, w - 4, dispH - 5, 3);
-  ctx.fill();
-
-  // Green digital temperature readout
-  const tempStr = readingTemperature < 100
-    ? readingTemperature.toFixed(1)
-    : `${Math.round(readingTemperature)}`;
-  ctx.fillStyle = "#00e676";
-  ctx.font = `bold ${Math.floor((dispH - 8) * 0.55)}px monospace`;
-  ctx.textAlign = "center";
-  ctx.fillText(tempStr, probeCX, y + dispH * 0.66);
-
-  // °C label
-  ctx.font = `${Math.floor((dispH - 8) * 0.28)}px monospace`;
-  ctx.fillStyle = "rgba(0, 230, 118, 0.62)";
-  ctx.fillText("°C", x + w * 0.84, y + dispH * 0.32);
 
   // Glass probe tube
   const probeGrad = ctx.createLinearGradient(probeCX - probeW / 2, 0, probeCX + probeW / 2, 0);
@@ -1191,16 +1173,6 @@ const drawStirringRod = (
   ctx.ellipse(rodCX, y + h - 2, rodW * 0.62, 4, 0, 0, Math.PI * 2);
   ctx.fill();
 
-  // Label (rotated 90° along the rod)
-  ctx.save();
-  ctx.translate(rodCX + rodW / 2 + 7, y + h / 2);
-  ctx.rotate(-Math.PI / 2);
-  ctx.fillStyle = "rgba(255, 255, 255, 0.55)";
-  ctx.font = "5px Arial";
-  ctx.textAlign = "center";
-  ctx.fillText("GLASS STIRRING ROD", 0, 0);
-  ctx.restore();
-
   ctx.restore();
 };
 
@@ -1214,9 +1186,8 @@ const drawPhMeter = (
 ) => {
   ctx.save();
 
-  const dispH = Math.min(h * 0.30, 42);
-  const probeStartY = y + dispH + 10;
-  const probeH = h - dispH - 10 - 12;
+  const probeStartY = y;
+  const probeH = h - 12;
   const probeW = Math.max(w * 0.26, 6);
   const probeCX = x + w / 2;
   const bulbR = probeW * 1.0;
@@ -1232,69 +1203,6 @@ const drawPhMeter = (
       : phReading < 11
       ? `rgba(30, ${Math.floor(160 - ((phReading - 8) / 3) * 60)}, 255, 0.90)`
       : `rgba(100, 0, 220, 0.92)`;
-
-  // Display housing
-  ctx.shadowColor = "rgba(0,0,0,0.28)";
-  ctx.shadowBlur = 6;
-  ctx.shadowOffsetY = 2;
-  const dispGrad = ctx.createLinearGradient(x, y, x + w, y);
-  dispGrad.addColorStop(0, "#cdd8e8");
-  dispGrad.addColorStop(0.5, "#eaf0f8");
-  dispGrad.addColorStop(1, "#bac8d8");
-  ctx.fillStyle = dispGrad;
-  ctx.beginPath();
-  ctx.roundRect(x, y, w, dispH, [6, 6, 3, 3]);
-  ctx.fill();
-  ctx.shadowBlur = 0;
-  ctx.shadowOffsetY = 0;
-
-  // LCD screen
-  ctx.fillStyle = "#060e14";
-  ctx.beginPath();
-  ctx.roundRect(x + 2, y + 2, w - 4, dispH - 4, 3);
-  ctx.fill();
-
-  // "pH" tag top-left
-  ctx.fillStyle = phColor;
-  ctx.font = `bold ${Math.floor((dispH - 6) * 0.26)}px monospace`;
-  ctx.textAlign = "left";
-  ctx.fillText("pH", x + 4, y + dispH * 0.40);
-
-  // Numeric readout
-  ctx.font = `bold ${Math.floor((dispH - 6) * 0.54)}px monospace`;
-  ctx.textAlign = "center";
-  ctx.fillText(phReading.toFixed(2), probeCX, y + dispH * 0.76);
-
-  // Rainbow pH scale bar
-  const barH = 7;
-  const barY = y + dispH + 1;
-  const barX = x + 2;
-  const barW = w - 4;
-  const barGrad = ctx.createLinearGradient(barX, 0, barX + barW, 0);
-  barGrad.addColorStop(0,    "rgba(255,0,0,0.9)");
-  barGrad.addColorStop(0.21, "rgba(255,120,0,0.9)");
-  barGrad.addColorStop(0.43, "rgba(255,230,0,0.9)");
-  barGrad.addColorStop(0.50, "rgba(0,200,80,0.9)");
-  barGrad.addColorStop(0.57, "rgba(0,200,255,0.9)");
-  barGrad.addColorStop(0.79, "rgba(0,80,220,0.9)");
-  barGrad.addColorStop(1,    "rgba(100,0,200,0.9)");
-  ctx.fillStyle = barGrad;
-  ctx.beginPath();
-  ctx.roundRect(barX, barY, barW, barH, 2);
-  ctx.fill();
-
-  // White triangle indicator on the scale
-  const indX = barX + (phReading / 14) * barW;
-  ctx.fillStyle = "white";
-  ctx.strokeStyle = "rgba(0,0,0,0.5)";
-  ctx.lineWidth = 0.5;
-  ctx.beginPath();
-  ctx.moveTo(indX, barY - 1);
-  ctx.lineTo(indX - 3.5, barY - 7);
-  ctx.lineTo(indX + 3.5, barY - 7);
-  ctx.closePath();
-  ctx.fill();
-  ctx.stroke();
 
   // Glass probe tube
   const probeGrad = ctx.createLinearGradient(probeCX - probeW / 2, 0, probeCX + probeW / 2, 0);
@@ -1324,14 +1232,11 @@ const drawPhMeter = (
   ctx.roundRect(probeCX - probeW / 2 + 1, probeStartY + 4, probeW * 0.30, probeH - 8, 1);
   ctx.fill();
 
-  // Sensitive bulb at tip — glows with pH colour
+  // Sensitive bulb at tip
   ctx.fillStyle = phColor;
-  ctx.shadowColor = phColor;
-  ctx.shadowBlur = 6;
   ctx.beginPath();
   ctx.arc(probeCX, probeStartY + probeH + bulbR * 0.5, bulbR, 0, Math.PI * 2);
   ctx.fill();
-  ctx.shadowBlur = 0;
   ctx.strokeStyle = "rgba(195, 222, 248, 0.88)";
   ctx.lineWidth = 1;
   ctx.stroke();
@@ -1392,12 +1297,7 @@ const drawViscosityGauge = (
   ctx.roundRect(x + dm, lcdY, w - dm * 2, lcdH, 3);
   ctx.fill();
 
-  // "VISCOSITY" header
   const accentColor = isActive ? "#00e676" : "#4caf50";
-  ctx.fillStyle = accentColor;
-  ctx.font = `${Math.floor(lcdH * 0.17)}px monospace`;
-  ctx.textAlign = "center";
-  ctx.fillText("VISCOSITY", probeCX, lcdY + lcdH * 0.22);
 
   // Numeric reading
   const visStr =
@@ -1413,15 +1313,6 @@ const drawViscosityGauge = (
   ctx.fillStyle = `rgba(0, 230, 118, 0.58)`;
   ctx.fillText("cP", x + w * 0.84, lcdY + lcdH * 0.40);
 
-  // Descriptor label
-  const desc =
-    viscosityReading < 2 ? "WATER-LIKE" :
-    viscosityReading < 50 ? "LOW" :
-    viscosityReading < 300 ? "MEDIUM" :
-    viscosityReading < 1000 ? "HIGH" : "VERY HIGH";
-  ctx.font = `${Math.floor(lcdH * 0.15)}px Arial`;
-  ctx.fillStyle = `rgba(0, 230, 118, 0.52)`;
-  ctx.fillText(desc, probeCX, lcdY + lcdH * 0.82);
 
   // Circular dial gauge
   const dialY = lcdY + lcdH + 4;
@@ -1471,21 +1362,6 @@ const drawViscosityGauge = (
   ctx.arc(dialCX, dialCY, 2.5, 0, Math.PI * 2);
   ctx.fill();
 
-  // Scale labels
-  ctx.fillStyle = "rgba(255,255,255,0.42)";
-  ctx.font = `5px Arial`;
-  ctx.textAlign = "center";
-  ctx.fillText("1", dialCX + Math.cos(startAngle) * (dialR + 6), dialCY + Math.sin(startAngle) * (dialR + 6) + 3);
-  ctx.fillText("3k", dialCX + Math.cos(endAngle) * (dialR + 7), dialCY + Math.sin(endAngle) * (dialR + 7) + 3);
-
-  // "CLICK TO MEASURE" hint when probe is dipped but not active
-  if (!isActive && viscosityReading === 0) {
-    ctx.fillStyle = "rgba(255,255,255,0.30)";
-    ctx.font = `5px Arial`;
-    ctx.textAlign = "center";
-    ctx.fillText("CLICK TO", probeCX, dialCY + dialR + 9);
-    ctx.fillText("MEASURE", probeCX, dialCY + dialR + 15);
-  }
 
   // Spindle shaft
   const spindleY = y + bodyH;
@@ -1705,12 +1581,15 @@ const StepAlerts: React.FC<{ items: StepNotif[] }> = ({ items }) => {
 interface InteractiveLabCanvasProps {
   currentStep: SimulationStep;
   onApparatusClick?: (apparatus: Apparatus) => void;
+  practicalId?: string;
 }
 
 const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
   currentStep,
   onApparatusClick,
+  practicalId = "vanishing-cream",
 }) => {
+  const isColdCream = practicalId === "cold-cream";
   const canvasRef     = useRef<HTMLCanvasElement>(null);
   const holdStirRef   = useRef<{ rodId: string; targetId: string } | null>(null);
   const draggingRef   = useRef<{ id: string; offsetX: number; offsetY: number } | null>(null);
@@ -1731,6 +1610,7 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
     null,
   );
   const [showDetailModal, setShowDetailModal] = useState(false);
+  const [moveMenu, setMoveMenu] = useState<{ id: string; x: number; y: number } | null>(null);
   const [showProtocolSidebar, setShowProtocolSidebar] = useState(false);
   const [dragging, setDragging] = useState<{
     id: string;
@@ -1754,8 +1634,10 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
   const benchHeight = canvasSize.height - (TABLE_Y + LIP_HEIGHT); // Reaches bottom
   const shelfY = 220;
 
-  const [apparatus, setApparatus] = useState<Apparatus[]>(
-    getInitialApparatus(LEFT_GAP, shelfY, TABLE_Y),
+  const [apparatus, setApparatus] = useState<Apparatus[]>(() =>
+    isColdCream
+      ? getInitialApparatusColdCream(LEFT_GAP, shelfY, TABLE_Y)
+      : getInitialApparatus(LEFT_GAP, shelfY, TABLE_Y),
   );
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [showEvaluationPanel, setShowEvaluationPanel] = useState(false);
@@ -1766,6 +1648,7 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
   } | null>(null);
   const [isAnimatingPour, setIsAnimatingPour] = useState(false);
   const [showLidModal, setShowLidModal] = useState<{ id: string } | null>(null);
+  const [lidContextMenu, setLidContextMenu] = useState<{ id: string; x: number; y: number } | null>(null);
   const [showHotPlateModal, setShowHotPlateModal] = useState(false);
   const [hotPlateFrame, setHotPlateFrame] = useState(0);
   const [showScoopModal, setShowScoopModal] = useState<{ spatulaId: string; sourceId: string; maxGrams: number } | null>(null);
@@ -1844,6 +1727,33 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
       ctx.fillStyle = HIGHLIGHT_STRIP;
       ctx.fillRect(LEFT_GAP, TABLE_Y, tableTotalWidth + SIDE_DEPTH, 2);
 
+      // ── Instrument holder stands on the shelf ──────────────────────────────
+      // Draw a small bracket/dock for each instrument that lives on the shelf.
+      // These show WHERE instruments belong when not in use.
+      // Holders always fixed at original shelf positions
+      const origHolderList = getInitialApparatus(LEFT_GAP, shelfY, TABLE_Y);
+      const HOLDER_IDS = ["thermometer-digital","glass-stirring-rod","spatula","ph-meter","viscosity-gauge"];
+      origHolderList.forEach((item) => {
+        if (!HOLDER_IDS.includes(item.id)) return;
+        const cx  = item.x + item.width / 2;
+        const bot = shelfY;
+        // Base plate
+        ctx.fillStyle = "rgba(100,130,160,0.22)";
+        ctx.beginPath();
+        ctx.roundRect(cx - item.width * 0.75, bot - 7, item.width * 1.5, 7, [0,0,3,3]);
+        ctx.fill();
+        ctx.strokeStyle = "rgba(148,163,184,0.28)";
+        ctx.lineWidth = 0.8;
+        ctx.stroke();
+        // Two small side clips
+        [cx - item.width * 0.3, cx + item.width * 0.3].forEach(clipX => {
+          ctx.fillStyle = "rgba(100,130,160,0.35)";
+          ctx.beginPath();
+          ctx.roundRect(clipX - 3, bot - 18, 6, 12, 2);
+          ctx.fill();
+        });
+      });
+
       // 5. APPARATUS RENDERING logic
       apparatus.forEach((item) => {
         const { x: origX, y: origY, width, height, type, name, id } = item;
@@ -1910,6 +1820,31 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
           ctx.fillText(name, labelX, labelY + 3);
         }
 
+        // -- Elevation glow: show when an instrument is dragged over this beaker --
+        if (type === "beaker" || type === "cylinder") {
+          const draggedItem = draggingRef.current
+            ? apparatus.find(a => a.id === draggingRef.current?.id) : null;
+          const isInstrument = draggedItem &&
+            ["thermometer","phmeter","viscositygauge","stirringrod"].includes(draggedItem.type);
+          if (isInstrument && draggedItem) {
+            const dCX = draggedItem.x + draggedItem.width / 2;
+            const bCX = x + width / 2;
+            const nearHoriz = Math.abs(dCX - bCX) < width * 0.9;
+            const nearVert  = draggedItem.y + draggedItem.height > y && draggedItem.y < y + height;
+            if (nearHoriz && nearVert) {
+              ctx.save();
+              ctx.strokeStyle = "rgba(59,130,246,0.7)";
+              ctx.lineWidth = 2.5;
+              ctx.shadowColor = "#3b82f6";
+              ctx.shadowBlur = 12;
+              ctx.beginPath();
+              ctx.roundRect(x - 3, y - 3, width + 6, height + 6, 6);
+              ctx.stroke();
+              ctx.restore();
+            }
+          }
+        }
+
         // -- 3D Shadow for the object --
         ctx.shadowColor = "rgba(0, 0, 0, 0.2)";
         ctx.shadowBlur = 10;
@@ -1931,7 +1866,7 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
           const currentVol = item.data?.currentVolume || 0;
           const liquidColor =
             item.data?.liquidColor || "rgba(56, 189, 248, 0.6)";
-          drawBeaker(ctx, x, y, width, height, maxVol, currentVol, liquidColor, item.data?.liquidTemperature ?? 25, hotPlateFrame, item.data?.isStirring ?? false, item.data?.solidStearicGrams ?? 0, tiltAngle, item.data?.emulsificationProgress ?? 0);
+          drawBeaker(ctx, x, y, width, height, maxVol, currentVol, liquidColor, item.data?.liquidTemperature ?? 25, hotPlateFrame, item.data?.isStirring ?? false, (item.data?.solidStearicGrams ?? 0) + (item.data?.solidBeeswaxGrams ?? 0), tiltAngle, item.data?.emulsificationProgress ?? 0);
         } else if (type === "cylinder") {
           const maxVol = item.data?.maxVolume || 100;
           const currentVol = item.data?.currentVolume || 0;
@@ -1950,7 +1885,15 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
             item.data?.isSolid ?? false,
           );
         } else if (type === "thermometer") {
-          drawThermometer(ctx, x, y, width, height, item.data?.readingTemperature ?? 25);
+          // Show display only when probe tip is inside a beaker
+          const probeBottom = y + height;
+          const probeCX     = x + width / 2;
+          const thermoMeasuring = apparatus.some(
+            (a) => (a.type === "beaker" || a.type === "cylinder") &&
+                   probeCX    >= a.x && probeCX    <= a.x + a.width &&
+                   probeBottom >= a.y && probeBottom <= a.y + a.height,
+          );
+          drawThermometer(ctx, x, y, width, height, item.data?.readingTemperature ?? 25, thermoMeasuring);
         } else if (type === "stirringrod") {
           drawStirringRod(ctx, x, y, width, height, item.data?.isStirring ?? false, hotPlateFrame);
         } else if (type === "phmeter") {
@@ -1958,7 +1901,15 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
         } else if (type === "viscositygauge") {
           drawViscosityGauge(ctx, x, y, width, height, item.data?.viscosityReading ?? 0, item.data?.isViscosityActive ?? false, hotPlateFrame);
         } else if (type === "spatula") {
-          drawSpatula(ctx, x, y, width, height, item.data?.spatulaLoad ?? 0);
+          // Deflect blade downward when pressing into a solid reagent bottle
+          const bladeCX  = x + width / 2;
+          const bladeBot = y + height;
+          const pressingIntoSolid = dragging?.id === item.id && apparatus.some(
+            (a) => a.data?.isSolid &&
+                   bladeCX  >= a.x && bladeCX  <= a.x + a.width &&
+                   bladeBot >= a.y && bladeBot <= a.y + a.height,
+          );
+          drawSpatula(ctx, x, y, width, height, item.data?.spatulaLoad ?? 0, pressingIntoSolid);
         } else if (type === "weightbalance") {
           // Platform top matches drawWeightBalance: y + h*0.60 - 8
           const platformTop = item.y + item.height * 0.60 - 8;
@@ -2199,12 +2150,20 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
                   newData.solidStearicGrams = 0;
                   newData.currentVolume     = Math.min((a.data?.maxVolume ?? 500), (a.data?.currentVolume ?? 0) + meltedVol);
                   newData.liquidColor       = "rgba(255, 248, 220, 0.85)";
-                  newData.composition       = {
-                    ...(a.data?.composition ?? {}),
-                    stearicAcid: ((a.data?.composition?.stearicAcid) ?? 0) + meltedVol,
-                  };
+                  newData.composition       = { ...(a.data?.composition ?? {}), stearicAcid: ((a.data?.composition?.stearicAcid) ?? 0) + grams };
                   newData.pH        = a.data?.pH ?? 3.5;
                   newData.viscosity = a.data?.viscosity ?? 15;
+                }
+                // Melt solid beeswax above 62°C (lower melting point than stearic acid)
+                if (curT >= 62 && (a.data?.solidBeeswaxGrams ?? 0) > 0) {
+                  const grams     = a.data!.solidBeeswaxGrams!;
+                  const meltedVol = grams / 0.96;
+                  newData.solidBeeswaxGrams = 0;
+                  newData.currentVolume     = Math.min((a.data?.maxVolume ?? 500), (newData.currentVolume ?? (a.data?.currentVolume ?? 0)) + meltedVol);
+                  newData.liquidColor       = "rgba(255, 240, 180, 0.88)";
+                  newData.composition       = { ...(newData.composition ?? a.data?.composition ?? {}), beeswax: ((a.data?.composition?.beeswax) ?? 0) + grams };
+                  newData.pH        = a.data?.pH ?? 6.5;
+                  newData.viscosity = a.data?.viscosity ?? 180;
                 }
                 return { ...a, data: newData };
 
@@ -2308,8 +2267,8 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
           if ((a.type !== "beaker" && a.type !== "cylinder") || !a.data?.isStirring) return a;
 
           const comp    = (a.data?.composition ?? {}) as Record<string, number>;
-          const hasOil  = (comp.stearicAcid ?? 0) > 2 || (comp.liquidParaffin ?? 0) > 2;
-          const hasAq   = (comp.water ?? 0) > 10;
+          const hasOil  = (comp.stearicAcid ?? 0) > 2 || (comp.liquidParaffin ?? 0) > 2 || (comp.beeswax ?? 0) > 2;
+          const hasAq   = (comp.water ?? 0) > 10 || (comp.borax ?? 0) > 0.5;
           if (!hasOil || !hasAq) return a;
 
           const progress = a.data?.emulsificationProgress ?? 0;
@@ -2416,7 +2375,7 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
         const current = meter.data?.phReading ?? 7.0;
         if (Math.abs(current - targetPH) < 0.005) return prev;
 
-        const rate = 0.04;
+        const rate = 0.12;
         const next =
           current < targetPH
             ? Math.min(current + rate, targetPH)
@@ -2464,8 +2423,8 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
         const current = gauge.data?.viscosityReading ?? 0;
         if (Math.abs(current - targetVisc) < 0.5) return prev;
 
-        // Approach 4% of remaining gap per tick → reaches target in ~3 s
-        const next = current + (targetVisc - current) * 0.04;
+        // Approach 18% of remaining gap per tick → reaches target in ~2 s
+        const next = current + (targetVisc - current) * 0.18;
 
         return prev.map((a) =>
           a.id === gauge.id ? { ...a, data: { ...a.data, viscosityReading: next } } : a,
@@ -2539,9 +2498,12 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
             checkPour("glycerin",      "Glycerin",                2,  5, "mL");
             checkPour("koh",           "KOH & Triethanolamine", 0.5,  2, "mL");
           }
-        } else if (p.data?.isPouring && !curr.data?.isPouring && curr.type === "beaker") {
-          // Beaker-to-beaker mix completed — give a positive mixing confirmation
-          addNotif("Phases combined ✓", "success", "Continue stirring to complete emulsification");
+        } else if (p.data?.isPouring && !curr.data?.isPouring &&
+                   (curr.type === "beaker" || curr.type === "cylinder")) {
+          // Beaker/cylinder-to-beaker mix completed — give a positive mixing confirmation
+          if (curr.type === "beaker")
+            addNotif("Phases combined ✓", "success", "Continue stirring to complete emulsification");
+          // Always clean up the snapshot to prevent orphan entries
           delete pourStartRef.current[p.data?.pouringTargetId ?? ""];
         }
       }
@@ -2569,12 +2531,15 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
         const currSolid = curr.data?.solidStearicGrams ?? 0;
         if (currSolid > prevSolid) {
           const added = +(currSolid - prevSolid).toFixed(1);
-          if (added >= 15 && added <= 22)
-            addNotif(`✓ Stearic acid: ${added} g`, "success", "Correct amount (ideal 15–22 g)");
-          else if (added < 15)
-            addNotif(`⚠ Stearic acid: ${added} g — too little`, "warning", "Ideal is 15–22 g");
+          // Ranges match evaluation engine: pass 15–20 g, warn 12–23 g, fail otherwise
+          if (added >= 15 && added <= 20)
+            addNotif(`✓ Stearic acid: ${added} g`, "success", "Correct amount (ideal 15–20 g)");
+          else if (added >= 12 && added <= 23)
+            addNotif(`⚠ Stearic acid: ${added} g — marginal`, "warning", "Ideal is 15–20 g — borderline amount");
+          else if (added < 12)
+            addNotif(`✗ Stearic acid: ${added} g — too little`, "error", "Ideal is 15–20 g");
           else
-            addNotif(`⚠ Stearic acid: ${added} g — too much`, "warning", "Ideal is 15–22 g");
+            addNotif(`✗ Stearic acid: ${added} g — too much`, "error", "Ideal is 15–20 g");
         }
       }
 
@@ -2753,6 +2718,7 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
         dragged &&
         !dragged.data?.hasLid &&
         (dragged.data?.currentVolume ?? 0) > 0 &&
+        !dragged.data?.isSolid &&          // solids must be transferred by spatula only
         (dragged.type === "bottle" ||
           dragged.type === "container" ||
           dragged.type === "cylinder" ||
@@ -2811,12 +2777,18 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
           );
           if (beakerTarget) {
             const grams = currentLoad;
+            const sourceId = dragged.data?.spatulaLoadSourceId ?? "";
+            const isBeeswax = sourceId === "container-beeswax";
             setApparatus((prev) =>
               prev.map((a) => {
                 if (a.id === dragged.id)
                   return { ...a, data: { ...a.data, spatulaLoad: 0, spatulaLoadSourceId: null } };
-                if (a.id === beakerTarget.id)
-                  return { ...a, data: { ...a.data, solidStearicGrams: (a.data?.solidStearicGrams ?? 0) + grams } };
+                if (a.id === beakerTarget.id) {
+                  if (isBeeswax)
+                    return { ...a, data: { ...a.data, solidBeeswaxGrams: (a.data?.solidBeeswaxGrams ?? 0) + grams } };
+                  else
+                    return { ...a, data: { ...a.data, solidStearicGrams: (a.data?.solidStearicGrams ?? 0) + grams } };
+                }
                 return a;
               }),
             );
@@ -2861,6 +2833,25 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
           onMouseMove={handleMouseMove}
           onMouseUp={() => handleMouseUp()}
           onMouseLeave={() => setHoveredId(null)}
+          onContextMenu={(e) => {
+            e.preventDefault();
+            setMoveMenu(null);
+            setLidContextMenu(null);
+            const rect = canvasRef.current?.getBoundingClientRect();
+            if (!rect) return;
+            const cx = e.clientX - rect.left;
+            const cy = e.clientY - rect.top;
+            const clicked = apparatus.find(
+              (a) => cx >= a.x && cx <= a.x + a.width && cy >= a.y && cy <= a.y + a.height,
+            );
+            if (!clicked) return;
+            // Lid menu for bottles/containers; move menu for everything else
+            if (clicked.type === "bottle" || clicked.type === "container") {
+              setLidContextMenu({ id: clicked.id, x: e.clientX, y: e.clientY });
+            } else {
+              setMoveMenu({ id: clicked.id, x: e.clientX, y: e.clientY });
+            }
+          }}
           onMouseMoveCapture={(e) => {
             const rect = canvasRef.current?.getBoundingClientRect();
             if (!rect) return;
@@ -2876,6 +2867,8 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
             setHoveredId(hovered?.id || null);
           }}
           onClick={(e) => {
+            if (lidContextMenu) { setLidContextMenu(null); return; }
+            if (moveMenu) { setMoveMenu(null); return; }
             if (dragging) return;
             const rect = canvasRef.current?.getBoundingClientRect();
             if (!rect) return;
@@ -2980,137 +2973,171 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
                 y <= a.y + a.height,
             );
             if (clicked) {
-              // If lid is present, show lid modal; otherwise show detail modal
-              if (clicked.data?.hasLid) {
+              if (clicked.type === "bottle" || clicked.type === "container") {
                 setShowLidModal({ id: clicked.id });
-              } else {
-                setSelectedApparatus(clicked);
-                setShowDetailModal(true);
-                onApparatusClick?.(clicked);
               }
+              // Info modal removed — protocol workbook covers apparatus information
             }
           }}
         />
-        {/* Tooltip for volume */}
-        {hoveredId &&
-          (() => {
-            const item = apparatus.find((a) => a.id === hoveredId);
-            if (!item) return null;
-            const vol = item.data?.currentVolume ?? 0;
-            const max = item.data?.maxVolume ?? 0;
-            return (
-              <div
-                style={{
-                  position: "absolute",
-                  left: item.x + item.width / 2,
-                  top: item.y - 30,
-                  background: "rgba(30,41,59,0.95)",
-                  color: "white",
-                  padding: "4px 10px",
-                  borderRadius: 8,
-                  fontSize: 13,
-                  pointerEvents: "none",
-                  transform: "translate(-50%, 0)",
-                  zIndex: 20,
-                }}
-              >
-                {vol} mL / {max} mL
-              </div>
-            );
-          })()}
       </div>
-      {/* Pour Modal */}
+      {/* ── Pour Modal ─────────────────────────────────────────────────────── */}
       {showPourModal &&
         (() => {
           const source = apparatus.find((a) => a.id === showPourModal.sourceId);
           const target = apparatus.find((a) => a.id === showPourModal.targetId);
           if (!source || !target) return null;
-          const available = source.data?.currentVolume || 0;
-          const targetMax = target.data?.maxVolume || 0;
+          const available    = source.data?.currentVolume || 0;
+          const targetMax    = target.data?.maxVolume || 0;
           const targetCurrent = target.data?.currentVolume || 0;
-          const maxPour = Math.min(available, targetMax - targetCurrent);
-          // currentAmount is driven by the useEffect that resets to maxPour on open
+          const maxPour      = Math.min(available, targetMax - targetCurrent);
           const currentAmount = selectedPourAmount > 0 && selectedPourAmount <= maxPour
             ? selectedPourAmount : maxPour;
+          const pct = maxPour > 0 ? (currentAmount / maxPour) * 100 : 100;
+          const liquidColor = source.data?.liquidColor || "rgba(56,189,248,0.7)";
+
           return (
-            <div
-              style={{
-                position: "fixed",
-                left: 0,
-                top: 0,
-                width: "100vw",
-                height: "100vh",
-                background: "rgba(0,0,0,0.25)",
-                zIndex: 100,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-              }}
-            >
-              <div
-                style={{
-                  background: "white",
-                  borderRadius: 12,
-                  padding: 32,
-                  minWidth: 320,
-                  boxShadow: "0 8px 32px #0002",
-                }}
-              >
-                <h2 className="font-bold text-lg mb-2">Pour Liquid</h2>
-                <p className="mb-4">
-                  How much would you like to pour from <b>{source.name}</b> into{" "}
-                  <b>{target.name}</b>?
-                </p>
-                <div className="mb-4">
-                  <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                    <input
-                      type="range"
-                      min={1}
-                      max={maxPour}
-                      value={currentAmount}
-                      style={{ flex: 1 }}
-                      disabled={isAnimatingPour}
-                      onChange={(e) => setSelectedPourAmount(Number(e.target.value))}
-                    />
-                    <span
-                      style={{
-                        minWidth: 70,
-                        background: "#1e3a5f",
-                        color: "#7dd3fc",
-                        fontFamily: "monospace",
-                        fontWeight: 700,
-                        fontSize: 16,
-                        borderRadius: 8,
-                        padding: "4px 10px",
-                        textAlign: "center",
-                      }}
-                    >
-                      {currentAmount} mL
-                    </span>
+            <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.65)",
+              zIndex:100, display:"flex", alignItems:"center", justifyContent:"center" }}>
+              <div style={{ background:"#0f172a", borderRadius:20,
+                width:"min(440px, 95vw)", boxShadow:"0 24px 80px rgba(0,0,0,0.8)",
+                border:"1px solid #1e293b", overflow:"hidden" }}>
+
+                {/* ── Header ── */}
+                <div style={{ background:"linear-gradient(135deg,#0d1b2e,#162032)",
+                  padding:"20px 24px 16px", borderBottom:"1px solid #1e293b" }}>
+                  <div style={{ display:"flex", alignItems:"center", gap:12 }}>
+                    <div style={{ width:42, height:42, borderRadius:12,
+                      background: liquidColor, border:"2px solid rgba(255,255,255,0.15)",
+                      flexShrink:0 }} />
+                    <div>
+                      <div style={{ color:"white", fontWeight:800, fontSize:17 }}>Pour Liquid</div>
+                      <div style={{ color:"#64748b", fontSize:12, marginTop:2 }}>
+                        Select how much to pour
+                      </div>
+                    </div>
                   </div>
-                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "#94a3b8", marginTop: 4 }}>
-                    <span>1 mL</span>
-                    <span>{maxPour} mL</span>
-                  </div>
+
                 </div>
-                <button
-                  className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 mr-2"
-                  disabled={isAnimatingPour}
-                  onClick={() => {
-                    const amount = currentAmount;
+
+                {/* ── Slider body ── */}
+                <div style={{ padding:"22px 24px" }}>
+
+                  {/* Big volume display */}
+                  <div style={{ textAlign:"center", marginBottom:20 }}>
+                    <div style={{ fontSize:48, fontWeight:900, fontFamily:"monospace", lineHeight:1,
+                      background:"linear-gradient(135deg,#60a5fa,#a78bfa)",
+                      WebkitBackgroundClip:"text", WebkitTextFillColor:"transparent" }}>
+                      {Math.round(currentAmount)}
+                    </div>
+                    <div style={{ color:"#475569", fontSize:14, fontWeight:600, marginTop:2 }}>
+                      mL selected
+                    </div>
+                  </div>
+
+                  {/* Custom slider */}
+                  <div style={{ position:"relative", marginBottom:8 }}>
+                    {/* Track background */}
+                    <div style={{ height:8, borderRadius:4, background:"#1e293b",
+                      position:"relative", overflow:"hidden" }}>
+                      <div style={{ height:"100%", borderRadius:4, width:`${pct}%`,
+                        background:"linear-gradient(90deg,#3b82f6,#7c3aed)",
+                        transition: isAnimatingPour ? "none" : "width 0.1s" }} />
+                    </div>
+                    <input type="range" min={1} max={maxPour} step={0.5}
+                      value={currentAmount}
+                      disabled={isAnimatingPour}
+                      onChange={e => setSelectedPourAmount(Number(e.target.value))}
+                      style={{ position:"absolute", top:0, left:0, width:"100%", height:"100%",
+                        opacity:0, cursor: isAnimatingPour ? "not-allowed" : "pointer",
+                        margin:0, padding:0 }} />
+                    {/* Thumb indicator */}
+                    <div style={{ position:"absolute", top:"50%", transform:"translate(-50%,-50%)",
+                      left:`calc(${pct}% - ${pct * 0.16}px)`,
+                      width:20, height:20, borderRadius:"50%",
+                      background:"linear-gradient(135deg,#3b82f6,#7c3aed)",
+                      border:"3px solid #0f172a",
+                      boxShadow:"0 0 0 2px #3b82f6",
+                      pointerEvents:"none",
+                      transition: isAnimatingPour ? "none" : "left 0.1s" }} />
+                  </div>
+                  <div style={{ display:"flex", justifyContent:"space-between",
+                    fontSize:11, color:"#334155", marginBottom:18 }}>
+                    <span>1 mL</span>
+                    <span>{Math.round(maxPour)} mL (max)</span>
+                  </div>
+
+                  {/* Quick preset buttons */}
+                  <div style={{ display:"flex", gap:8, marginBottom:20 }}>
+                    {[25, 50, 75, 100].map(p => {
+                      const val = Math.max(1, Math.round(maxPour * p / 100));
+                      const active = Math.round(currentAmount) === val;
+                      return (
+                        <button key={p}
+                          disabled={isAnimatingPour}
+                          onClick={() => setSelectedPourAmount(val)}
+                          style={{ flex:1, padding:"8px 0", borderRadius:8, border:"none",
+                            cursor: isAnimatingPour ? "not-allowed" : "pointer",
+                            background: active
+                              ? "linear-gradient(135deg,#1d4ed8,#7c3aed)"
+                              : "#1e293b",
+                            color: active ? "white" : "#64748b",
+                            fontWeight:700, fontSize:12,
+                            boxShadow: active ? "0 2px 10px rgba(59,130,246,0.4)" : "none",
+                            transition:"all 0.15s" }}>
+                          {p}%
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {/* Pour progress bar (visible during animation) */}
+                  {isAnimatingPour && (
+                    <div style={{ marginBottom:16 }}>
+                      <div style={{ display:"flex", justifyContent:"space-between",
+                        fontSize:11, color:"#64748b", marginBottom:4 }}>
+                        <span>Pouring…</span>
+                        <span style={{ color:"#60a5fa" }}>Please wait</span>
+                      </div>
+                      <div style={{ height:4, borderRadius:2, background:"#1e293b", overflow:"hidden" }}>
+                        <div style={{ height:"100%", borderRadius:2,
+                          background:"linear-gradient(90deg,#3b82f6,#7c3aed)",
+                          animation:"pour-progress 1.2s ease-in-out infinite" }} />
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Action buttons */}
+                  <div style={{ display:"flex", gap:10 }}>
+                    <button
+                      disabled={isAnimatingPour}
+                      style={{ flex:1, padding:"13px 0", borderRadius:12, border:"none",
+                        cursor: isAnimatingPour ? "not-allowed" : "pointer",
+                        background: isAnimatingPour
+                          ? "#1e293b"
+                          : "linear-gradient(135deg,#1d4ed8,#7c3aed)",
+                        color: isAnimatingPour ? "#475569" : "white",
+                        fontWeight:800, fontSize:15, letterSpacing:0.5,
+                        boxShadow: isAnimatingPour ? "none" : "0 4px 18px rgba(37,99,235,0.45)",
+                        transition:"all 0.15s" }}
+                      onClick={() => {
+                    const amount    = currentAmount;
+                    // Snapshot source state at pour-start so fractions are stable
+                    const srcStartVol  = source.data?.currentVolume ?? amount;
+                    const srcOrigComp  = { ...(source.data?.composition ?? {}) } as Record<string, number>;
+                    const ingredientKey = BOTTLE_INGREDIENT[source.id];
+
                     setIsAnimatingPour(true);
-                    // Animate pouring with tilt and real-time volume
                     let progress = 0;
-                    const steps = 60;
+                    const steps  = 60;
+                    const addVol = amount / steps;
+
                     const animate = () => {
                       progress += 1 / steps;
                       setApparatus((prev) =>
                         prev.map((a) => {
+                          // ── Source: drain volume only (composition handled at end) ──
                           if (a.id === source.id) {
-                            const newVol = Math.max(
-                              0,
-                              (a.data?.currentVolume || 0) - amount / steps,
-                            );
                             return {
                               ...a,
                               data: {
@@ -3118,45 +3145,44 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
                                 isPouring: true,
                                 pouringTargetId: target.id,
                                 pouringProgress: progress,
-                                currentVolume: newVol,
+                                currentVolume: Math.max(0, (a.data?.currentVolume || 0) - addVol),
                               },
                             };
                           }
-                          if (a.id === target.id) {
-                            const prevVol  = a.data?.currentVolume || 0;
-                            const addVol   = amount / steps;
-                            const newVol   = Math.min(a.data?.maxVolume || 1000, prevVol + addVol);
 
-                            // ── Temperature: blend source heat into target ──
-                            const srcTemp  = source.data?.liquidTemperature ?? 25;
-                            const tgtTemp  = a.data?.liquidTemperature ?? 25;
+                          // ── Target: accumulate composition step by step ──
+                          if (a.id === target.id) {
+                            const prevVol = a.data?.currentVolume || 0;
+                            const newVol  = Math.min(a.data?.maxVolume || 1000, prevVol + addVol);
+
+                            // Temperature: volume-weighted blend using source snapshot temp
+                            const srcTemp = source.data?.liquidTemperature ?? 25;
+                            const tgtTemp = a.data?.liquidTemperature ?? 25;
                             const blendedTemp = prevVol > 0
                               ? (prevVol * tgtTemp + addVol * srcTemp) / newVol
                               : srcTemp;
 
-                            // ── Composition: transfer from bottle key OR proportional from beaker ──
-                            const ingredientKey = BOTTLE_INGREDIENT[source.id];
+                            // Composition: use CONSTANT fraction (addVol / srcStartVol) so
+                            // the 60 steps sum to exactly (amount/srcStartVol) of srcOrigComp.
+                            // This prevents the exploding-denominator bug.
                             const prevComp = (a.data?.composition ?? {}) as Record<string, number>;
                             let newComp: Record<string, number>;
                             if (ingredientKey) {
-                              // Source is a chemical bottle — one specific ingredient
+                              // Bottle → one known ingredient
                               newComp = { ...prevComp, [ingredientKey]: (prevComp[ingredientKey] ?? 0) + addVol };
                             } else {
-                              // Source is a beaker/cylinder — spread its composition proportionally
-                              const srcInPrev = prev.find((s) => s.id === source.id);
-                              const srcComp   = (srcInPrev?.data?.composition ?? {}) as Record<string, number>;
-                              const srcVol    = srcInPrev?.data?.currentVolume ?? amount;
-                              const frac      = srcVol > 0 ? addVol / srcVol : 0;
+                              // Beaker/cylinder → distribute by stable fraction
+                              const frac = srcStartVol > 0 ? addVol / srcStartVol : 0;
                               newComp = { ...prevComp };
-                              for (const [k, v] of Object.entries(srcComp)) {
-                                newComp[k] = (newComp[k] ?? 0) + (v as number) * frac;
+                              for (const [k, v] of Object.entries(srcOrigComp)) {
+                                newComp[k] = (newComp[k] ?? 0) + v * frac;
                               }
                             }
 
-                            // ── pH & viscosity: volume-weighted blend (fallback) ──
-                            const srcPH   = source.data?.pH ?? 7.0;
+                            // pH & viscosity: volume-weighted blend
+                            const srcPH   = source.data?.pH   ?? 7.0;
                             const srcVisc = source.data?.viscosity ?? 1;
-                            const tgtPH   = a.data?.pH ?? srcPH;
+                            const tgtPH   = a.data?.pH   ?? srcPH;
                             const tgtVisc = a.data?.viscosity ?? srcVisc;
                             const blendedPH   = prevVol > 0 ? (prevVol * tgtPH   + addVol * srcPH)   / newVol : srcPH;
                             const blendedVisc = prevVol > 0 ? (prevVol * tgtVisc + addVol * srcVisc) / newVol : srcVisc;
@@ -3165,35 +3191,47 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
                               ...a,
                               data: {
                                 ...a.data,
-                                currentVolume: newVol,
-                                liquidColor: source.data?.liquidColor || "rgba(56, 189, 248, 0.6)",
+                                currentVolume:     newVol,
+                                liquidColor:       source.data?.liquidColor || "rgba(56, 189, 248, 0.6)",
                                 liquidTemperature: blendedTemp,
-                                pH: blendedPH,
-                                viscosity: blendedVisc,
-                                composition: newComp,
+                                pH:                blendedPH,
+                                viscosity:         blendedVisc,
+                                composition:       newComp,
                               },
                             };
                           }
                           return a;
                         }),
                       );
+
                       if (progress < 1) {
                         setTimeout(animate, 18);
                       } else {
+                        // Animation done — finalise source and target
+                        const keepFrac = srcStartVol > 0
+                          ? Math.max(0, 1 - amount / srcStartVol)
+                          : 0;
                         setApparatus((prev) =>
                           prev.map((a) => {
                             if (a.id === source.id) {
+                              // Reduce source composition by the poured fraction
+                              const srcComp = (a.data?.composition ?? {}) as Record<string, number>;
+                              const reducedComp: Record<string, number> = {};
+                              for (const [k, v] of Object.entries(srcComp)) {
+                                const rem = v * keepFrac;
+                                if (rem > 0.001) reducedComp[k] = rem;
+                              }
                               return {
                                 ...a,
                                 data: {
                                   ...a.data,
-                                  isPouring: false,
-                                  pouringTargetId: null,
-                                  pouringProgress: 0,
+                                  isPouring:        false,
+                                  pouringTargetId:  null,
+                                  pouringProgress:  0,
+                                  composition:      reducedComp,
                                 },
                               };
                             }
-                            // Record pour history on the target beaker
                             if (a.id === target.id) {
                               const hist = [...(a.data?.pouringSourceHistory ?? [])];
                               if (!hist.includes(source.id)) hist.push(source.id);
@@ -3203,21 +3241,27 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
                           }),
                         );
                         setIsAnimatingPour(false);
-                        setShowPourModal(null); setSelectedPourAmount(0);
+                        setShowPourModal(null);
+                        setSelectedPourAmount(0);
                       }
                     };
                     animate();
                   }}
-                >
-                  Pour
-                </button>
-                <button
-                  className="px-4 py-2 bg-gray-400 text-white rounded hover:bg-gray-500"
-                  disabled={isAnimatingPour}
-                  onClick={() => setShowPourModal(null)}
-                >
-                  Cancel
-                </button>
+                    >
+                      {isAnimatingPour ? "Pouring…" : `⬇ Pour ${Math.round(currentAmount)} mL`}
+                    </button>
+                    <button
+                      disabled={isAnimatingPour}
+                      style={{ padding:"13px 18px", borderRadius:12, border:"none",
+                        cursor: isAnimatingPour ? "not-allowed" : "pointer",
+                        background:"#1e293b", color:"#64748b",
+                        fontWeight:700, fontSize:14 }}
+                      onClick={() => setShowPourModal(null)}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
               </div>
             </div>
           );
@@ -3335,86 +3379,373 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
         (() => {
           const item = apparatus.find((a) => a.id === showLidModal.id);
           if (!item) return null;
+          const isOpen = !item.data?.hasLid;  // true = currently open (no lid on)
+          const lidColor = item.data?.lidColor || "#3b82f6";
+          const liquidColor = item.data?.liquidColor || "rgba(56,189,248,0.5)";
+
           return (
-            <div
-              style={{
-                position: "fixed",
-                left: 0,
-                top: 0,
-                width: "100vw",
-                height: "100vh",
-                background: "rgba(0,0,0,0.25)",
-                zIndex: 100,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-              }}
-            >
-              <div
-                style={{
-                  background: "white",
-                  borderRadius: 12,
-                  padding: 32,
-                  minWidth: 320,
-                  boxShadow: "0 8px 32px #0002",
-                }}
-              >
-                <h2 className="font-bold text-lg mb-2">{item.name}</h2>
-                <p className="mb-4">
-                  This container is closed. Remove the lid to pour?
-                </p>
-                <button
-                  className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 mr-2"
-                  onClick={() => {
-                    setApparatus((prev) =>
-                      prev.map((a) =>
-                        a.id === item.id
-                          ? { ...a, data: { ...a.data, hasLid: false } }
-                          : a,
-                      ),
-                    );
-                    setShowLidModal(null);
-                  }}
-                >
-                  Remove Lid
-                </button>
-                <button
-                  className="px-4 py-2 bg-gray-400 text-white rounded hover:bg-gray-500"
-                  onClick={() => setShowLidModal(null)}
-                >
-                  Cancel
-                </button>
+            <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.6)",
+              zIndex:200, display:"flex", alignItems:"center", justifyContent:"center" }}>
+              <div style={{ background:"#0f172a", border:`1px solid ${isOpen ? "#334155" : "#1e3a5f"}`,
+                borderRadius:18, width:"min(380px,94vw)",
+                boxShadow:"0 24px 80px rgba(0,0,0,0.8)", overflow:"hidden" }}>
+
+                {/* ── Coloured header strip ── */}
+                <div style={{ padding:"20px 22px 16px",
+                  background: isOpen
+                    ? "linear-gradient(135deg,#1c2535,#0f172a)"
+                    : "linear-gradient(135deg,#0d1b2e,#162032)",
+                  borderBottom:"1px solid #1e293b" }}>
+
+                  {/* Bottle + lid icon row */}
+                  <div style={{ display:"flex", alignItems:"center", gap:14, marginBottom:14 }}>
+                    {/* Mini bottle visual */}
+                    <div style={{ position:"relative", width:36, height:52, flexShrink:0 }}>
+                      <div style={{ position:"absolute", bottom:0, left:4, right:4, height:36,
+                        borderRadius:4, background:liquidColor, border:"1.5px solid rgba(255,255,255,0.18)" }} />
+                      <div style={{ position:"absolute", bottom:34, left:9, right:9, height:12,
+                        borderRadius:"2px 2px 0 0",
+                        background: isOpen ? "rgba(255,255,255,0.05)" : lidColor,
+                        border: isOpen ? "1.5px dashed #475569" : `1.5px solid ${lidColor}` }} />
+                      {/* Lid sitting to the side if open */}
+                      {isOpen && (
+                        <div style={{ position:"absolute", top:0, right:-12, width:18, height:10,
+                          borderRadius:3, background:lidColor, border:`1px solid ${lidColor}`,
+                          opacity:0.8, transform:"rotate(-15deg)" }} />
+                      )}
+                    </div>
+
+                    <div>
+                      <div style={{ color:"white", fontWeight:800, fontSize:16 }}>{item.name}</div>
+                      <div style={{ marginTop:4, display:"inline-flex", alignItems:"center", gap:6,
+                        background: isOpen ? "rgba(71,85,105,0.3)" : "rgba(59,130,246,0.15)",
+                        border: `1px solid ${isOpen ? "#475569" : "#3b82f6"}`,
+                        borderRadius:20, padding:"3px 10px" }}>
+                        <span style={{ fontSize:13 }}>{isOpen ? "🔓" : "🔒"}</span>
+                        <span style={{ color: isOpen ? "#94a3b8" : "#7dd3fc",
+                          fontSize:11, fontWeight:700 }}>
+                          {isOpen ? "Lid removed" : "Lid on — sealed"}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div style={{ color:"#94a3b8", fontSize:13, lineHeight:1.6 }}>
+                    {isOpen
+                      ? "The container is open. Put the lid back to seal it, or leave it open to pour."
+                      : "The container is sealed. Remove the lid before you can pour from it."}
+                  </div>
+                </div>
+
+                {/* ── Action buttons ── */}
+                <div style={{ padding:"16px 22px", display:"flex", flexDirection:"column", gap:10 }}>
+                  {/* Primary action */}
+                  <button
+                    onClick={() => {
+                      setApparatus(prev =>
+                        prev.map(a => a.id === item.id
+                          ? { ...a, data: { ...a.data, hasLid: isOpen } } : a)
+                      );
+                      setShowLidModal(null);
+                    }}
+                    style={{ width:"100%", padding:"12px 0", borderRadius:12, border:"none",
+                      cursor:"pointer", fontWeight:800, fontSize:15, letterSpacing:0.3,
+                      background: isOpen
+                        ? `linear-gradient(135deg,${lidColor},${lidColor}cc)`
+                        : "linear-gradient(135deg,#1d4ed8,#2563eb)",
+                      color:"white",
+                      boxShadow: isOpen
+                        ? `0 4px 16px ${lidColor}55`
+                        : "0 4px 16px rgba(37,99,235,0.45)" }}
+                  >
+                    {isOpen ? "🔒  Replace Lid" : "🔓  Remove Lid"}
+                  </button>
+
+                  {/* Cancel */}
+                  <button
+                    onClick={() => setShowLidModal(null)}
+                    style={{ width:"100%", padding:"10px 0", borderRadius:12, border:"none",
+                      cursor:"pointer", fontWeight:600, fontSize:14,
+                      background:"#1e293b", color:"#64748b" }}
+                  >
+                    Cancel
+                  </button>
+                </div>
               </div>
             </div>
           );
         })()}
 
-      {/* MODAL & SIDEBAR RESTORED */}
-      {selectedApparatus && (
-        <ApparatusDetailModal
-          isOpen={showDetailModal}
-          onClose={() => {
-            setShowDetailModal(false);
-            setSelectedApparatus(null);
-          }}
-          apparatusType={selectedApparatus.type}
-          apparatusName={selectedApparatus.name}
-          currentData={selectedApparatus.data}
-        />
-      )}
+      {/* Right-click context menu for bottles ─────────────────────────────── */}
+      {lidContextMenu &&
+        (() => {
+          const item = apparatus.find((a) => a.id === lidContextMenu.id);
+          if (!item) return null;
+          const isOpen = !item.data?.hasLid;
+          return (
+            <>
+              {/* Invisible backdrop to catch outside clicks */}
+              <div style={{ position:"fixed", inset:0, zIndex:149 }}
+                onClick={() => setLidContextMenu(null)} />
+              <div style={{ position:"fixed", left: lidContextMenu.x, top: lidContextMenu.y,
+                zIndex:150, background:"#0f172a", border:"1px solid #334155",
+                borderRadius:10, boxShadow:"0 8px 30px rgba(0,0,0,0.7)",
+                minWidth:200, overflow:"hidden" }}>
+                {/* Header */}
+                <div style={{ padding:"10px 14px", borderBottom:"1px solid #1e293b",
+                  color:"#64748b", fontSize:11, fontWeight:600, textTransform:"uppercase", letterSpacing:0.8 }}>
+                  {item.name}
+                </div>
+                {/* Close / Open lid option */}
+                <button
+                  style={{ width:"100%", padding:"10px 14px", background:"transparent", border:"none",
+                    cursor:"pointer", textAlign:"left", display:"flex", alignItems:"center", gap:10,
+                    color:"#e2e8f0", fontSize:13, fontWeight:600 }}
+                  onMouseEnter={e => (e.currentTarget.style.background = "#1e293b")}
+                  onMouseLeave={e => (e.currentTarget.style.background = "transparent")}
+                  onClick={() => {
+                    setApparatus((prev) =>
+                      prev.map((a) => a.id === item.id
+                        ? { ...a, data: { ...a.data, hasLid: isOpen } } : a)
+                    );
+                    setLidContextMenu(null);
+                  }}
+                >
+                  <span style={{ fontSize:16 }}>{isOpen ? "🔒" : "🔓"}</span>
+                  {isOpen ? "Close Lid" : "Open Lid"}
+                </button>
+                {/* Cancel */}
+                <button
+                  style={{ width:"100%", padding:"10px 14px", background:"transparent", border:"none",
+                    cursor:"pointer", textAlign:"left", display:"flex", alignItems:"center", gap:10,
+                    color:"#64748b", fontSize:13, borderTop:"1px solid #1e293b" }}
+                  onMouseEnter={e => (e.currentTarget.style.background = "#1e293b")}
+                  onMouseLeave={e => (e.currentTarget.style.background = "transparent")}
+                  onClick={() => setLidContextMenu(null)}
+                >
+                  <span style={{ fontSize:16 }}>✕</span>
+                  Cancel
+                </button>
+              </div>
+            </>
+          );
+        })()}
+
+      {/* ── Move-to context menu (shelf → destination) ───────────────────── */}
+      {moveMenu && (() => {
+        const item = apparatus.find(a => a.id === moveMenu.id);
+        if (!item) return null;
+
+        // Only show move menu for items currently on the shelf
+        const onShelf = Math.abs((item.y + item.height) - shelfY) < 25;
+        if (!onShelf) return null;
+
+        // Fixed apparatus cannot be moved
+        const FIXED = new Set(["hot-plate-1","ice-bucket","weight-balance"]);
+        if (FIXED.has(item.id)) return null;
+
+        // Original positions from initial state
+        const origList = getInitialApparatus(LEFT_GAP, shelfY, TABLE_Y);
+        const orig = origList.find(a => a.id === item.id);
+        const shelfPos = orig ? { x: orig.x, y: orig.y } : { x: item.x, y: shelfY - item.height };
+
+        // Table position: centre the item on the right half of the table
+        const tablePos = { x: item.x, y: TABLE_Y - item.height };
+
+        const hotPlate   = apparatus.find(a => a.type === "hotplate");
+        const iceBucket  = apparatus.find(a => a.type === "icebucket");
+        const balance    = apparatus.find(a => a.type === "weightbalance");
+        const mainBeaker = apparatus.find(a => a.id === "beaker-500-main");
+        const oilBeaker  = apparatus.find(a => a.id === "beaker-250-oil");
+        const aqBeaker   = apparatus.find(a => a.id === "beaker-250-aqueous");
+
+        const snapOnto = (tgt: typeof hotPlate, surfaceFrac = 0) => {
+          if (!tgt) return null;
+          return { x: tgt.x + (tgt.width - item.width) / 2, y: tgt.y + tgt.height * surfaceFrac - item.height };
+        };
+        // dockInto: places probe instruments INSIDE the beaker.
+        // Instrument is horizontally centred; its bottom sits at beaker bottom - 4px.
+        // Avoid collisions: if another instrument is already centred in this beaker,
+        // offset slightly so they don't stack exactly.
+        const dockInto = (tgt: typeof mainBeaker, slotOffset = 0) => {
+          if (!tgt) return null;
+          const beakerInnerBot = tgt.y + tgt.height - 4;
+          const iy = beakerInnerBot - item.height;
+          // Horizontal: centre ± slot offset to avoid exact overlap
+          const ix = tgt.x + (tgt.width - item.width) / 2 + slotOffset;
+          return { x: ix, y: iy };
+        };
+
+        // Compute slot offsets so multiple probes don't land on same pixel
+        const usedSlots = (tgt: typeof mainBeaker) => {
+          if (!tgt) return 0;
+          return apparatus.filter(a =>
+            a.id !== item.id &&
+            ["thermometer","phmeter","viscositygauge","stirringrod"].includes(a.type) &&
+            Math.abs(a.x + a.width/2 - (tgt.x + tgt.width/2)) < tgt.width
+          ).length;
+        };
+        const slotW = 8; // horizontal gap between co-docked instruments
+
+        type Dest = { label: string; icon: string; pos: { x:number; y:number } | null };
+
+        const DESTS: Record<string, Dest[]> = {
+          beaker: [
+            { label:"Table",          icon:"🪑", pos: tablePos },
+            { label:"Hot Plate",      icon:"🔥", pos: snapOnto(hotPlate) },
+            { label:"Ice Bucket",     icon:"🧊", pos: snapOnto(iceBucket, 0.08) },
+            { label:"Weight Balance", icon:"⚖️", pos: snapOnto(balance, 0.60) },
+          ],
+          cylinder: [
+            { label:"Table", icon:"🪑", pos: tablePos },
+          ],
+          thermometer: [
+            { label:"Oil Beaker",   icon:"🧪", pos: dockInto(oilBeaker,  usedSlots(oilBeaker)  * slotW) },
+            { label:"Aqueous Beaker", icon:"🧪", pos: dockInto(aqBeaker, usedSlots(aqBeaker)   * slotW) },
+            { label:"Mixing Beaker",  icon:"🧪", pos: dockInto(mainBeaker, usedSlots(mainBeaker) * slotW) },
+          ],
+          stirringrod: [
+            { label:"Oil Beaker",    icon:"🧪", pos: dockInto(oilBeaker,  usedSlots(oilBeaker)  * slotW) },
+            { label:"Aqueous Beaker",icon:"🧪", pos: dockInto(aqBeaker,   usedSlots(aqBeaker)   * slotW) },
+            { label:"Mixing Beaker", icon:"🧪", pos: dockInto(mainBeaker, usedSlots(mainBeaker) * slotW) },
+          ],
+          phmeter:       [{ label:"Mixing Beaker", icon:"🧪", pos: dockInto(mainBeaker, usedSlots(mainBeaker) * slotW) }],
+          viscositygauge:[{ label:"Mixing Beaker", icon:"🧪", pos: dockInto(mainBeaker, usedSlots(mainBeaker) * slotW) }],
+          spatula:       [{ label:"Stearic Acid",  icon:"🧂", pos: (() => { const b = apparatus.find(a => a.id==="container-stearic-acid"); return b ? { x: b.x + (b.width-item.width)/2, y: b.y } : null; })() }],
+        };
+
+        const dests: Dest[] = (DESTS[item.type] ?? []).filter(d => d.pos !== null);
+
+        return (
+          <>
+            <div style={{ position:"fixed", inset:0, zIndex:149 }}
+              onClick={() => setMoveMenu(null)} />
+            <div style={{ position:"fixed", left: moveMenu.x, top: moveMenu.y,
+              zIndex:150, background:"#0f172a", border:"1px solid #334155",
+              borderRadius:12, boxShadow:"0 8px 32px rgba(0,0,0,0.7)",
+              minWidth:220, overflow:"hidden" }}>
+
+              <div style={{ padding:"10px 14px", borderBottom:"1px solid #1e293b", background:"#080f1e" }}>
+                <div style={{ color:"#94a3b8", fontSize:10, fontWeight:700,
+                  textTransform:"uppercase", letterSpacing:0.8 }}>Move to…</div>
+                <div style={{ color:"white", fontWeight:700, fontSize:13, marginTop:2 }}>{item.name}</div>
+              </div>
+
+              {dests.map(d => (
+                <button key={d.label}
+                  style={{ width:"100%", padding:"11px 14px", background:"transparent",
+                    border:"none", cursor:"pointer", textAlign:"left",
+                    display:"flex", alignItems:"center", gap:10,
+                    color:"#e2e8f0", fontSize:13, fontWeight:600,
+                    borderBottom:"1px solid rgba(255,255,255,0.04)" }}
+                  onMouseEnter={e => (e.currentTarget.style.background="#1e293b")}
+                  onMouseLeave={e => (e.currentTarget.style.background="transparent")}
+                  onClick={() => {
+                    if (!d.pos) return;
+                    setApparatus(prev => prev.map(a =>
+                      a.id === item.id ? { ...a, x: d.pos!.x, y: d.pos!.y } : a
+                    ));
+                    setMoveMenu(null);
+                  }}>
+                  <span style={{ fontSize:18 }}>{d.icon}</span>
+                  <span>{d.label}</span>
+                </button>
+              ))}
+
+              <button style={{ width:"100%", padding:"10px 14px", background:"transparent",
+                border:"none", cursor:"pointer", textAlign:"left",
+                display:"flex", alignItems:"center", gap:10,
+                color:"#64748b", fontSize:13, borderTop:"1px solid #1e293b" }}
+                onMouseEnter={e => (e.currentTarget.style.background="#1e293b")}
+                onMouseLeave={e => (e.currentTarget.style.background="transparent")}
+                onClick={() => setMoveMenu(null)}>
+                <span style={{ fontSize:18 }}>✕</span><span>Cancel</span>
+              </button>
+            </div>
+          </>
+        );
+      })()}
+
+      {/* ── Move-to context menu (table/hotplate/icebucket → shelf) ──────── */}
+      {moveMenu && (() => {
+        const item = apparatus.find(a => a.id === moveMenu.id);
+        if (!item) return null;
+        const onShelf = Math.abs((item.y + item.height) - shelfY) < 25;
+        if (onShelf) return null; // handled by the shelf menu above
+        const FIXED = new Set(["hot-plate-1","ice-bucket","weight-balance"]);
+        if (FIXED.has(item.id)) return null;
+        // Only movable types
+        const MOVABLE = new Set(["beaker","cylinder","thermometer","stirringrod","phmeter","viscositygauge","spatula"]);
+        if (!MOVABLE.has(item.type)) return null;
+
+        const origList = getInitialApparatus(LEFT_GAP, shelfY, TABLE_Y);
+        const orig = origList.find(a => a.id === item.id);
+        const shelfPos = orig ? { x: orig.x, y: orig.y } : { x: item.x, y: shelfY - item.height };
+
+        return (
+          <>
+            <div style={{ position:"fixed", inset:0, zIndex:149 }}
+              onClick={() => setMoveMenu(null)} />
+            <div style={{ position:"fixed", left: moveMenu.x, top: moveMenu.y,
+              zIndex:150, background:"#0f172a", border:"1px solid #334155",
+              borderRadius:12, boxShadow:"0 8px 32px rgba(0,0,0,0.7)",
+              minWidth:220, overflow:"hidden" }}>
+
+              <div style={{ padding:"10px 14px", borderBottom:"1px solid #1e293b", background:"#080f1e" }}>
+                <div style={{ color:"#94a3b8", fontSize:10, fontWeight:700,
+                  textTransform:"uppercase", letterSpacing:0.8 }}>Return…</div>
+                <div style={{ color:"white", fontWeight:700, fontSize:13, marginTop:2 }}>{item.name}</div>
+              </div>
+
+              <button
+                style={{ width:"100%", padding:"11px 14px", background:"transparent",
+                  border:"none", cursor:"pointer", textAlign:"left",
+                  display:"flex", alignItems:"center", gap:10,
+                  color:"#e2e8f0", fontSize:13, fontWeight:600 }}
+                onMouseEnter={e => (e.currentTarget.style.background="#1e293b")}
+                onMouseLeave={e => (e.currentTarget.style.background="transparent")}
+                onClick={() => {
+                  setApparatus(prev => prev.map(a =>
+                    a.id === item.id ? { ...a, x: shelfPos.x, y: shelfPos.y } : a
+                  ));
+                  setMoveMenu(null);
+                }}>
+                <span style={{ fontSize:18 }}>📦</span>
+                <span>Return to Shelf</span>
+              </button>
+
+              <button style={{ width:"100%", padding:"10px 14px", background:"transparent",
+                border:"none", cursor:"pointer", textAlign:"left",
+                display:"flex", alignItems:"center", gap:10,
+                color:"#64748b", fontSize:13, borderTop:"1px solid #1e293b" }}
+                onMouseEnter={e => (e.currentTarget.style.background="#1e293b")}
+                onMouseLeave={e => (e.currentTarget.style.background="transparent")}
+                onClick={() => setMoveMenu(null)}>
+                <span style={{ fontSize:18 }}>✕</span><span>Cancel</span>
+              </button>
+            </div>
+          </>
+        );
+      })()}
 
       <ProtocolSidebar
-        currentStep={currentStep}
         isOpen={showProtocolSidebar}
         onClose={() => setShowProtocolSidebar(false)}
+        apparatus={apparatus}
       />
 
-      {/* Protocol Toggle Button */}
+      {/* Lab Workbook Toggle Button */}
       <button
         onClick={() => setShowProtocolSidebar(!showProtocolSidebar)}
-        className="protocol-toggle-btn"
+        style={{
+          position: "absolute", top: 14, right: 24, zIndex: 50,
+          background: showProtocolSidebar ? "#1e293b" : "linear-gradient(135deg,#1d4ed8,#7c3aed)",
+          color: "white", border: "none", borderRadius: 10,
+          padding: "9px 18px", fontWeight: 700, fontSize: 13,
+          cursor: "pointer", boxShadow: "0 2px 12px rgba(0,0,0,0.4)", letterSpacing: 0.3,
+        }}
       >
-        {showProtocolSidebar ? "Hide Protocol" : "Show Protocol"}
+        📋 {showProtocolSidebar ? "Close Workbook" : "Lab Workbook"}
       </button>
 
       {/* Spatula Scoop Modal */}
@@ -3470,34 +3801,217 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
         );
       })()}
 
-      {/* Evaluate Formulation Button */}
+      {/* Evaluate Formulation Button — top bar, left of Lab Workbook button */}
       <button
         onClick={() => setShowEvaluationPanel(true)}
         style={{
           position: "absolute",
-          bottom: 24,
-          right: 24,
+          top: 14,
+          right: 210,
           background: "linear-gradient(135deg, #1d4ed8, #7c3aed)",
           color: "white",
           border: "none",
-          borderRadius: 12,
-          padding: "12px 22px",
+          borderRadius: 10,
+          padding: "9px 18px",
           fontWeight: 700,
-          fontSize: 14,
+          fontSize: 13,
           cursor: "pointer",
-          boxShadow: "0 4px 20px rgba(109,40,217,0.45)",
-          letterSpacing: 0.5,
+          boxShadow: "0 2px 12px rgba(109,40,217,0.45)",
+          letterSpacing: 0.3,
           zIndex: 50,
         }}
       >
-        ⚗ Evaluate Formulation
+        ⚗ Evaluate
       </button>
 
       <EvaluationPanel
         isOpen={showEvaluationPanel}
         onClose={() => setShowEvaluationPanel(false)}
         apparatus={apparatus}
+        practicalId={practicalId}
       />
+
+      {/* ── Large floating thermometer display ─────────────────────────────
+           Appears beside the thermometer only when its probe is in a beaker. */}
+      {(() => {
+        const thermo = apparatus.find(a => a.type === "thermometer");
+        if (!thermo) return null;
+        const canvasRect = canvasRef.current?.getBoundingClientRect();
+        if (!canvasRect) return null;
+        const probeBottom = thermo.y + thermo.height;
+        const probeCX     = thermo.x + thermo.width / 2;
+        const isMeasuring = apparatus.some(
+          a => (a.type === "beaker" || a.type === "cylinder") &&
+               probeCX    >= a.x && probeCX    <= a.x + a.width &&
+               probeBottom >= a.y && probeBottom <= a.y + a.height,
+        );
+        if (!isMeasuring) return null;
+
+        const temp = thermo.data?.readingTemperature ?? 25;
+        const tempStr = temp < 100 ? temp.toFixed(1) : `${Math.round(temp)}`;
+        const fluidColor =
+          temp > 120 ? "#ef4444"
+          : temp > 75 ? "#f97316"
+          : temp > 40 ? "#fbbf24"
+          : "#60a5fa";
+
+        // Position display to the right of the thermometer
+        const dispX = canvasRect.left + thermo.x + thermo.width + 8;
+        const dispY = canvasRect.top  + thermo.y;
+
+        return (
+          <div style={{
+            position: "fixed",
+            left: dispX,
+            top: dispY,
+            zIndex: 55,
+            background: "#020b12",
+            border: `2px solid ${fluidColor}`,
+            borderRadius: 12,
+            padding: "8px 14px",
+            minWidth: 90,
+            boxShadow: `0 4px 20px rgba(0,0,0,0.7), 0 0 12px ${fluidColor}44`,
+            pointerEvents: "none",
+          }}>
+            {/* °C unit */}
+            <div style={{ color: `${fluidColor}99`, fontSize: 10, fontWeight: 700,
+              textAlign: "right", letterSpacing: 0.5, marginBottom: 2 }}>°C</div>
+            {/* Main reading */}
+            <div style={{
+              color: fluidColor,
+              fontSize: 32,
+              fontWeight: 900,
+              fontFamily: "monospace",
+              lineHeight: 1,
+              textAlign: "center",
+              textShadow: `0 0 12px ${fluidColor}88`,
+            }}>
+              {tempStr}
+            </div>
+            {/* Status bar */}
+            <div style={{ marginTop: 6, height: 4, borderRadius: 2,
+              background: "#1e293b", overflow: "hidden" }}>
+              <div style={{ height: "100%", borderRadius: 2,
+                width: `${Math.min(temp / 100 * 100, 100)}%`,
+                background: `linear-gradient(90deg, #3b82f6, ${fluidColor})`,
+                transition: "width 0.3s" }} />
+            </div>
+            <div style={{ color: "#334155", fontSize: 9, textAlign: "center",
+              marginTop: 4, fontWeight: 600, letterSpacing: 0.5 }}>MEASURING</div>
+          </div>
+        );
+      })()}
+
+      {/* ── Large floating pH meter display ── */}
+      {(() => {
+        const meter = apparatus.find(a => a.type === "phmeter");
+        if (!meter) return null;
+        const canvasRect = canvasRef.current?.getBoundingClientRect();
+        if (!canvasRect) return null;
+        const probeBottom = meter.y + meter.height;
+        const probeCX     = meter.x + meter.width / 2;
+        const isMeasuring = apparatus.some(
+          a => (a.type === "beaker" || a.type === "cylinder") &&
+               probeCX >= a.x && probeCX <= a.x + a.width &&
+               probeBottom >= a.y && probeBottom <= a.y + a.height,
+        );
+        if (!isMeasuring) return null;
+
+        const ph = meter.data?.phReading ?? 7.0;
+        const phColor =
+          ph < 4  ? "#ef4444"
+          : ph < 6  ? "#f97316"
+          : ph < 7  ? "#eab308"
+          : ph < 8  ? "#22c55e"
+          : ph < 10 ? "#3b82f6"
+          : "#8b5cf6";
+
+        const dispX = canvasRect.left + meter.x + meter.width + 8;
+        const dispY = canvasRect.top  + meter.y;
+
+        return (
+          <div style={{
+            position:"fixed", left:dispX, top:dispY, zIndex:55,
+            background:"#020b12", border:`2px solid ${phColor}`,
+            borderRadius:12, padding:"8px 14px", minWidth:90,
+            boxShadow:`0 4px 20px rgba(0,0,0,0.7), 0 0 12px ${phColor}44`,
+            pointerEvents:"none",
+          }}>
+            <div style={{ color:`${phColor}99`, fontSize:10, fontWeight:700,
+              textAlign:"right", letterSpacing:0.5, marginBottom:2 }}>pH</div>
+            <div style={{ color:phColor, fontSize:32, fontWeight:900,
+              fontFamily:"monospace", lineHeight:1, textAlign:"center",
+              textShadow:`0 0 12px ${phColor}88` }}>
+              {ph.toFixed(2)}
+            </div>
+            {/* pH scale strip */}
+            <div style={{ marginTop:6, height:5, borderRadius:3, overflow:"hidden",
+              background:"linear-gradient(90deg,#ef4444,#f97316,#eab308,#22c55e,#3b82f6,#8b5cf6)" }}>
+              <div style={{ position:"relative", height:"100%" }}>
+                <div style={{ position:"absolute", top:0, bottom:0, width:3, borderRadius:2,
+                  background:"white", left:`${(ph / 14) * 100}%`,
+                  transform:"translateX(-50%)" }} />
+              </div>
+            </div>
+            <div style={{ color:"#334155", fontSize:9, textAlign:"center",
+              marginTop:4, fontWeight:600, letterSpacing:0.5 }}>MEASURING</div>
+          </div>
+        );
+      })()}
+
+      {/* ── Close-lid hover badge ───────────────────────────────────────────
+           Shows a small floating 🔒 button above any open bottle the user
+           is hovering over, so they always know how to close the lid.      */}
+      {(() => {
+        if (!hoveredId || dragging) return null;
+        const hovered = apparatus.find(
+          (a) => a.id === hoveredId &&
+                 (a.type === "bottle" || a.type === "container") &&
+                 !a.data?.hasLid &&
+                 a.data?.lidColor,   // only bottles that originally had a lid
+        );
+        if (!hovered) return null;
+        const canvasRect = canvasRef.current?.getBoundingClientRect();
+        if (!canvasRect) return null;
+        // Position badge centred above the bottle
+        const badgeX = canvasRect.left + hovered.x + hovered.width / 2;
+        const badgeY = canvasRect.top  + hovered.y - 10;
+        return (
+          <button
+            onMouseDown={e => e.stopPropagation()}
+            onClick={e => {
+              e.stopPropagation();
+              setApparatus(prev =>
+                prev.map(a => a.id === hovered.id
+                  ? { ...a, data: { ...a.data, hasLid: true } } : a)
+              );
+            }}
+            style={{
+              position: "fixed",
+              left: badgeX,
+              top:  badgeY,
+              transform: "translate(-50%, -100%)",
+              zIndex: 60,
+              background: "linear-gradient(135deg,#1e3a5f,#0d1b2e)",
+              border: "1.5px solid #3b82f6",
+              borderRadius: 20,
+              padding: "4px 10px",
+              color: "#7dd3fc",
+              fontSize: 11,
+              fontWeight: 700,
+              cursor: "pointer",
+              display: "flex",
+              alignItems: "center",
+              gap: 5,
+              boxShadow: "0 2px 10px rgba(59,130,246,0.4)",
+              pointerEvents: "auto",
+              whiteSpace: "nowrap",
+            }}
+          >
+            🔒 Close Lid
+          </button>
+        );
+      })()}
     </div>
   );
 };

@@ -1,179 +1,81 @@
-import React, { useState, useEffect } from "react";
-import { SimulationStep, SimulationState } from "./simulation/model/types";
-import { ErrorPopup, StepCompletePopup, HelpPopup } from "./components/Popups";
+import React, { useState } from "react";
+import { SimulationStep } from "./simulation/model/types";
 import InteractiveLabCanvas from "./components/InteractiveLabCanvas";
-import { MainSim } from "./MainSim";
+import LabSelection from "./components/LabSelection";
+import PreLabNotebook from "./components/PreLabNotebook";
 import "./App.css";
-import ProtocolSidebar from "./components/ProtocolSidebar";
+
+type AppState = "selection" | "pre-lab" | "lab";
 
 function App() {
-  const [simulation, setSimulation] = useState<MainSim | null>(null);
-  const [simulationState, setSimulationState] =
-    useState<SimulationState | null>(null);
-  const [showError, setShowError] = useState(false);
-  const [showComplete, setShowComplete] = useState(false);
-    const [showProtocolSidebar, setShowProtocolSidebar] = useState(false);
-  const [showHelp, setShowHelp] = useState(false);
-  const [currentError, setCurrentError] = useState<string>("");
-  const [currentStep, setCurrentStep] = useState<SimulationStep>(
-    SimulationStep.SELECTION,
-  );
+  const [appState,          setAppState]          = useState<AppState>("selection");
+  const [selectedPractical, setSelectedPractical] = useState<string>("vanishing-cream");
+  const currentStep = SimulationStep.SELECTION;
 
-  useEffect(() => {
-    // Initialize simulation
-    const initSimulation = async () => {
-      try {
-        const sim = new MainSim();
-        await sim.initialize();
+  const practicalLabel = selectedPractical === "cold-cream"
+    ? "Cold Cream — W/O Emulsion"
+    : "Vanishing Cream — O/W Emulsion";
 
-        // Set up event listeners
-        sim.onStateChange((state) => {
-          setSimulationState(state);
-          setCurrentStep(state.currentStep);
-        });
+  if (appState === "selection") {
+    return (
+      <LabSelection
+        onSelect={(id) => { setSelectedPractical(id); setAppState("pre-lab"); }}
+      />
+    );
+  }
 
-        sim.onError((error) => {
-          setCurrentError(error.message);
-          setShowError(true);
-        });
-
-        sim.onStepComplete((step, score, feedback) => {
-          console.log(
-            "Step completed:",
-            step,
-            "Score:",
-            score,
-            "Feedback:",
-            feedback,
-          );
-          setCurrentStep(step);
-          setShowComplete(true);
-        });
-
-        setSimulation(sim);
-        setSimulationState(sim.getState());
-      } catch (error) {
-        console.error("Failed to initialize simulation:", error);
-        setCurrentError(
-          "Failed to initialize simulation. Please refresh the page.",
-        );
-        setShowError(true);
-      }
-    };
-
-    initSimulation();
-  }, []);
-
-  const handleStartSimulation = async () => {
-    if (!simulation) return;
-
-    try {
-      await simulation.start();
-      setSimulationState(simulation.getState());
-    } catch (error) {
-      console.error("Failed to start simulation:", error);
-      setCurrentError("Failed to start simulation.");
-      setShowError(true);
-    }
-  };
-
-  const handleResetSimulation = async () => {
-    if (!simulation) return;
-
-    try {
-      await simulation.reset();
-      setSimulationState(simulation.getState());
-    } catch (error) {
-      console.error("Failed to reset simulation:", error);
-      setCurrentError("Failed to reset simulation.");
-      setShowError(true);
-    }
-  };
+  if (appState === "pre-lab") {
+    return (
+      <PreLabNotebook
+        practicalId={selectedPractical}
+        onStart={() => setAppState("lab")}
+        onBack={() => setAppState("selection")}
+      />
+    );
+  }
 
   return (
-    <div className="min-h-screen bg-blue-500 w-full overflow-hidden">
-      {/* Header */}
-      <header className="bg-white shadow-sm border-b border-gray-200 w-full">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between items-center h-16">
-            <div className="flex items-center">
-              <h1 className="text-xl font-bold text-gray-900">
-                Virtual Vanishing Cream Simulation
-              </h1>
-            </div>
-            <div className="flex items-center space-x-4">
-              <button
-                onClick={() => setShowHelp(true)}
-                className="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-md transition-colors"
-                title="Help"
-              >
-                <svg
-                  className="w-5 h-5"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-                  />
-                </svg>
-              </button>
-              {/*!simulationState?.isStarted ? (
-                <button
-                  onClick={handleStartSimulation}
-                  className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
-                >
-                  Start Simulation
-                </button>
-              ) : (
-                <button
-                  onClick={handleResetSimulation}
-                  className="px-4 py-2 bg-gray-600 text-white rounded-md hover:bg-gray-700 transition-colors"
-                >
-                  Reset
-                </button>
-              )*/}
-            </div>
+    <div style={{ minHeight:"100vh", background:"#060d18",
+      display:"flex", flexDirection:"column", fontFamily:"system-ui,sans-serif" }}>
+
+      <header style={{ background:"rgba(8,15,30,0.98)", borderBottom:"1px solid #1e293b",
+        display:"flex", alignItems:"center", justifyContent:"space-between",
+        height:56, padding:"0 20px", position:"relative", zIndex:10 }}>
+        <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+          <button onClick={() => setAppState("pre-lab")}
+            style={{ background:"#1e293b", border:"1px solid #334155", borderRadius:8,
+              color:"#94a3b8", padding:"6px 12px", cursor:"pointer",
+              fontSize:12, fontWeight:600 }}>
+            ← Notebook
+          </button>
+          <div style={{ width:1, height:24, background:"#1e293b" }} />
+          <div style={{ width:28, height:28, borderRadius:8,
+            background: selectedPractical === "cold-cream"
+              ? "linear-gradient(135deg,#6d28d9,#4c1d95)"
+              : "linear-gradient(135deg,#1d4ed8,#7c3aed)",
+            display:"flex", alignItems:"center", justifyContent:"center", fontSize:14 }}>
+            🧪
+          </div>
+          <div>
+            <div style={{ color:"white", fontWeight:800, fontSize:14 }}>{practicalLabel}</div>
+            <div style={{ color:"#475569", fontSize:10 }}>Cream Formulation Virtual Laboratory</div>
+          </div>
+        </div>
+        <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+          <div style={{ background:"#052e16", border:"1px solid #16a34a",
+            borderRadius:20, padding:"3px 12px", color:"#4ade80", fontSize:11, fontWeight:700 }}>
+            ● Live Session
           </div>
         </div>
       </header>
 
-      {/* Main Content - Full Width Simulation Area */}
-      <div className="h-[calc(100vh-4rem)] overflow-hidden">
-        {/* Interactive Lab Canvas - Full Width */}
-        <div className=" h-full relative overflow-auto">
-          <InteractiveLabCanvas
-            currentStep={currentStep}
-            onApparatusClick={(apparatus) => {
-              console.log("Apparatus clicked:", apparatus);
-            }}
-          />
-        </div>
+      <div style={{ height:"calc(100vh - 56px)", overflow:"hidden" }}>
+        <InteractiveLabCanvas
+          currentStep={currentStep}
+          onApparatusClick={() => {}}
+          practicalId={selectedPractical}
+        />
       </div>
-
-      {/* Popups */}
-      <ErrorPopup
-        isOpen={showError}
-        message={currentError}
-        onClose={() => setShowError(false)}
-      />
-
-      <StepCompletePopup
-        isOpen={showComplete}
-        step={currentStep}
-        score={simulationState?.score || 0}
-        feedback={simulationState?.feedback || []}
-        onClose={() => setShowComplete(false)}
-      />
-
-      <HelpPopup
-        isOpen={showHelp}
-        step={currentStep}
-        onClose={() => setShowHelp(false)}
-      />
     </div>
   );
 }
