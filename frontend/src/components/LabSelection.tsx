@@ -111,7 +111,7 @@ const LabSelection: React.FC<Props> = ({ onSelect }) => {
 
       {/* ── Header ── */}
       <header style={{ background:"rgba(8,15,30,0.98)", borderBottom:"1px solid #1e293b",
-        padding:"0 40px", display:"flex", alignItems:"center",
+        padding:"0 clamp(16px,3vw,40px)", display:"flex", alignItems:"center",
         justifyContent:"space-between", height:64, position:"sticky", top:0, zIndex:50 }}>
         <div style={{ display:"flex", alignItems:"center", gap:12 }}>
           <div style={{ width:38, height:38, borderRadius:10,
@@ -120,7 +120,7 @@ const LabSelection: React.FC<Props> = ({ onSelect }) => {
             🧪
           </div>
           <div>
-            <div style={{ color:"white", fontWeight:900, fontSize:17, letterSpacing:0.2 }}>
+            <div style={{ color:"white", fontWeight:900, fontSize:"clamp(14px,1.5vw,17px)", letterSpacing:0.2 }}>
               Cream Formulation Virtual Laboratory
             </div>
             <div style={{ color:"#475569", fontSize:11 }}>Pharmaceutical Chemistry · Emulsion Practicals</div>
@@ -133,7 +133,7 @@ const LabSelection: React.FC<Props> = ({ onSelect }) => {
 
       {/* ── Hero ── */}
       <div style={{ background:"linear-gradient(180deg,#0d1b2e 0%,#060d18 60%)",
-        padding:"56px 40px 44px", textAlign:"center", borderBottom:"1px solid #1e293b",
+        padding:"clamp(32px,5vw,56px) clamp(16px,3vw,40px) clamp(28px,4vw,44px)", textAlign:"center", borderBottom:"1px solid #1e293b",
         position:"relative", overflow:"hidden" }}>
         {/* Decorative circles */}
         <div style={{ position:"absolute", top:-60, left:"10%", width:300, height:300,
@@ -148,7 +148,7 @@ const LabSelection: React.FC<Props> = ({ onSelect }) => {
           Pharmaceutical Cream &amp; Emulsion Formulation
         </div>
 
-        <h1 style={{ color:"white", fontSize:40, fontWeight:900, margin:"0 0 16px",
+        <h1 style={{ color:"white", fontSize:"clamp(24px,3.5vw,40px)", fontWeight:900, margin:"0 0 16px",
           lineHeight:1.15, letterSpacing:-0.5 }}>
           Select Your{" "}
           <span style={{ background:"linear-gradient(135deg,#60a5fa,#a78bfa)",
@@ -156,7 +156,7 @@ const LabSelection: React.FC<Props> = ({ onSelect }) => {
             Cream Practical
           </span>
         </h1>
-        <p style={{ color:"#64748b", fontSize:15, maxWidth:560, margin:"0 auto",
+        <p style={{ color:"#64748b", fontSize:"clamp(13px,1.2vw,15px)", maxWidth:"min(560px,90vw)", margin:"0 auto",
           lineHeight:1.75 }}>
           Simulate real pharmaceutical cream preparation in a fully interactive virtual lab.
           Follow the protocol, control temperatures, mix phases correctly, and evaluate
@@ -165,9 +165,8 @@ const LabSelection: React.FC<Props> = ({ onSelect }) => {
       </div>
 
       {/* ── Cards ── */}
-      <div style={{ flex:1, padding:"44px 40px 56px", maxWidth:1100,
-        margin:"0 auto", width:"100%",
-        display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(440px,1fr))", gap:28, alignContent:"start" }}>
+      <div className="lab-select-grid" style={{ flex:1, padding:"clamp(24px,3vw,44px) clamp(16px,3vw,40px) clamp(32px,4vw,56px)",
+        maxWidth:1200, margin:"0 auto", width:"100%", alignContent:"start" }}>
 
         {PRACTICALS.map(p => {
           const diff  = DIFF_COLOR[p.difficulty];
@@ -191,7 +190,7 @@ const LabSelection: React.FC<Props> = ({ onSelect }) => {
               }}>
 
               {/* ── Top strip ── */}
-              <div style={{ padding:"24px 26px 18px",
+              <div style={{ padding:"clamp(16px,2vw,24px) clamp(16px,2vw,26px) 18px",
                 borderBottom:`1px solid ${p.accentColor}20`,
                 display:"flex", gap:18, alignItems:"flex-start" }}>
 
@@ -205,7 +204,7 @@ const LabSelection: React.FC<Props> = ({ onSelect }) => {
 
                 <div style={{ flex:1 }}>
                   <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:7 }}>
-                    <span style={{ color:"white", fontWeight:900, fontSize:20 }}>{p.title}</span>
+                    <span style={{ color:"white", fontWeight:900, fontSize:"clamp(16px,1.6vw,20px)" }}>{p.title}</span>
                     {!p.available && (
                       <span style={{ background:"#1e293b", border:"1px solid #334155",
                         color:"#64748b", fontSize:9, fontWeight:700, borderRadius:10,
@@ -303,7 +302,7 @@ const LabSelection: React.FC<Props> = ({ onSelect }) => {
       </div>
 
       {/* ── Footer ── */}
-      <footer style={{ borderTop:"1px solid #1e293b", padding:"18px 40px",
+      <footer style={{ borderTop:"1px solid #1e293b", padding:"14px clamp(16px,3vw,40px)",
         display:"flex", justifyContent:"center" }}>
         <span style={{ color:"#1e293b", fontSize:12 }}>
           Cream Formulation Virtual Laboratory — Pharmaceutical Chemistry

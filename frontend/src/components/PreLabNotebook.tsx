@@ -234,6 +234,32 @@ const PreLabNotebook: React.FC<Props> = ({ practicalId, onStart, onBack }) => {
       </>
     );
 
+    if (isColdCream && activeSection.id === "predictions") return (
+      <>
+        <p style={{ color:"#374151", fontSize:14, lineHeight:1.75, marginBottom:20 }}>
+          Based on your knowledge of W/O emulsions and the cold cream formula, answer these
+          questions <strong>before</strong> you begin the practical. Your predictions will be
+          compared against your actual results.
+        </p>
+        <InfoBox title="Why predict before you experiment?">
+          <p style={{ color:"#1e40af", fontSize:13, margin:0, lineHeight:1.65 }}>
+            Cold cream behaves very differently from vanishing cream. Predicting first
+            helps you notice what changes when the oil phase is continuous instead of the
+            water phase. There are no wrong answers — focus on your reasoning.
+          </p>
+        </InfoBox>
+        <PredField
+          q="1. Cold cream is a W/O emulsion while vanishing cream is O/W. How do you predict their textures will differ when applied to skin?"
+          value={pred1} onChange={setPred1} />
+        <PredField
+          q="2. Beeswax melts at about 62°C. What do you think will happen if the oil phase is not heated high enough to fully melt the beeswax before mixing?"
+          value={pred2} onChange={setPred2} />
+        <PredField
+          q="3. Cold cream requires much more liquid paraffin (35 mL) than vanishing cream (7 mL). Why do you think the oil content is so much higher in a W/O emulsion?"
+          value={pred3} onChange={setPred3} />
+      </>
+    );
+
     switch (activeSection.id) {
 
       /* 1. CONTEXT ──────────────────────────────────────────────────────── */
@@ -523,26 +549,30 @@ const PreLabNotebook: React.FC<Props> = ({ practicalId, onStart, onBack }) => {
       </div>
 
       {/* ── Main layout — mirrors LabXchange ── */}
-      <div style={{ flex:1, display:"flex", position:"relative" }}>
+      <div className="nb-layout">
 
         {/* Left: dimmed lab preview */}
-        <div style={{ flex:1, position:"relative", overflow:"hidden", minHeight:"calc(100vh - 52px)" }}>
+        <div className="nb-preview">
           {/* Lab background illustration */}
           <div style={{ position:"absolute", inset:0,
-            background:"linear-gradient(180deg,#0d1b2e 0%,#060d18 100%)" }}>
+            background: isColdCream
+              ? "linear-gradient(180deg,#1a0d2e 0%,#060d18 100%)"
+              : "linear-gradient(180deg,#0d1b2e 0%,#060d18 100%)" }}>
             {/* Shelf line */}
             <div style={{ position:"absolute", top:"28%", left:0, right:0,
-              height:3, background:"rgba(59,130,246,0.2)" }} />
+              height:3, background: isColdCream ? "rgba(139,92,246,0.25)" : "rgba(59,130,246,0.2)" }} />
             <div style={{ position:"absolute", top:"70%", left:0, right:0,
-              height:3, background:"rgba(59,130,246,0.15)" }} />
-            {/* Schematic beakers */}
+              height:3, background: isColdCream ? "rgba(139,92,246,0.18)" : "rgba(59,130,246,0.15)" }} />
+            {/* Schematic beakers — golden tint for W/O cold cream */}
             {[60,160,260,360,460,560].map((lx,i) => (
               <div key={i} style={{ position:"absolute", top:"18%", left:lx,
-                width:40, height:60, border:"1.5px solid rgba(59,130,246,0.25)",
+                width:40, height:60,
+                border:`1.5px solid ${isColdCream ? "rgba(251,191,36,0.3)" : "rgba(59,130,246,0.25)"}`,
                 borderTop:"none", borderRadius:"0 0 6px 6px",
-                background:"rgba(56,189,248,0.06)" }}>
+                background: isColdCream ? "rgba(255,213,79,0.06)" : "rgba(56,189,248,0.06)" }}>
                 <div style={{ position:"absolute", bottom:0, left:0, right:0,
-                  height:`${30+i*6}%`, background:"rgba(56,189,248,0.15)",
+                  height:`${30+i*6}%`,
+                  background: isColdCream ? "rgba(255,213,79,0.2)" : "rgba(56,189,248,0.15)",
                   borderRadius:"0 0 4px 4px" }} />
               </div>
             ))}
@@ -564,28 +594,23 @@ const PreLabNotebook: React.FC<Props> = ({ practicalId, onStart, onBack }) => {
         </div>
 
         {/* Center: notebook content */}
-        <div style={{ width:620, background:"white", display:"flex",
-          flexDirection:"column", borderLeft:"1px solid #e2e8f0",
-          borderRight:"1px solid #e2e8f0", overflowY:"auto",
-          maxHeight:"calc(100vh - 52px)" }}>
+        <div className="nb-content">
 
           {/* Section heading */}
-          <div style={{ padding:"28px 36px 8px", borderBottom:"3px solid #3b82f6" }}>
-            <div style={{ color:"#1e293b", fontSize:26, fontWeight:900, letterSpacing:0.5 }}>
+          <div className="nb-section-head" style={{ borderBottom:`3px solid ${isColdCream ? "#8b5cf6" : "#3b82f6"}` }}>
+            <div style={{ color:"#1e293b", fontSize:"clamp(18px,2.5vw,26px)", fontWeight:900, letterSpacing:0.5 }}>
               {activeSection.num}. {activeSection.label}
             </div>
-            <div style={{ height:3, width:50, background:"#3b82f6", borderRadius:2, marginTop:6 }} />
+            <div style={{ height:3, width:50, background: isColdCream ? "#8b5cf6" : "#3b82f6", borderRadius:2, marginTop:6 }} />
           </div>
 
           {/* Section body */}
-          <div style={{ flex:1, padding:"22px 36px 28px", overflowY:"auto" }}>
+          <div className="nb-section-body">
             {renderContent()}
           </div>
 
           {/* Navigation footer */}
-          <div style={{ borderTop:"1px solid #e2e8f0", padding:"14px 36px",
-            display:"flex", justifyContent:"space-between", alignItems:"center",
-            background:"white", position:"sticky", bottom:0 }}>
+          <div className="nb-footer">
             <button onClick={() => activeIdx > 0 && setActiveIdx(i => i - 1)}
               disabled={activeIdx === 0}
               style={{ padding:"9px 20px", borderRadius:8, border:"1px solid #e2e8f0",
@@ -608,17 +633,24 @@ const PreLabNotebook: React.FC<Props> = ({ practicalId, onStart, onBack }) => {
             {isLast ? (
               <button onClick={onStart}
                 style={{ padding:"10px 24px", borderRadius:8, border:"none",
-                  background:"linear-gradient(135deg,#f97316,#ea580c)",
+                  background: isColdCream
+                    ? "linear-gradient(135deg,#7c3aed,#6d28d9)"
+                    : "linear-gradient(135deg,#f97316,#ea580c)",
                   color:"white", fontWeight:800, fontSize:14, cursor:"pointer",
-                  boxShadow:"0 4px 14px rgba(249,115,22,0.45)", letterSpacing:0.3 }}>
-                Start Practical →
+                  boxShadow: isColdCream
+                    ? "0 4px 14px rgba(124,58,237,0.45)"
+                    : "0 4px 14px rgba(249,115,22,0.45)",
+                  letterSpacing:0.3 }}>
+                {isColdCream ? "Start Cold Cream →" : "Start Practical →"}
               </button>
             ) : (
               <button onClick={() => setActiveIdx(i => i + 1)}
                 style={{ padding:"10px 24px", borderRadius:8, border:"none",
-                  background:"#1d4ed8", color:"white", fontWeight:700,
-                  fontSize:13, cursor:"pointer",
-                  boxShadow:"0 3px 12px rgba(29,78,216,0.35)" }}>
+                  background: isColdCream ? "#7c3aed" : "#1d4ed8",
+                  color:"white", fontWeight:700, fontSize:13, cursor:"pointer",
+                  boxShadow: isColdCream
+                    ? "0 3px 12px rgba(124,58,237,0.35)"
+                    : "0 3px 12px rgba(29,78,216,0.35)" }}>
                 Next section &gt;
               </button>
             )}
@@ -626,8 +658,7 @@ const PreLabNotebook: React.FC<Props> = ({ practicalId, onStart, onBack }) => {
         </div>
 
         {/* Right sidebar — section navigation */}
-        <div style={{ width:220, background:"#0f172a", borderLeft:"1px solid #1e293b",
-          padding:"24px 0", maxHeight:"calc(100vh - 52px)", overflowY:"auto" }}>
+        <div className="nb-sidebar">
 
           {/* Lab icon */}
           <div style={{ padding:"0 20px 20px", borderBottom:"1px solid #1e293b" }}>
@@ -655,14 +686,14 @@ const PreLabNotebook: React.FC<Props> = ({ practicalId, onStart, onBack }) => {
                 <button key={s.id} onClick={() => setActiveIdx(i)}
                   style={{ width:"100%", display:"flex", alignItems:"center", gap:12,
                     padding:"11px 20px", border:"none", cursor:"pointer", textAlign:"left",
-                    background: active ? "rgba(29,78,216,0.2)" : "transparent",
-                    borderLeft: active ? "3px solid #3b82f6" : "3px solid transparent",
+                    background: active ? (isColdCream ? "rgba(124,58,237,0.2)" : "rgba(29,78,216,0.2)") : "transparent",
+                    borderLeft: active ? `3px solid ${isColdCream ? "#8b5cf6" : "#3b82f6"}` : "3px solid transparent",
                     transition:"all 0.15s" }}>
                   <div style={{ flexShrink:0, width:24, height:24, borderRadius:"50%",
-                    border:`2px solid ${active ? "#3b82f6" : done ? "#3b82f6" : "#334155"}`,
-                    background: done ? "#1d4ed8" : active ? "rgba(59,130,246,0.2)" : "transparent",
+                    border:`2px solid ${active ? (isColdCream ? "#8b5cf6" : "#3b82f6") : done ? (isColdCream ? "#8b5cf6" : "#3b82f6") : "#334155"}`,
+                    background: done ? (isColdCream ? "#6d28d9" : "#1d4ed8") : active ? (isColdCream ? "rgba(139,92,246,0.2)" : "rgba(59,130,246,0.2)") : "transparent",
                     display:"flex", alignItems:"center", justifyContent:"center",
-                    fontSize:11, color: done ? "white" : active ? "#60a5fa" : "#475569",
+                    fontSize:11, color: done ? "white" : active ? (isColdCream ? "#c4b5fd" : "#60a5fa") : "#475569",
                     fontWeight:800 }}>
                     {done ? "✓" : s.num}
                   </div>
@@ -680,7 +711,10 @@ const PreLabNotebook: React.FC<Props> = ({ practicalId, onStart, onBack }) => {
             <div style={{ color:"#475569", fontSize:10, fontWeight:700, letterSpacing:1,
               textTransform:"uppercase", marginBottom:8 }}>Progress</div>
             <div style={{ height:5, background:"#1e293b", borderRadius:3, overflow:"hidden" }}>
-              <div style={{ height:"100%", background:"linear-gradient(90deg,#3b82f6,#1d4ed8)",
+              <div style={{ height:"100%",
+                background: isColdCream
+                  ? "linear-gradient(90deg,#8b5cf6,#6d28d9)"
+                  : "linear-gradient(90deg,#3b82f6,#1d4ed8)",
                 borderRadius:3, width:`${((activeIdx + 1) / SECTIONS.length) * 100}%`,
                 transition:"width 0.3s" }} />
             </div>

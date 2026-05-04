@@ -69,12 +69,14 @@ function App() {
         </div>
       </header>
 
-      <div style={{ height:"calc(100vh - 56px)", overflow:"hidden" }}>
-        <InteractiveLabCanvas
-          currentStep={currentStep}
-          onApparatusClick={() => {}}
-          practicalId={selectedPractical}
-        />
+      <div className="lab-canvas-wrap" style={{ overflowX:"auto", overflowY:"hidden" }}>
+        <div style={{ minWidth: 1200, height:"100%" }}>
+          <InteractiveLabCanvas
+            currentStep={currentStep}
+            onApparatusClick={() => {}}
+            practicalId={selectedPractical}
+          />
+        </div>
       </div>
     </div>
   );
