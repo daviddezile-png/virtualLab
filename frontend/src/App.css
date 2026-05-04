@@ -297,6 +297,15 @@
   100% { transform: rotate(360deg); }
 }
 
+@keyframes pour-progress {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(200%); }
+}
+
+/* Custom range slider — hide native thumb so our overlay thumb shows */
+input[type="range"]::-webkit-slider-thumb { opacity: 0; }
+input[type="range"]::-moz-range-thumb     { opacity: 0; }
+
 /* Error States */
 .error {
   border-color: #e74c3c !important;

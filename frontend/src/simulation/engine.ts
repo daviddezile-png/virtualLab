@@ -201,3 +201,168 @@ export function evaluateFormulation(input: FormulationInput): EvaluationResult {
     },
   };
 }
+
+// ── Cold Cream (W/O Emulsion) Engine ─────────────────────────────────────────
+
+export interface ColdCreamInput {
+  beeswax: number;           // grams
+  liquid_paraffin: number;   // mL
+  borax: number;             // mL
+  water: number;             // mL
+  oil_phase_temperature: number;
+  aqueous_phase_temperature: number;
+  mixing_order: "aqueous_to_oil" | "oil_to_aqueous";
+  mixing_time: number;
+  cooling_temperature: number;
+  cooling_stirring: boolean;
+}
+
+export interface ColdCreamPercentages {
+  beeswax: number;
+  paraffin: number;
+  borax: number;
+  water: number;
+}
+
+export interface ColdCreamResult {
+  result: "PASS" | "AVERAGE" | "FAIL";
+  score: number;
+  stability: "stable" | "unstable" | "separation";
+  appearance: string;
+  predicted_pH: number;
+  predicted_viscosity: number;
+  feedback: string[];
+  scores: ScoreBreakdown;
+  percentages: ColdCreamPercentages;
+}
+
+export function evaluateColdCream(input: ColdCreamInput): ColdCreamResult {
+  const total = input.beeswax + input.liquid_paraffin + input.borax + input.water;
+  if (total === 0) throw new Error("No ingredients added.");
+
+  // Percentages
+  const beeswax_pct  = (input.beeswax        / total) * 100;
+  const paraffin_pct = (input.liquid_paraffin / total) * 100;
+  const borax_pct    = (input.borax           / total) * 100;
+  const water_pct    = (input.water           / total) * 100;
+
+  // Ingredient score — W/O needs much more oil (paraffin) than water
+  const ingredient_score =
+    scoreRange(beeswax_pct,  10, 16) +   // target ~13%
+    scoreRange(paraffin_pct, 34, 46) +   // target ~39%
+    scoreRange(borax_pct,     2,  5) +   // target ~3.3%
+    scoreRange(water_pct,    38, 52);    // target ~44%
+
+  // Temperature score — slightly lower than vanishing cream (65–75°C)
+  const temp_diff = Math.abs(input.oil_phase_temperature - input.aqueous_phase_temperature);
+  let temperature_score: number;
+  if (
+    input.oil_phase_temperature >= 65 && input.oil_phase_temperature <= 75 &&
+    input.aqueous_phase_temperature >= 65 && input.aqueous_phase_temperature <= 75 &&
+    temp_diff <= 5
+  ) {
+    temperature_score = 1;
+  } else if (temp_diff <= 10) {
+    temperature_score = 0.5;
+  } else {
+    temperature_score = 0;
+  }
+
+  // Emulsification — same rule: aqueous into oil (W/O)
+  const order_score = input.mixing_order === "aqueous_to_oil" ? 1 : 0;
+  const time_score  = input.mixing_time >= 20 ? 1 : 0.5;
+  const emulsification_score = (order_score + time_score) / 2;
+
+  // Cooling — cold cream needs to cool to ≤35°C (colder than vanishing cream)
+  let cooling_score: number;
+  if (input.cooling_temperature <= 35 && input.cooling_stirring) {
+    cooling_score = 1;
+  } else if (input.cooling_temperature <= 45) {
+    cooling_score = 0.5;
+  } else {
+    cooling_score = 0;
+  }
+
+  // pH prediction — borax buffers to slightly alkaline
+  const predicted_pH = 6.5 + (borax_pct / 5) * 1.0;
+  const pH_score = predicted_pH >= 6.0 && predicted_pH <= 7.5 ? 1 : 0;
+
+  // Viscosity prediction — W/O is much thicker than O/W
+  const predicted_viscosity = Math.round(
+    beeswax_pct * 220 + paraffin_pct * 55 - water_pct * 10
+  );
+  const viscosity_score = predicted_viscosity >= 2000 && predicted_viscosity <= 6000 ? 1 : 0.5;
+
+  // Stability
+  let stability: "stable" | "unstable" | "separation";
+  if (temperature_score === 1 && emulsification_score === 1 && ingredient_score >= 3) {
+    stability = "stable";
+  } else if (temperature_score === 0) {
+    stability = "separation";
+  } else {
+    stability = "unstable";
+  }
+
+  // Final score (max 18)
+  const final_score =
+    ingredient_score * 2 +
+    temperature_score * 2 +
+    emulsification_score * 3 +
+    cooling_score * 1 +
+    pH_score * 1 +
+    viscosity_score * 1;
+
+  let result: "PASS" | "AVERAGE" | "FAIL";
+  if (final_score >= 8 && stability === "stable") {
+    result = "PASS";
+  } else if (final_score >= 5) {
+    result = "AVERAGE";
+  } else {
+    result = "FAIL";
+  }
+
+  const appearance =
+    result === "PASS"    ? "Thick white cold cream"
+    : result === "AVERAGE" ? "Soft but slightly greasy cream"
+    : "Phase separation or watery texture";
+
+  const feedback: string[] = [];
+  if (temp_diff > 5)
+    feedback.push("Temperature mismatch between phases — keep both at 65–75°C.");
+  if (input.mixing_order !== "aqueous_to_oil")
+    feedback.push("Incorrect mixing order. Add aqueous (borax+water) into the oil phase.");
+  if (input.mixing_time < 20)
+    feedback.push("Increase stirring time to at least 20 s for full emulsification.");
+  if (predicted_pH > 7.5)
+    feedback.push("pH too high — reduce borax quantity.");
+  if (beeswax_pct < 10 || beeswax_pct > 16)
+    feedback.push("Beeswax proportion out of range (target 10–16%).");
+  if (paraffin_pct < 34 || paraffin_pct > 46)
+    feedback.push("Liquid paraffin proportion out of range (target 34–46%).");
+  if (cooling_score < 1)
+    feedback.push("Cool to ≤35°C with continuous stirring for best cold cream texture.");
+
+  return {
+    result,
+    score: Math.round(final_score * 10) / 10,
+    stability,
+    appearance,
+    predicted_pH:       Math.round(predicted_pH * 100) / 100,
+    predicted_viscosity,
+    feedback,
+    scores: {
+      ingredient: ingredient_score,
+      temperature: temperature_score,
+      emulsification: emulsification_score,
+      cooling: cooling_score,
+      pH: pH_score,
+      viscosity: viscosity_score,
+    },
+    percentages: {
+      beeswax:  Math.round(beeswax_pct  * 10) / 10,
+      paraffin: Math.round(paraffin_pct * 10) / 10,
+      borax:    Math.round(borax_pct    * 10) / 10,
+      water:    Math.round(water_pct    * 10) / 10,
+    },
+  };
+}

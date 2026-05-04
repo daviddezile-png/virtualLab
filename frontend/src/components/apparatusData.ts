@@ -33,6 +33,7 @@ export interface Apparatus {
     spatulaLoad?: number;       // grams of solid on spatula blade
     spatulaLoadSourceId?: string | null;
     solidStearicGrams?: number; // grams of solid stearic acid in beaker (melts when hot)
+    solidBeeswaxGrams?: number; // grams of solid beeswax in beaker (melts at 62°C)
     iceLevel?: number;
     emulsificationProgress?: number;
     maxTemperatureReached?: number;   // peak temperature during heating
@@ -45,6 +46,8 @@ export interface Apparatus {
       glycerin?: number;
       koh?: number;
       water?: number;
+      beeswax?: number;   // cold cream
+      borax?: number;     // cold cream
     };
   };
   isInteractive: boolean;
@@ -242,4 +245,72 @@ export const getInitialApparatus = (LEFT_GAP: number, shelfY: number, TABLE_Y: n
     isInteractive: true,
     data: { viscosityReading: 0, isViscosityActive: false },
   },
+  // ── W/O Cold Cream chemicals (second experiment) ────────────────────────
+  {
+    id: "container-beeswax",
+    type: "bottle",
+    name: "Beeswax",
+    x: LEFT_GAP + 1290,
+    y: shelfY - 130,
+    width: 60,
+    height: 130,
+    isInteractive: true,
+    data: {
+      maxVolume: 300, currentVolume: 200, hasLid: true,
+      isPouring: false, pouringTargetId: null, pouringProgress: 0,
+      liquidColor: "rgba(255,213,79,0.82)", lidColor: "#b8860b",
+      isSolid: true, density: 0.96,
+    },
+  },
+  {
+    id: "container-borax",
+    type: "bottle",
+    name: "Borax Solution",
+    x: LEFT_GAP + 1365,
+    y: shelfY - 130,
+    width: 60,
+    height: 130,
+    isInteractive: true,
+    data: {
+      maxVolume: 300, currentVolume: 200, hasLid: true,
+      isPouring: false, pouringTargetId: null, pouringProgress: 0,
+      liquidColor: "rgba(200,240,255,0.65)", lidColor: "#0ea5e9",
+      pH: 9.2, viscosity: 1.2, density: 1.07,
+    },
+  },
+];
+
+// ── Cold Cream (W/O) initial apparatus ────────────────────────────────────────
+export const getInitialApparatusColdCream = (LEFT_GAP: number, shelfY: number, TABLE_Y: number): Apparatus[] => [
+  // Beakers (same positions)
+  { id:"beaker-250-oil",   type:"beaker", name:"250 mL Beaker (Oil Phase)",   x:LEFT_GAP+50,  y:shelfY-100, width:60, height:100, isInteractive:true, data:{maxVolume:250,currentVolume:0,hasLid:false,liquidColor:"rgba(255,213,79,0.4)"} },
+  { id:"beaker-250-aqueous",type:"beaker",name:"250 mL Beaker (Aqueous Phase)",x:LEFT_GAP+150, y:shelfY-100, width:60, height:100, isInteractive:true, data:{maxVolume:250,currentVolume:0,hasLid:false,liquidColor:"rgba(200,240,255,0.4)"} },
+  { id:"beaker-500-main",  type:"beaker", name:"500 mL Beaker (Main Mixing)", x:LEFT_GAP+250, y:shelfY-120, width:70, height:120, isInteractive:true, data:{maxVolume:500,currentVolume:0,hasLid:false,liquidColor:"rgba(240,235,220,0.6)"} },
+  // Distilled Water
+  { id:"distilled-water-bottle", type:"bottle", name:"Distilled Water", x:LEFT_GAP+350, y:shelfY-150, width:70, height:150, isInteractive:true,
+    data:{maxVolume:1000,currentVolume:500,hasLid:true,isPouring:false,pouringTargetId:null,pouringProgress:0,liquidColor:"rgba(185,228,255,0.32)",lidColor:"#3b82f6",pH:7.0,viscosity:1,density:1.0} },
+  // Graduated Cylinder
+  { id:"graduated-cylinder-100", type:"cylinder", name:"100 mL Graduated Cylinder", x:LEFT_GAP+440, y:shelfY-120, width:40, height:120, isInteractive:true,
+    data:{maxVolume:100,currentVolume:0,hasLid:false,liquidColor:"rgba(56,189,248,0.6)"} },
+  // Beeswax (solid — scooped by spatula)
+  { id:"container-beeswax", type:"bottle", name:"Beeswax", x:LEFT_GAP+530, y:shelfY-130, width:60, height:130, isInteractive:true,
+    data:{maxVolume:300,currentVolume:200,hasLid:true,isPouring:false,pouringTargetId:null,pouringProgress:0,
+      liquidColor:"rgba(255,213,79,0.85)",lidColor:"#b8860b",isSolid:true,density:0.96} },
+  // Liquid Paraffin (35 mL target — much more than vanishing cream)
+  { id:"container-liquid-paraffin", type:"bottle", name:"Liquid Paraffin", x:LEFT_GAP+610, y:shelfY-130, width:60, height:130, isInteractive:true,
+    data:{maxVolume:500,currentVolume:300,hasLid:true,isPouring:false,pouringTargetId:null,pouringProgress:0,
+      liquidColor:"rgba(255,248,195,0.70)",lidColor:"#FF8C00",pH:7.0,viscosity:110,density:0.88} },
+  // Borax Solution
+  { id:"container-borax", type:"bottle", name:"Borax Solution", x:LEFT_GAP+690, y:shelfY-130, width:60, height:130, isInteractive:true,
+    data:{maxVolume:300,currentVolume:200,hasLid:true,isPouring:false,pouringTargetId:null,pouringProgress:0,
+      liquidColor:"rgba(200,240,255,0.65)",lidColor:"#0ea5e9",pH:9.2,viscosity:1.2,density:1.07} },
+  // Equipment (same as vanishing cream)
+  { id:"ice-bucket",       type:"icebucket",      name:"Ice Bucket",             x:LEFT_GAP+300, y:TABLE_Y-110, width:160, height:110, isInteractive:false, data:{iceLevel:100} },
+  { id:"hot-plate-1",      type:"hotplate",        name:"Hot Plate",              x:LEFT_GAP+500, y:TABLE_Y-65,  width:130, height:65,  isInteractive:true, data:{isOn:false,temperature:25,targetTemperature:70} },
+  { id:"weight-balance",   type:"weightbalance",   name:"Digital Weight Balance", x:LEFT_GAP+80,  y:TABLE_Y-85,  width:150, height:85,  isInteractive:true, data:{isOn:true} },
+  { id:"thermometer-digital",type:"thermometer",   name:"Digital Thermometer",   x:LEFT_GAP+870, y:shelfY-130,  width:30,  height:130, isInteractive:true, data:{readingTemperature:25} },
+  { id:"glass-stirring-rod", type:"stirringrod",   name:"Glass Stirring Rod",    x:LEFT_GAP+925, y:shelfY-155,  width:20,  height:155, isInteractive:true, data:{isStirring:false,stirringTargetId:null} },
+  { id:"spatula",           type:"spatula",         name:"Spatula",               x:LEFT_GAP+1100,y:shelfY-150,  width:18,  height:150, isInteractive:true, data:{spatulaLoad:0,spatulaLoadSourceId:null} },
+  { id:"ph-meter",          type:"phmeter",         name:"pH Meter",              x:LEFT_GAP+1130,y:shelfY-165,  width:48,  height:165, isInteractive:true, data:{phReading:7.0} },
+  { id:"viscosity-gauge",   type:"viscositygauge",  name:"Viscosity Gauge",       x:LEFT_GAP+1195,y:shelfY-150,  width:62,  height:150, isInteractive:true, data:{viscosityReading:0,isViscosityActive:false} },
 ];
