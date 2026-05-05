@@ -395,7 +395,7 @@ const EvaluationPanel: React.FC<Props> = ({ isOpen, onClose, apparatus, practica
     <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.85)",
       zIndex:200, display:"flex", alignItems:"center", justifyContent:"center", padding:12 }}>
       <div style={{ background:"#0f172a", borderRadius:16, border:"1px solid #1e293b",
-        width:"min(1020px, 97vw)", maxHeight:"95vh", display:"flex", flexDirection:"column",
+        width:"min(1060px, 98vw)", maxHeight:"96vh", display:"flex", flexDirection:"column",
         overflow:"hidden", boxShadow:"0 24px 80px rgba(0,0,0,0.7)" }}>
 
         {/* ── Header ── */}
@@ -412,11 +412,10 @@ const EvaluationPanel: React.FC<Props> = ({ isOpen, onClose, apparatus, practica
         </div>
 
         {/* ── Body ── */}
-        <div style={{ display:"flex", flex:1, overflow:"hidden" }}>
+        <div className="eval-body">
 
           {/* ── LEFT: detected lab values (read-only) ── */}
-          <div style={{ width:300, flexShrink:0, borderRight:"1px solid #1e293b",
-            padding:"16px 18px", overflowY:"auto", background:"#0a1628" }}>
+          <div className="eval-left">
 
             <div style={{ background:"#0d1b2e", border:"1px solid #1e3a5f", borderRadius:10,
               padding:"10px 14px", marginBottom:16, fontSize:12, color:"#7dd3fc", lineHeight:1.5 }}>
@@ -495,7 +494,7 @@ const EvaluationPanel: React.FC<Props> = ({ isOpen, onClose, apparatus, practica
           </div>
 
           {/* ── RIGHT: result ── */}
-          <div style={{ flex:1, overflowY:"auto", padding:"16px 20px" }}>
+          <div className="eval-right">
             {!activeResult ? (
               <div style={{ display:"flex", flexDirection:"column", alignItems:"center",
                 justifyContent:"center", height:"100%", color:"#4b5563", textAlign:"center", gap:14 }}>
@@ -610,7 +609,7 @@ const EvaluationPanel: React.FC<Props> = ({ isOpen, onClose, apparatus, practica
                   <div style={{ color:"#94a3b8", fontSize:10, fontWeight:700, letterSpacing:2, marginBottom:10 }}>
                     PROCEDURE VERIFICATION — {passCount} / {totalSteps} STEPS CORRECT
                   </div>
-                  <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"0 24px" }}>
+                  <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(240px,1fr))", gap:"0 24px" }}>
                     {checklist.map(item => <CheckRow key={item.label} {...item} />)}
                   </div>
                 </div>

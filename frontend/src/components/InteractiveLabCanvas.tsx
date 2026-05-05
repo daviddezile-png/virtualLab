@@ -2088,17 +2088,23 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
 
   useEffect(() => {
     const handleResize = () => {
-      const container = canvasRef.current?.parentElement?.parentElement;
+      // Walk up to find the scrollable wrapper (.lab-canvas-wrap or similar)
+      const container = canvasRef.current?.parentElement;
       if (container) {
-        setCanvasSize({
-          width: Math.max(container.clientWidth, 1200),
-          height: container.clientHeight,
-        });
+        const w = Math.max(container.clientWidth,  1200);
+        const h = Math.max(container.clientHeight, 680);
+        setCanvasSize({ width: w, height: h });
       }
     };
     handleResize();
+    const ro = new ResizeObserver(handleResize);
+    if (canvasRef.current?.parentElement)
+      ro.observe(canvasRef.current.parentElement);
     window.addEventListener("resize", handleResize);
-    return () => window.removeEventListener("resize", handleResize);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener("resize", handleResize);
+    };
   }, []);
 
   const hotPlateIsOn = apparatus.find((a) => a.type === "hotplate")?.data?.isOn ?? false;

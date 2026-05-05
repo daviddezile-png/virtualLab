@@ -807,7 +807,7 @@ const ProtocolSidebar: React.FC<Props> = ({ isOpen, onClose, apparatus }) => {
   };
 
   return (
-    <div style={{ position: "fixed", top: 0, right: 0, height: "100vh", width: 400,
+    <div className="proto-sidebar" style={{ position: "fixed", top: 0, right: 0, height: "100vh",
       background: "#0f172a", borderLeft: "1px solid #1e293b", zIndex: 100,
       display: "flex", flexDirection: "column", boxShadow: "-8px 0 40px rgba(0,0,0,0.6)" }}>
 
