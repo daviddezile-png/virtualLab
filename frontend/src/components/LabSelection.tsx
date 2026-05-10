@@ -100,9 +100,12 @@ const DIFF_COLOR = {
   Advanced:     { bg:"#2d0a0a", border:"#dc2626", text:"#f87171" },
 };
 
-interface Props { onSelect: (id: string) => void; }
+interface Props {
+  onSelect: (id: string) => void;
+  onTeacherPanel?: () => void;
+}
 
-const LabSelection: React.FC<Props> = ({ onSelect }) => {
+const LabSelection: React.FC<Props> = ({ onSelect, onTeacherPanel }) => {
   const [hovered, setHovered] = useState<string | null>(null);
 
   return (
@@ -126,8 +129,18 @@ const LabSelection: React.FC<Props> = ({ onSelect }) => {
             <div style={{ color:"#475569", fontSize:11 }}>Pharmaceutical Chemistry · Emulsion Practicals</div>
           </div>
         </div>
-        <div style={{ color:"#334155", fontSize:12 }}>
-          1 practical available &nbsp;·&nbsp; 1 coming soon
+        <div style={{ display:"flex", alignItems:"center", gap:14 }}>
+          <span style={{ color:"#334155", fontSize:12 }}>1 available · 1 coming soon</span>
+          {onTeacherPanel && (
+            <button onClick={onTeacherPanel} style={{
+              display:"flex", alignItems:"center", gap:7,
+              background:"rgba(255,255,255,0.05)", border:"1px solid #334155",
+              color:"#94a3b8", borderRadius:9, padding:"7px 14px",
+              fontSize:12, fontWeight:600, cursor:"pointer", transition:"all .15s",
+            }}>
+              <span>🎓</span> Teacher Panel
+            </button>
+          )}
         </div>
       </header>
 
