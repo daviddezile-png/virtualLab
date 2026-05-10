@@ -5,6 +5,7 @@ interface Props {
   isOpen: boolean;
   onClose: () => void;
   apparatus: Apparatus[];
+  practicalId?: string;
 }
 
 // ── Section index ──────────────────────────────────────────────────────────────
@@ -304,7 +305,8 @@ const MatRow: React.FC<{ item: string; qty: string; note?: string }> = ({ item, 
 );
 
 // ── Main component ─────────────────────────────────────────────────────────────
-const ProtocolSidebar: React.FC<Props> = ({ isOpen, onClose, apparatus }) => {
+const ProtocolSidebar: React.FC<Props> = ({ isOpen, onClose, apparatus, practicalId = "vanishing-cream" }) => {
+  const isColdCream = practicalId === "cold-cream";
   const [activeSection, setActiveSection] = useState<SectionId>("context");
 
   // Prediction fields
@@ -336,11 +338,16 @@ const ProtocolSidebar: React.FC<Props> = ({ isOpen, onClose, apparatus }) => {
   const oilComp  = (oilBeaker?.data?.composition  ?? {}) as Record<string, number>;
   const aqComp   = (aqBeaker?.data?.composition   ?? {}) as Record<string, number>;
 
+  // Vanishing cream (O/W)
   const stearicG   = Math.round(((comp.stearicAcid  ?? 0) + (oilComp.stearicAcid  ?? 0) + (mainBeaker?.data?.solidStearicGrams ?? 0) + (oilBeaker?.data?.solidStearicGrams ?? 0)) * 10) / 10;
-  const paraffinML = Math.round(((comp.liquidParaffin ?? 0) + (oilComp.liquidParaffin ?? 0)) * 10) / 10;
   const glycerinML = Math.round(((comp.glycerin ?? 0) + (aqComp.glycerin ?? 0)) * 10) / 10;
   const kohML      = Math.round(((comp.koh     ?? 0) + (aqComp.koh     ?? 0)) * 10) / 10;
+  // Shared
+  const paraffinML = Math.round(((comp.liquidParaffin ?? 0) + (oilComp.liquidParaffin ?? 0)) * 10) / 10;
   const waterML    = Math.round(((comp.water   ?? 0) + (aqComp.water   ?? 0)) * 10) / 10;
+  // Cold cream (W/O)
+  const beeswaxG   = Math.round(((comp.beeswax ?? 0) + (oilComp.beeswax ?? 0) + (mainBeaker?.data?.solidBeeswaxGrams ?? 0) + (oilBeaker?.data?.solidBeeswaxGrams ?? 0)) * 10) / 10;
+  const boraxML    = Math.round(((comp.borax   ?? 0) + (aqComp.borax   ?? 0)) * 10) / 10;
   const oilMaxT    = Math.max(oilBeaker?.data?.maxTemperatureReached ?? 25, mainBeaker?.data?.maxTemperatureReached ?? 25);
   const aqMaxT     = aqBeaker?.data?.maxTemperatureReached ?? 25;
   const stirSec    = Math.round(mainBeaker?.data?.stirringSeconds ?? 0);
@@ -359,32 +366,41 @@ const ProtocolSidebar: React.FC<Props> = ({ isOpen, onClose, apparatus }) => {
         return (
           <div>
             <div style={S.card}>
-              <div style={{ color: "#38bdf8", fontWeight: 700, fontSize: 14, marginBottom: 6 }}>What is Vanishing Cream?</div>
+              <div style={{ color: "#38bdf8", fontWeight: 700, fontSize: 14, marginBottom: 6 }}>
+                {isColdCream ? "What is Cold Cream?" : "What is Vanishing Cream?"}
+              </div>
               <p style={S.body}>
-                A vanishing cream is an <strong style={{ color: "#a78bfa" }}>oil-in-water (O/W) emulsion</strong> — tiny droplets of oil
-                suspended in a water base. It is called "vanishing" because it absorbs rapidly into the skin
-                and leaves no visible residue after rubbing in.
+                {isColdCream
+                  ? <span>A cold cream is a <strong style={{ color: "#a78bfa" }}>water-in-oil (W/O) emulsion</strong> — tiny water droplets dispersed in a continuous oil phase. It feels heavier and greasier than O/W creams. It stays on the skin surface for deep moisturisation and cleansing.</span>
+                  : <span>A vanishing cream is an <strong style={{ color: "#a78bfa" }}>oil-in-water (O/W) emulsion</strong> — tiny oil droplets suspended in a water base. It is called "vanishing" because it absorbs rapidly into the skin and leaves no visible residue.</span>}
               </p>
             </div>
 
             <div style={S.card}>
-              <div style={{ color: "#38bdf8", fontWeight: 700, fontSize: 14, marginBottom: 6 }}>Why Does It Vanish?</div>
+              <div style={{ color: "#38bdf8", fontWeight: 700, fontSize: 14, marginBottom: 6 }}>
+                {isColdCream ? "How does it work?" : "Why Does It Vanish?"}
+              </div>
               <p style={S.body}>
-                The high water content (60–75%) makes the cream light and fast-absorbing. Stearic acid
-                and potassium hydroxide react to form <strong style={{ color: "#4ade80" }}>potassium stearate</strong>,
-                a soap that acts as the emulsifier holding the oil and water together.
+                {isColdCream
+                  ? <span>Beeswax reacts with borax to form <strong style={{ color: "#4ade80" }}>beeswax soap</strong>, the emulsifier that holds water droplets inside the oil phase. The high oil content (35+ mL paraffin + beeswax) gives the cream its thick, occlusive texture.</span>
+                  : <span>The high water content (60–75%) makes the cream light and fast-absorbing. Stearic acid and KOH react to form <strong style={{ color: "#4ade80" }}>potassium stearate</strong>, the soap emulsifier holding oil and water together.</span>}
               </p>
             </div>
 
             <div style={S.card}>
               <div style={{ color: "#38bdf8", fontWeight: 700, fontSize: 14, marginBottom: 8 }}>Role of Each Ingredient</div>
-              {[
-                ["Stearic Acid (18 g)", "Primary emulsifier & thickener. Reacts with KOH to form soap."],
-                ["Liquid Paraffin (7 mL)", "Oil phase. Moisturises and softens skin."],
-                ["Glycerin (3 mL)", "Humectant. Attracts moisture and improves texture."],
-                ["KOH & Triethanolamine (1 mL)", "Alkali. Reacts with stearic acid to form emulsifier."],
-                ["Distilled Water (70 mL)", "Aqueous phase. Main carrier of the cream."],
-              ].map(([name, role]) => (
+              {(isColdCream ? [
+                ["Beeswax (12 g)",          "Solid wax. Melts at 62°C. Reacts with borax to form emulsifier."],
+                ["Liquid Paraffin (35 mL)", "Main oil phase carrier. Gives cold cream its heavy texture."],
+                ["Borax Solution (3 mL)",   "Reacts with beeswax fatty acids to produce the soap emulsifier."],
+                ["Distilled Water (40 mL)", "Aqueous phase. Dispersed as droplets inside the oil phase."],
+              ] : [
+                ["Stearic Acid (18 g)",         "Primary emulsifier & thickener. Reacts with KOH to form soap."],
+                ["Liquid Paraffin (7 mL)",      "Oil phase. Moisturises and softens skin."],
+                ["Glycerin (3 mL)",             "Humectant. Attracts moisture and improves texture."],
+                ["KOH & Triethanolamine (1 mL)","Alkali. Reacts with stearic acid to form emulsifier."],
+                ["Distilled Water (70 mL)",     "Aqueous phase. Main carrier of the cream."],
+              ]).map(([name, role]) => (
                 <div key={name} style={{ marginBottom: 8 }}>
                   <span style={{ color: "#60a5fa", fontWeight: 700, fontSize: 12 }}>{name}</span>
                   <div style={{ color: "#94a3b8", fontSize: 12 }}>{role}</div>
@@ -394,12 +410,19 @@ const ProtocolSidebar: React.FC<Props> = ({ isOpen, onClose, apparatus }) => {
 
             <div style={S.card}>
               <div style={{ color: "#38bdf8", fontWeight: 700, fontSize: 14, marginBottom: 6 }}>Learning Objectives</div>
-              {["Understand O/W emulsion formation",
+              {(isColdCream ? [
+                "Understand W/O emulsion formation and how it differs from O/W",
+                "Melt beeswax and blend with liquid paraffin to form the oil phase",
+                "Prepare borax solution as both the aqueous phase and emulsifier source",
+                "Measure pH and viscosity of the finished cold cream",
+                "Compare W/O cream properties against specification",
+              ] : [
+                "Understand O/W emulsion formation",
                 "Practise accurate weighing and measuring",
                 "Learn the effect of temperature on emulsification",
                 "Measure pH and viscosity of a pharmaceutical cream",
                 "Evaluate product quality against specifications",
-              ].map((obj, i) => (
+              ]).map((obj, i) => (
                 <div key={i} style={{ display: "flex", gap: 8, marginBottom: 5 }}>
                   <span style={{ color: "#3b82f6", fontWeight: 700, minWidth: 18, fontSize: 12 }}>{i + 1}.</span>
                   <span style={{ color: "#cbd5e1", fontSize: 12 }}>{obj}</span>
@@ -445,13 +468,13 @@ const ProtocolSidebar: React.FC<Props> = ({ isOpen, onClose, apparatus }) => {
               svg={<SvgBalance />}
               name="Digital Weight Balance"
               qty="1"
-              purpose="Weighing stearic acid accurately to ±0.1 g." />
+              purpose={isColdCream ? "Weighing beeswax accurately to ±0.1 g." : "Weighing stearic acid accurately to ±0.1 g."} />
 
             <ApparatusCard
               svg={<SvgSpatula />}
               name="Spatula"
               qty="1"
-              purpose="Scooping and transferring solid stearic acid into the oil beaker." />
+              purpose={isColdCream ? "Scooping solid beeswax into the oil beaker." : "Scooping and transferring solid stearic acid into the oil beaker."} />
 
             <ApparatusCard
               svg={<SvgRod />}
@@ -463,13 +486,13 @@ const ProtocolSidebar: React.FC<Props> = ({ isOpen, onClose, apparatus }) => {
               svg={<SvgHotPlate />}
               name="Hot Plate"
               qty="1"
-              purpose="Heating oil phase and aqueous phase separately to 75°C." />
+              purpose={isColdCream ? "Heating both phases to 65–75°C." : "Heating oil phase and aqueous phase separately to 75°C."} />
 
             <ApparatusCard
               svg={<SvgIceBucket />}
               name="Ice Bucket"
               qty="1"
-              purpose="Controlled cooling of the cream below 40°C while stirring." />
+              purpose={isColdCream ? "Controlled cooling of the cream below 35°C while stirring." : "Controlled cooling of the cream below 40°C while stirring."} />
 
             <ApparatusCard
               svg={<SvgThermometer />}
@@ -481,24 +504,29 @@ const ProtocolSidebar: React.FC<Props> = ({ isOpen, onClose, apparatus }) => {
               svg={<SvgPhMeter />}
               name="pH Meter"
               qty="1"
-              purpose="Measuring the final pH of the cream. Target range: 5.0–7.0." />
+              purpose={isColdCream ? "Measuring the final pH. Target: 6.0–7.5." : "Measuring the final pH. Target: 5.0–7.0."} />
 
             <ApparatusCard
               svg={<SvgViscGauge />}
               name="Viscosity Gauge"
               qty="1"
-              purpose="Measuring the viscosity of the final cream. Target: 1100–1800 cP." />
+              purpose={isColdCream ? "Measuring the viscosity. Target: 2000–6000 cP." : "Measuring the viscosity. Target: 1100–1800 cP."} />
 
             <div style={{ color: "#38bdf8", fontWeight: 700, fontSize: 14, margin: "18px 0 10px" }}>
               Chemicals
             </div>
-            {[
-              ["rgba(255,252,245,0.95)", "Stearic Acid",          "18 g",   "Solid white flakes. Emulsifier & thickener."],
-              ["rgba(255,248,195,0.70)", "Liquid Paraffin",       "7 mL",   "Light colourless oil. Moisturises skin."],
-              ["rgba(235,250,215,0.62)", "Glycerin",              "3 mL",   "Clear viscous liquid. Humectant."],
-              ["rgba(255,245,175,0.68)", "KOH & Triethanolamine", "1 mL",   "Alkaline solution. Reacts with stearic acid."],
-              ["rgba(185,228,255,0.32)", "Distilled Water",       "70 mL",  "Clear, pH 7. Main aqueous carrier."],
-            ].map(([color, name, qty, note]) => (
+            {(isColdCream ? [
+              ["rgba(255,213,79,0.85)",   "Beeswax",         "12 g",  "Golden solid wax. Melts at 62°C. Emulsifier source."],
+              ["rgba(255,248,195,0.70)",  "Liquid Paraffin", "35 mL", "Main oil phase carrier. Much more than in O/W!"],
+              ["rgba(200,240,255,0.65)",  "Borax Solution",  "3 mL",  "Reacts with beeswax to form emulsifier."],
+              ["rgba(185,228,255,0.32)",  "Distilled Water", "40 mL", "Aqueous phase dispersed inside oil."],
+            ] : [
+              ["rgba(255,252,245,0.95)", "Stearic Acid",          "18 g",  "Solid white flakes. Emulsifier & thickener."],
+              ["rgba(255,248,195,0.70)", "Liquid Paraffin",       "7 mL",  "Light colourless oil. Moisturises skin."],
+              ["rgba(235,250,215,0.62)", "Glycerin",              "3 mL",  "Clear viscous liquid. Humectant."],
+              ["rgba(255,245,175,0.68)", "KOH & Triethanolamine", "1 mL",  "Alkaline solution. Reacts with stearic acid."],
+              ["rgba(185,228,255,0.32)", "Distilled Water",       "70 mL", "Clear, pH 7. Main aqueous carrier."],
+            ]).map(([color, name, qty, note]) => (
               <div key={name} style={{ display: "flex", gap: 10, alignItems: "center",
                 background: "#0d1b2e", border: "1px solid #1e3a5f", borderRadius: 10,
                 padding: "10px 14px", marginBottom: 8 }}>
@@ -516,11 +544,13 @@ const ProtocolSidebar: React.FC<Props> = ({ isOpen, onClose, apparatus }) => {
 
             <div style={S.warn}>
               <div style={{ color: "#fbbf24", fontWeight: 700, fontSize: 13, marginBottom: 6 }}>⚠ Safety Precautions</div>
-              {["KOH is corrosive — handle with care",
-                "Hot glassware causes burns — use appropriate care",
+              {(isColdCream ? ["Borax is a mild irritant — avoid skin contact",
+                "Molten beeswax and hot glassware cause burns",
                 "Wear safety goggles and gloves throughout",
+              ] : ["KOH is corrosive — handle with care",
+                "Hot glassware causes burns — use appropriate care",
                 "Work carefully with all apparatus",
-              ].map((s, i) => <div key={i} style={{ color: "#fcd34d", fontSize: 12, marginBottom: 3 }}>• {s}</div>)}
+              ]).map((s, i) => <div key={i} style={{ color: "#fcd34d", fontSize: 12, marginBottom: 3 }}>• {s}</div>)}
             </div>
           </div>
         );
@@ -532,44 +562,27 @@ const ProtocolSidebar: React.FC<Props> = ({ isOpen, onClose, apparatus }) => {
             <div style={S.card}>
               <div style={{ color: "#38bdf8", fontWeight: 700, fontSize: 14, marginBottom: 6 }}>Before You Begin</div>
               <p style={{ color: "#94a3b8", fontSize: 13, lineHeight: 1.6 }}>
-                Based on your knowledge of emulsions and the ingredients listed, answer the
-                questions below <strong style={{ color: "#e2e8f0" }}>before</strong> conducting the practical.
-                Your predictions will be compared to your actual results.
+                Answer the questions below <strong style={{ color: "#e2e8f0" }}>before</strong> conducting
+                the practical. Your predictions will be compared to your actual results.
               </p>
             </div>
 
-            <Field
-              label="1. What do you predict the final cream will look like? Describe its texture, colour, and appearance."
-              value={pred1}
-              onChange={setPred1}
-              rows={4}
-            />
-            <Field
-              label="2. What pH range do you expect for the final cream? Explain why."
-              value={pred2}
-              onChange={setPred2}
-              rows={3}
-            />
-            <Field
-              label="3. What do you think will happen if the oil phase and aqueous phase are at different temperatures when mixed?"
-              value={pred3}
-              onChange={setPred3}
-              rows={4}
-            />
-            <Field
-              label="4. What do you predict will happen if the mixing order is wrong (aqueous poured first, then oil added into it)?"
-              value={pred4}
-              onChange={setPred4}
-              rows={4}
-            />
+            {isColdCream ? (<>
+              <Field label="1. Cold cream is W/O while vanishing cream is O/W. How do you predict their textures will differ on skin?" value={pred1} onChange={setPred1} rows={4} />
+              <Field label="2. Beeswax melts at 62°C. What do you think will happen if the oil phase is not heated enough to fully melt it before mixing?" value={pred2} onChange={setPred2} rows={4} />
+              <Field label="3. Cold cream uses 35 mL liquid paraffin vs 7 mL in vanishing cream. Why is the oil content so much higher in a W/O emulsion?" value={pred3} onChange={setPred3} rows={4} />
+              <Field label="4. What do you predict if the aqueous phase is added first and the oil phase added into it — instead of the correct order?" value={pred4} onChange={setPred4} rows={4} />
+            </>) : (<>
+              <Field label="1. What do you predict the final cream will look like? Describe its texture, colour, and appearance." value={pred1} onChange={setPred1} rows={4} />
+              <Field label="2. What pH range do you expect for the final cream? Explain why." value={pred2} onChange={setPred2} rows={3} />
+              <Field label="3. What do you think will happen if the oil phase and aqueous phase are at different temperatures when mixed?" value={pred3} onChange={setPred3} rows={4} />
+              <Field label="4. What do you predict will happen if the mixing order is wrong (aqueous poured first, then oil added into it)?" value={pred4} onChange={setPred4} rows={4} />
+            </>)}
 
             <div style={S.tip}>
-              <div style={{ color: "#4ade80", fontWeight: 700, fontSize: 12, marginBottom: 4 }}>
-                ✓ Tip
-              </div>
+              <div style={{ color: "#4ade80", fontWeight: 700, fontSize: 12, marginBottom: 4 }}>✓ Tip</div>
               <div style={{ color: "#86efac", fontSize: 12 }}>
                 There are no wrong predictions — what matters is your scientific reasoning.
-                Compare these to your Results and Reflection sections after completing the practical.
               </div>
             </div>
           </div>
@@ -580,45 +593,52 @@ const ProtocolSidebar: React.FC<Props> = ({ isOpen, onClose, apparatus }) => {
         return (
           <div>
             <div style={S.card}>
-              <div style={{ color: "#38bdf8", fontWeight: 700, fontSize: 14, marginBottom: 4 }}>Preparation of Vanishing Cream</div>
+              <div style={{ color: "#38bdf8", fontWeight: 700, fontSize: 14, marginBottom: 4 }}>
+                {isColdCream ? "Preparation of Cold Cream (W/O)" : "Preparation of Vanishing Cream (O/W)"}
+              </div>
               <div style={{ color: "#64748b", fontSize: 12 }}>Follow each step in order. Do not skip steps.</div>
             </div>
 
             <div style={{ color: "#60a5fa", fontSize: 11, fontWeight: 700, letterSpacing: 1, textTransform: "uppercase", marginBottom: 10, marginTop: 4 }}>
               — Oil Phase —
             </div>
-            <Step n={1} text="Drag the Spatula onto the Stearic Acid bottle. Select 18 g and click Scoop."
-              tip="Use the digital balance to confirm weight" />
-            <Step n={2} text="Drag the loaded spatula into the 250 mL Oil Phase Beaker to deposit the stearic acid."
-              tip="Stearic acid appears as solid white chunks" />
-            <Step n={3} text="Drag the Liquid Paraffin bottle over the Oil Phase Beaker. Select 7 mL and pour."
-              tip="Liquid paraffin is light yellow — correct amount turns green" />
-            <Step n={4} text="Drag the Oil Phase Beaker onto the Hot Plate. Confirm target = 75°C and turn ON."
-              warn="Stearic acid melts at 70°C — wait for the melt toast" />
-            <Step n={5} text="Wait for the green toast: 'Oil Phase Beaker reached 75°C'. Then drag beaker off the hot plate."
-              tip="Temperature holds after removal — no cooling until ice bucket" />
+            {isColdCream ? (<>
+              <Step n={1} text="Drag the Spatula onto the Beeswax container. Select 12 g and click Scoop." tip="Beeswax appears as golden solid chunks" />
+              <Step n={2} text="Drag the loaded spatula into the 250 mL Oil Phase Beaker to deposit the beeswax." />
+              <Step n={3} text="Drag the Liquid Paraffin bottle over the Oil Phase Beaker. Select 35 mL and pour." warn="35 mL — much more than in vanishing cream!" />
+              <Step n={4} text="Drag the Oil Phase Beaker onto the Hot Plate. Set target = 70°C and turn ON." warn="Beeswax melts at 62°C — wait for the melt toast" />
+              <Step n={5} text="Wait for 'Oil Phase Beaker reached 70°C'. Remove beaker from hot plate." tip="Oil phase is now a clear golden liquid" />
+            </>) : (<>
+              <Step n={1} text="Drag the Spatula onto the Stearic Acid bottle. Select 18 g and click Scoop." tip="Use the digital balance to confirm weight" />
+              <Step n={2} text="Drag the loaded spatula into the 250 mL Oil Phase Beaker to deposit the stearic acid." tip="Stearic acid appears as solid white chunks" />
+              <Step n={3} text="Drag the Liquid Paraffin bottle over the Oil Phase Beaker. Select 7 mL and pour." tip="Liquid paraffin is light yellow" />
+              <Step n={4} text="Drag the Oil Phase Beaker onto the Hot Plate. Confirm target = 75°C and turn ON." warn="Stearic acid melts at 70°C — wait for the melt toast" />
+              <Step n={5} text="Wait for 'Oil Phase Beaker reached 75°C'. Then drag beaker off the hot plate." tip="Temperature holds after removal" />
+            </>)}
 
             <div style={{ color: "#60a5fa", fontSize: 11, fontWeight: 700, letterSpacing: 1, textTransform: "uppercase", marginBottom: 10, marginTop: 16 }}>
               — Aqueous Phase —
             </div>
-            <Step n={6} text="Drag the Distilled Water bottle over the 250 mL Aqueous Phase Beaker. Select 70 mL and pour." />
-            <Step n={7} text="Add 3 mL Glycerin then 1 mL KOH & Triethanolamine to the Aqueous Phase Beaker." />
-            <Step n={8} text="Drag the Aqueous Phase Beaker onto the Hot Plate. Wait for 75°C toast. Remove from plate."
-              tip="Both phases must be at the same temperature before mixing" />
+            {isColdCream ? (<>
+              <Step n={6} text="Drag the Distilled Water bottle over the Aqueous Phase Beaker. Select 40 mL and pour." />
+              <Step n={7} text="Add 3 mL Borax Solution to the Aqueous Phase Beaker." />
+              <Step n={8} text="Drag the Aqueous Phase Beaker onto the Hot Plate. Heat to 70°C then remove." tip="Both phases must be at the same temperature" />
+            </>) : (<>
+              <Step n={6} text="Drag the Distilled Water bottle over the Aqueous Phase Beaker. Select 70 mL and pour." />
+              <Step n={7} text="Add 3 mL Glycerin then 1 mL KOH & Triethanolamine to the Aqueous Phase Beaker." />
+              <Step n={8} text="Drag the Aqueous Phase Beaker onto the Hot Plate. Wait for 75°C toast. Remove from plate." tip="Both phases must be at the same temperature before mixing" />
+            </>)}
 
             <div style={{ color: "#60a5fa", fontSize: 11, fontWeight: 700, letterSpacing: 1, textTransform: "uppercase", marginBottom: 10, marginTop: 16 }}>
-              — Mixing & Finishing —
+              — Mixing &amp; Finishing —
             </div>
-            <Step n={9} text="Pour the Oil Phase Beaker into the 500 mL Main Mixing Beaker first (select all volume)."
-              warn="Oil goes in FIRST — this is the critical order" />
-            <Step n={10} text="Pour the Aqueous Phase Beaker into the Main Mixing Beaker (select all volume)."
-              tip="You should see 'Phases combined ✓'" />
-            <Step n={11} text="Drag the Stirring Rod into the Main Mixing Beaker. Hold mouse to stir for at least 30 seconds." />
-            <Step n={12} text="Drag the Main Mixing Beaker into the Ice Bucket. Continue stirring until temperature ≤ 40°C."
-              tip="Watch for 'Cooled to ≤40°C' toast" />
-            <Step n={13} text="Dip the pH Meter into the Main Mixing Beaker. Wait 2–3 seconds for reading to settle." />
-            <Step n={14} text="Dip the Viscosity Gauge into the Main Mixing Beaker. Wait for reading to settle." />
-            <Step n={15} text="Click ⚗ Evaluate Formulation (bottom right) then click EVALUATE RESULT." />
+            <Step n={9}  text="Pour the Oil Phase Beaker into the 500 mL Main Mixing Beaker first (all volume)." warn="Oil MUST go in FIRST — critical order" />
+            <Step n={10} text="Pour the Aqueous Phase Beaker into the Main Mixing Beaker (all volume)." tip="You should see 'Phases combined ✓'" />
+            <Step n={11} text={isColdCream ? "Stir for at least 20 seconds continuously." : "Stir for at least 30 seconds continuously."} />
+            <Step n={12} text={isColdCream ? "Place Main Beaker in Ice Bucket. Stir until ≤35°C." : "Place Main Beaker in Ice Bucket. Stir until ≤40°C."} tip={isColdCream ? "Watch for 'Cooled to ≤35°C' toast" : "Watch for 'Cooled to ≤40°C' toast"} />
+            <Step n={13} text="Dip the pH Meter into the Main Mixing Beaker. Wait for reading to settle." />
+            <Step n={14} text="Dip the Viscosity Gauge. Wait for reading to settle." />
+            <Step n={15} text="Click ⚗ Evaluate (top right) then EVALUATE RESULT." />
           </div>
         );
 
@@ -633,31 +653,48 @@ const ProtocolSidebar: React.FC<Props> = ({ isOpen, onClose, apparatus }) => {
               </div>
 
               <div style={{ color: "#475569", fontSize: 10, fontWeight: 700, letterSpacing: 1.5, textTransform: "uppercase", marginBottom: 6 }}>Ingredients Used</div>
-              <ResultRow label="Stearic Acid"          value={`${stearicG}`}   unit="g"  pass={stearicG >= 15 && stearicG <= 20} />
-              <ResultRow label="Liquid Paraffin"       value={`${paraffinML}`} unit="mL" pass={paraffinML >= 5 && paraffinML <= 10} />
-              <ResultRow label="Glycerin"              value={`${glycerinML}`} unit="mL" pass={glycerinML >= 2 && glycerinML <= 5} />
-              <ResultRow label="KOH & Triethanolamine" value={`${kohML}`}      unit="mL" pass={kohML >= 0.5 && kohML <= 2} />
-              <ResultRow label="Distilled Water"       value={`${waterML}`}    unit="mL" pass={waterML >= 65 && waterML <= 75} />
+              {isColdCream ? (<>
+                <ResultRow label="Beeswax"         value={`${beeswaxG}`}   unit="g"  pass={beeswaxG  >= 10  && beeswaxG  <= 16} />
+                <ResultRow label="Liquid Paraffin" value={`${paraffinML}`} unit="mL" pass={paraffinML >= 34  && paraffinML <= 46} />
+                <ResultRow label="Borax Solution"  value={`${boraxML}`}    unit="mL" pass={boraxML   >= 2   && boraxML   <= 5} />
+                <ResultRow label="Distilled Water" value={`${waterML}`}    unit="mL" pass={waterML   >= 35  && waterML   <= 50} />
+              </>) : (<>
+                <ResultRow label="Stearic Acid"          value={`${stearicG}`}   unit="g"  pass={stearicG  >= 15  && stearicG  <= 20} />
+                <ResultRow label="Liquid Paraffin"       value={`${paraffinML}`} unit="mL" pass={paraffinML >= 5   && paraffinML <= 10} />
+                <ResultRow label="Glycerin"              value={`${glycerinML}`} unit="mL" pass={glycerinML >= 2   && glycerinML <= 5} />
+                <ResultRow label="KOH & Triethanolamine" value={`${kohML}`}      unit="mL" pass={kohML      >= 0.5 && kohML      <= 2} />
+                <ResultRow label="Distilled Water"       value={`${waterML}`}    unit="mL" pass={waterML    >= 65  && waterML    <= 75} />
+              </>)}
 
               <div style={{ borderTop: "1px solid #1e293b", margin: "12px 0" }} />
               <div style={{ color: "#475569", fontSize: 10, fontWeight: 700, letterSpacing: 1.5, textTransform: "uppercase", marginBottom: 6 }}>Temperature</div>
-              <ResultRow label="Oil Phase Max Temp"     value={`${Math.round(oilMaxT)}`} unit="°C" pass={oilMaxT >= 70 && oilMaxT <= 80} />
-              <ResultRow label="Aqueous Phase Max Temp" value={`${Math.round(aqMaxT)}`}  unit="°C" pass={aqMaxT >= 70 && aqMaxT <= 80} />
+              <ResultRow label="Oil Phase Max Temp"     value={`${Math.round(oilMaxT)}`} unit="°C" pass={isColdCream ? (oilMaxT >= 65 && oilMaxT <= 75) : (oilMaxT >= 70 && oilMaxT <= 80)} />
+              <ResultRow label="Aqueous Phase Max Temp" value={`${Math.round(aqMaxT)}`}  unit="°C" pass={isColdCream ? (aqMaxT  >= 65 && aqMaxT  <= 75) : (aqMaxT  >= 70 && aqMaxT  <= 80)} />
 
               <div style={{ borderTop: "1px solid #1e293b", margin: "12px 0" }} />
               <div style={{ color: "#475569", fontSize: 10, fontWeight: 700, letterSpacing: 1.5, textTransform: "uppercase", marginBottom: 6 }}>Process</div>
-              <ResultRow label="Stirring Time"      value={`${stirSec}`}      unit="s"  pass={stirSec >= 30} />
-              <ResultRow label="Cooling Temperature" value={`${coolTemp}`}    unit="°C" pass={coolTemp <= 40} />
+              <ResultRow label="Stirring Time"       value={`${stirSec}`}   unit="s"  pass={isColdCream ? stirSec >= 20 : stirSec >= 30} />
+              <ResultRow label="Cooling Temperature" value={`${coolTemp}`}  unit="°C" pass={isColdCream ? coolTemp <= 35 : coolTemp <= 40} />
 
               <div style={{ borderTop: "1px solid #1e293b", margin: "12px 0" }} />
               <div style={{ color: "#475569", fontSize: 10, fontWeight: 700, letterSpacing: 1.5, textTransform: "uppercase", marginBottom: 6 }}>Instrument Readings</div>
-              <ResultRow label="pH Meter"        value={measuredPH   > 0 ? measuredPH.toFixed(2)   : "Not measured"} pass={measuredPH > 0 ? measuredPH >= 5 && measuredPH <= 7 : null} />
-              <ResultRow label="Viscosity Gauge" value={measuredVisc > 0 ? `${measuredVisc} cP`     : "Not measured"} pass={measuredVisc > 0 ? measuredVisc >= 1100 && measuredVisc <= 1800 : null} />
+              <ResultRow label="pH Meter"        value={measuredPH   > 0 ? measuredPH.toFixed(2) : "Not measured"} pass={measuredPH > 0 ? (isColdCream ? measuredPH >= 6 && measuredPH <= 7.5 : measuredPH >= 5 && measuredPH <= 7) : null} />
+              <ResultRow label="Viscosity Gauge" value={measuredVisc > 0 ? `${measuredVisc} cP`  : "Not measured"} pass={measuredVisc > 0 ? (isColdCream ? measuredVisc >= 2000 && measuredVisc <= 6000 : measuredVisc >= 1100 && measuredVisc <= 1800) : null} />
             </div>
 
             <div style={{ ...S.card, marginTop: 4 }}>
               <div style={{ color: "#38bdf8", fontWeight: 700, fontSize: 13, marginBottom: 8 }}>Target Ranges</div>
-              {[
+              {(isColdCream ? [
+                ["Beeswax",        "10–16 g"],
+                ["Liquid Paraffin","34–46%"],
+                ["Borax",          "2–5 mL"],
+                ["Water",          "35–50 mL"],
+                ["Both Temps",     "65–75°C"],
+                ["Stirring",       "≥ 20 s"],
+                ["Cooling",        "≤ 35°C"],
+                ["pH",             "6.0–7.5"],
+                ["Viscosity",      "2000–6000 cP"],
+              ] : [
                 ["Stearic Acid",    "15–20 g"],
                 ["Liquid Paraffin", "5–10 mL"],
                 ["Glycerin",        "2–5 mL"],
@@ -668,7 +705,7 @@ const ProtocolSidebar: React.FC<Props> = ({ isOpen, onClose, apparatus }) => {
                 ["Cooling",         "≤ 40°C"],
                 ["pH",              "5.0–7.0"],
                 ["Viscosity",       "1100–1800 cP"],
-              ].map(([label, range]) => (
+              ]).map(([label, range]) => (
                 <div key={label} style={{ display: "flex", justifyContent: "space-between",
                   padding: "4px 0", borderBottom: "1px solid rgba(255,255,255,0.04)", fontSize: 12 }}>
                   <span style={{ color: "#64748b" }}>{label}</span>
@@ -691,41 +728,33 @@ const ProtocolSidebar: React.FC<Props> = ({ isOpen, onClose, apparatus }) => {
               </p>
             </div>
 
-            <Field
-              label="1. Was your prediction about the cream's appearance correct? How did the actual result compare?"
-              value={ref1}
-              onChange={setRef1}
-              rows={4}
-            />
-            <Field
-              label="2. Why is it important to heat both the oil phase and aqueous phase to the same temperature (75°C) before mixing?"
-              value={ref2}
-              onChange={setRef2}
-              rows={4}
-            />
-            <Field
-              label="3. Why must the oil phase be poured into the main beaker first, and the aqueous phase added into it (not the other way around)?"
-              value={ref3}
-              onChange={setRef3}
-              rows={4}
-            />
-            <Field
-              label="4. What would happen to the cream's quality if you skipped the cooling step or cooled it too quickly? Explain."
-              value={ref4}
-              onChange={setRef4}
-              rows={4}
-            />
+            {isColdCream ? (<>
+              <Field label="1. Was your prediction about the cold cream's texture correct? How does it compare to a vanishing cream?" value={ref1} onChange={setRef1} rows={4} />
+              <Field label="2. Why must beeswax be fully melted (>62°C) before the aqueous phase is added?" value={ref2} onChange={setRef2} rows={4} />
+              <Field label="3. Why is the mixing order critical — why must the oil phase already be in the main beaker before adding the aqueous phase?" value={ref3} onChange={setRef3} rows={4} />
+              <Field label="4. Cold cream needs to cool to ≤35°C — lower than vanishing cream (≤40°C). Why does W/O cream require lower cooling temperature for best texture?" value={ref4} onChange={setRef4} rows={4} />
+            </>) : (<>
+              <Field label="1. Was your prediction about the cream's appearance correct? How did the actual result compare?" value={ref1} onChange={setRef1} rows={4} />
+              <Field label="2. Why is it important to heat both phases to the same temperature (75°C) before mixing?" value={ref2} onChange={setRef2} rows={4} />
+              <Field label="3. Why must the oil phase be poured first, and the aqueous phase added into it?" value={ref3} onChange={setRef3} rows={4} />
+              <Field label="4. What would happen if you skipped the cooling step or cooled too quickly?" value={ref4} onChange={setRef4} rows={4} />
+            </>)}
 
             <div style={S.card}>
               <div style={{ color: "#38bdf8", fontWeight: 700, fontSize: 13, marginBottom: 8 }}>Key Concepts to Review</div>
-              {[
+              {(isColdCream ? [
+                ["W/O Emulsion",       "Water droplets dispersed in a continuous oil phase"],
+                ["Beeswax Soap",       "Formed by beeswax fatty acids + borax; acts as W/O emulsifier"],
+                ["Phase Temperature",  "Both phases at 65–75°C ensures equal fluidity for uniform mixing"],
+                ["Viscosity",          "W/O cream viscosity 2000–6000 cP — much thicker than O/W"],
+                ["pH",                 "Borax buffers pH to 6–7.5 — slightly alkaline"],
+              ] : [
                 ["O/W Emulsion",       "Oil droplets dispersed in a continuous water phase"],
-                ["Emulsification",     "The process of combining immiscible liquids using an emulsifier"],
-                ["Potassium Stearate", "Soap formed by KOH + stearic acid reaction; acts as emulsifier"],
+                ["Potassium Stearate", "Soap formed by KOH + stearic acid; acts as O/W emulsifier"],
                 ["Phase Temperature",  "Both phases at 75°C ensures equal fluidity for uniform mixing"],
                 ["Viscosity",          "Resistance to flow; increases as cream cools and sets"],
                 ["pH",                 "Affects skin compatibility; 5–7 matches skin's natural pH"],
-              ].map(([term, def]) => (
+              ]).map(([term, def]) => (
                 <div key={term} style={{ marginBottom: 8 }}>
                   <span style={{ color: "#60a5fa", fontWeight: 700, fontSize: 12 }}>{term}: </span>
                   <span style={{ color: "#94a3b8", fontSize: 12 }}>{def}</span>
@@ -761,7 +790,19 @@ const ProtocolSidebar: React.FC<Props> = ({ isOpen, onClose, apparatus }) => {
 
             <div style={S.card}>
               <div style={{ color: "#38bdf8", fontWeight: 700, fontSize: 14, marginBottom: 10 }}>Procedure Checklist</div>
-              {[
+              {(isColdCream ? [
+                ["Weighed 12 g beeswax accurately",                        beeswaxG >= 10 && beeswaxG <= 16],
+                ["Added 35 mL liquid paraffin to oil beaker",              paraffinML >= 30 && paraffinML <= 40],
+                ["Heated oil phase to 65–75°C (beeswax melted)",          oilMaxT >= 65 && oilMaxT <= 80],
+                ["Added 40 mL water + 3 mL borax to aqueous beaker",      waterML >= 35 && waterML <= 50 && boraxML >= 2],
+                ["Heated aqueous phase to 65–75°C",                        aqMaxT >= 65 && aqMaxT <= 80],
+                ["Poured oil phase into main beaker first",                (mainBeaker?.data?.pouringSourceHistory ?? []).includes("beaker-250-oil")],
+                ["Poured aqueous phase into oil (correct order)",          (() => { const h = mainBeaker?.data?.pouringSourceHistory ?? []; const o = h.indexOf("beaker-250-oil"); const a = h.indexOf("beaker-250-aqueous"); return o !== -1 && a !== -1 && o < a; })()],
+                ["Stirred for at least 20 seconds",                        stirSec >= 20],
+                ["Cooled in ice bucket to ≤ 35°C",                        coolTemp <= 35],
+                ["Measured pH (6.0–7.5)",                                  measuredPH >= 6 && measuredPH <= 7.5],
+                ["Measured viscosity (2000–6000 cP)",                      measuredVisc >= 2000 && measuredVisc <= 6000],
+              ] : [
                 ["Weighed 18 g stearic acid accurately",                   stearicG >= 15 && stearicG <= 20],
                 ["Added 7 mL liquid paraffin to oil beaker",               paraffinML >= 5 && paraffinML <= 10],
                 ["Heated oil phase to 70–80°C",                            oilMaxT >= 70 && oilMaxT <= 80],
@@ -773,7 +814,7 @@ const ProtocolSidebar: React.FC<Props> = ({ isOpen, onClose, apparatus }) => {
                 ["Cooled in ice bucket to ≤ 40°C",                        coolTemp <= 40],
                 ["Measured pH (5.0–7.0)",                                  measuredPH >= 5 && measuredPH <= 7],
                 ["Measured viscosity (1100–1800 cP)",                      measuredVisc >= 1100 && measuredVisc <= 1800],
-              ].map(([label, done]) => (
+              ]).map(([label, done]) => (
                 <div key={label as string} style={{ display: "flex", gap: 10, alignItems: "center",
                   padding: "6px 0", borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
                   <span style={{ flexShrink: 0, width: 20, height: 20, borderRadius: "50%",
@@ -793,9 +834,9 @@ const ProtocolSidebar: React.FC<Props> = ({ isOpen, onClose, apparatus }) => {
                 Key Learning
               </div>
               <div style={{ color: "#86efac", fontSize: 12, lineHeight: 1.6 }}>
-                Vanishing cream formation depends on precise temperatures, correct ingredient proportions,
-                proper mixing order, sufficient stirring, and controlled cooling. Every step affects
-                the stability, pH, and viscosity of the final product.
+                {isColdCream
+                  ? "Cold cream (W/O) formation depends on fully melting the beeswax, matching both phase temperatures, adding aqueous into oil, vigorous stirring, and cooling to ≤35°C. The beeswax-borax reaction creates the emulsifier in situ."
+                  : "Vanishing cream (O/W) formation depends on precise temperatures, correct ingredient proportions, proper mixing order, sufficient stirring, and controlled cooling. Every step affects stability, pH, and viscosity."}
               </div>
             </div>
           </div>
@@ -816,7 +857,9 @@ const ProtocolSidebar: React.FC<Props> = ({ isOpen, onClose, apparatus }) => {
         background: "#080f1e", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <div>
           <div style={{ color: "white", fontWeight: 800, fontSize: 16 }}>Lab Workbook</div>
-          <div style={{ color: "#475569", fontSize: 11 }}>Vanishing Cream — O/W Emulsion</div>
+          <div style={{ color: "#475569", fontSize: 11 }}>
+            {isColdCream ? "Cold Cream — W/O Emulsion" : "Vanishing Cream — O/W Emulsion"}
+          </div>
         </div>
         <button onClick={onClose} style={{ background: "#1e293b", border: "none", color: "#94a3b8",
           borderRadius: 8, width: 32, height: 32, cursor: "pointer", fontSize: 20, lineHeight: 1 }}>×</button>

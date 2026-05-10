@@ -3,9 +3,10 @@ import { SimulationStep } from "./simulation/model/types";
 import InteractiveLabCanvas from "./components/InteractiveLabCanvas";
 import LabSelection from "./components/LabSelection";
 import PreLabNotebook from "./components/PreLabNotebook";
+import TeacherPanel from "./components/TeacherPanel";
 import "./App.css";
 
-type AppState = "selection" | "pre-lab" | "lab";
+type AppState = "selection" | "pre-lab" | "lab" | "teacher";
 
 function App() {
   const [appState,          setAppState]          = useState<AppState>("selection");
@@ -16,10 +17,15 @@ function App() {
     ? "Cold Cream — W/O Emulsion"
     : "Vanishing Cream — O/W Emulsion";
 
+  if (appState === "teacher") {
+    return <TeacherPanel onBack={() => setAppState("selection")} />;
+  }
+
   if (appState === "selection") {
     return (
       <LabSelection
         onSelect={(id) => { setSelectedPractical(id); setAppState("pre-lab"); }}
+        onTeacherPanel={() => setAppState("teacher")}
       />
     );
   }

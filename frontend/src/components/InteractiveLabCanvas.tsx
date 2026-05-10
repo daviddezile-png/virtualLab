@@ -1673,9 +1673,14 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
       ctx.fillStyle = NAV_COLOR;
       ctx.fillRect(0, 0, canvasSize.width, NAV_BAR_HEIGHT);
 
-      // 3. STORAGE SHELF
+      // 3. STORAGE SHELF — extend to cover every item resting on it
+      const shelfRightEdge = apparatus.reduce((maxX, a) => {
+        const onShelf = Math.abs((a.y + a.height) - shelfY) < 30;
+        return onShelf ? Math.max(maxX, a.x + a.width + 20) : maxX;
+      }, tableTotalWidth + LEFT_GAP);
+      const shelfDrawWidth = shelfRightEdge - LEFT_GAP;
       ctx.fillStyle = "rgba(255, 255, 255, 0.2)";
-      ctx.fillRect(LEFT_GAP, shelfY, tableTotalWidth, 6);
+      ctx.fillRect(LEFT_GAP, shelfY, shelfDrawWidth, 6);
 
       // 4. DRAW TABLE
       const drawCabinet = (x: number, isRight: boolean) => {
@@ -2692,13 +2697,15 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
             if (Math.abs(newY + app.height - shelfY) < snapDistance)
               newY = shelfY - app.height;
 
-            return { ...app, x: x - drag.offsetX, y: newY };
+            const boundedX = Math.max(0, Math.min(x - drag.offsetX, canvasSize.width - app.width));
+            const boundedY = Math.max(NAV_BAR_HEIGHT, Math.min(newY, canvasSize.height - app.height));
+            return { ...app, x: boundedX, y: boundedY };
           }
           return app;
         });
       });
     },
-    [TABLE_Y, shelfY],   // dragging removed — we read from ref instead
+    [TABLE_Y, shelfY, canvasSize, NAV_BAR_HEIGHT],   // dragging removed — we read from ref instead
   );
 
   const handleMouseUp = useCallback(() => {
@@ -3738,6 +3745,7 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
         isOpen={showProtocolSidebar}
         onClose={() => setShowProtocolSidebar(false)}
         apparatus={apparatus}
+        practicalId={practicalId}
       />
 
       {/* Lab Workbook Toggle Button */}
