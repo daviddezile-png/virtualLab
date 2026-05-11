@@ -307,8 +307,8 @@ const EvaluationPanel: React.FC<Props> = ({ isOpen, onClose, apparatus, practica
         got:`${td.toFixed(1)}°C`, target:"≤5°C",
         status:(td<=5?"pass":td<=10?"warn":"fail") as "pass"|"warn"|"fail" },
       { label:"Mixing Order",
-        got:f.mixing_order==="aqueous_to_oil"?"Aqueous → Oil":"Oil → Aqueous",
-        target:"Aqueous → Oil",
+        got:f.mixing_order==="aqueous_to_oil"?"Oil first, then Aqueous":"Aqueous first, then Oil",
+        target:"Oil first, then Aqueous",
         status:(f.mixing_order==="aqueous_to_oil"?"pass":"fail") as "pass"|"warn"|"fail" },
       { label:"Mixing Time",
         got:`${f.mixing_time} s`, target:"≥30 s",
@@ -347,7 +347,7 @@ const EvaluationPanel: React.FC<Props> = ({ isOpen, onClose, apparatus, practica
         status:(f.aqueous_phase_temperature>=65&&f.aqueous_phase_temperature<=75?"pass":f.aqueous_phase_temperature>=58&&f.aqueous_phase_temperature<=82?"warn":"fail") as "pass"|"warn"|"fail" },
       { label:"Phase Temperature Difference", got:`${td.toFixed(1)}°C`, target:"≤5°C",
         status:(td<=5?"pass":td<=10?"warn":"fail") as "pass"|"warn"|"fail" },
-      { label:"Mixing Order",       got:f.mixing_order==="aqueous_to_oil"?"Aqueous → Oil":"Oil → Aqueous", target:"Aqueous → Oil",
+      { label:"Mixing Order",       got:f.mixing_order==="aqueous_to_oil"?"Oil first, then Aqueous":"Aqueous first, then Oil", target:"Oil first, then Aqueous",
         status:(f.mixing_order==="aqueous_to_oil"?"pass":"fail") as "pass"|"warn"|"fail" },
       { label:"Mixing Time",        got:`${f.mixing_time} s`, target:"≥20 s",
         status:(f.mixing_time>=20?"pass":f.mixing_time>=12?"warn":"fail") as "pass"|"warn"|"fail" },
@@ -456,12 +456,12 @@ const EvaluationPanel: React.FC<Props> = ({ isOpen, onClose, apparatus, practica
             <SectionTitle>Process Recorded</SectionTitle>
 
             {isColdCream ? (<>
-              <DetectedRow label="Mixing Order"        value={ccForm.mixing_order==="aqueous_to_oil" ? "Aqueous → Oil ✓" : "Oil → Aqueous ✗"} inRange={ccForm.mixing_order==="aqueous_to_oil"} />
+              <DetectedRow label="Mixing Order"        value={ccForm.mixing_order==="aqueous_to_oil" ? "Oil first ✓" : "Aqueous first ✗"} inRange={ccForm.mixing_order==="aqueous_to_oil"} />
               <DetectedRow label="Stirring Time"       value={`${ccForm.mixing_time} s`}       inRange={ccForm.mixing_time>=20} />
               <DetectedRow label="Cooling Temperature" value={`${ccForm.cooling_temperature}°C`} inRange={ccForm.cooling_temperature<=35} />
               <DetectedRow label="Stirred while Cooling" value={ccForm.cooling_stirring ? "Yes ✓" : "No ✗"} inRange={ccForm.cooling_stirring} />
             </>) : (<>
-              <DetectedRow label="Mixing Order"        value={form.mixing_order==="aqueous_to_oil" ? "Aqueous → Oil ✓" : "Oil → Aqueous ✗"} inRange={form.mixing_order==="aqueous_to_oil"} />
+              <DetectedRow label="Mixing Order"        value={form.mixing_order==="aqueous_to_oil" ? "Oil first ✓" : "Aqueous first ✗"} inRange={form.mixing_order==="aqueous_to_oil"} />
               <DetectedRow label="Stirring Time"       value={`${form.mixing_time} s`}       inRange={form.mixing_time>=30} />
               <DetectedRow label="Cooling Temperature" value={`${form.cooling_temperature}°C`} inRange={form.cooling_temperature<=40} />
               <DetectedRow label="Stirred while Cooling" value={form.cooling_stirring ? "Yes ✓" : "No ✗"} inRange={form.cooling_stirring} />
