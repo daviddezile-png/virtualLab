@@ -1,4 +1,6 @@
 import React, { useState } from "react";
+import { findAssignment, incrementUses, startSession, isCodeExpired, Assignment } from "../utils/assignmentStore";
+import { getCurrentUser, logoutUser } from "../utils/userStore";
 
 interface Practical {
   id: string;
@@ -101,12 +103,50 @@ const DIFF_COLOR = {
 };
 
 interface Props {
-  onSelect: (id: string) => void;
+  onSelect:       (id: string) => void;
   onTeacherPanel?: () => void;
+  onAssignment?:  (assignment: Assignment) => void;
 }
 
-const LabSelection: React.FC<Props> = ({ onSelect, onTeacherPanel }) => {
-  const [hovered, setHovered] = useState<string | null>(null);
+const LabSelection: React.FC<Props> = ({ onSelect, onTeacherPanel, onAssignment }) => {
+  const [hovered,    setHovered]    = useState<string | null>(null);
+  const [tokenInput, setTokenInput] = useState("");
+  const [tokenError, setTokenError] = useState("");
+  const [checking,   setChecking]   = useState(false);
+  const currentUser = getCurrentUser();
+
+  const handleTokenSubmit = () => {
+    const raw = tokenInput.trim().toUpperCase();
+    if (!raw) { setTokenError("Please enter a code."); return; }
+    setChecking(true);
+    setTokenError("");
+    // Simulate brief async lookup (swap for API call when backend is ready)
+    setTimeout(() => {
+      const found = findAssignment(raw);
+      if (!found) {
+        setTokenError("Code not found. Check with your teacher and try again.");
+        setChecking(false);
+        return;
+      }
+      // Check if the teacher-set code expiry has passed
+      if (isCodeExpired(found)) {
+        const expDate = new Date(found.codeExpiresAt!).toLocaleString();
+        setTokenError(`This assignment code expired on ${expDate}. Ask your teacher for a new one.`);
+        setChecking(false);
+        return;
+      }
+      incrementUses(found.token);
+      startSession({
+        token:       found.token,
+        practicalId: found.practicalId,
+        startedAt:   new Date().toISOString(),
+        mode:        "assignment",
+        synced:      false, // TODO: POST to /api/sessions when backend is ready
+      });
+      setChecking(false);
+      onAssignment?.(found);
+    }, 500);
+  };
 
   return (
     <div style={{ minHeight:"100vh", background:"#060d18",
@@ -129,20 +169,88 @@ const LabSelection: React.FC<Props> = ({ onSelect, onTeacherPanel }) => {
             <div style={{ color:"#475569", fontSize:11 }}>Pharmaceutical Chemistry · Emulsion Practicals</div>
           </div>
         </div>
-        <div style={{ display:"flex", alignItems:"center", gap:14 }}>
-          <span style={{ color:"#334155", fontSize:12 }}>1 available · 1 coming soon</span>
+        <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+          {currentUser && (
+            <div style={{ textAlign:"right" }}>
+              <div style={{ color:"#e2e8f0", fontSize:12, fontWeight:700 }}>
+                {currentUser.fullName}
+              </div>
+              <div style={{ color:"#475569", fontSize:10, textTransform:"capitalize" }}>
+                {currentUser.role}{currentUser.regNumber ? ` · ${currentUser.regNumber}` : ""}
+              </div>
+            </div>
+          )}
           {onTeacherPanel && (
             <button onClick={onTeacherPanel} style={{
               display:"flex", alignItems:"center", gap:7,
-              background:"rgba(255,255,255,0.05)", border:"1px solid #334155",
-              color:"#94a3b8", borderRadius:9, padding:"7px 14px",
+              background:"rgba(34,197,94,0.10)", border:"1px solid #22c55e44",
+              color:"#22c55e", borderRadius:9, padding:"7px 14px",
               fontSize:12, fontWeight:600, cursor:"pointer", transition:"all .15s",
             }}>
               <span>🎓</span> Teacher Panel
             </button>
           )}
+          {currentUser && (
+            <button
+              onClick={() => { logoutUser(); window.location.reload(); }}
+              style={{
+                background:"rgba(255,255,255,0.05)", border:"1px solid #334155",
+                color:"#94a3b8", borderRadius:9, padding:"7px 14px",
+                fontSize:12, fontWeight:600, cursor:"pointer",
+              }}>
+              Logout
+            </button>
+          )}
         </div>
       </header>
+
+      {/* ── Assignment Code Entry ── */}
+      <div style={{ background:"#080f1e", borderBottom:"1px solid #1e3a5f",
+        padding:"20px clamp(16px,3vw,40px)" }}>
+        <div style={{ maxWidth:700, margin:"0 auto" }}>
+          <div style={{ color:"#60a5fa", fontSize:11, fontWeight:700, letterSpacing:1.2,
+            textTransform:"uppercase", marginBottom:10, display:"flex", alignItems:"center", gap:6 }}>
+            <span style={{ display:"inline-block", width:8, height:8, borderRadius:"50%",
+              background:"#22c55e", boxShadow:"0 0 6px #22c55e" }} />
+            Have an Assignment Code from your Teacher?
+          </div>
+          <div style={{ display:"flex", gap:10, alignItems:"flex-start", flexWrap:"wrap" }}>
+            <div style={{ flex:1, minWidth:220 }}>
+              <input
+                value={tokenInput}
+                onChange={e => { setTokenInput(e.target.value.toUpperCase()); setTokenError(""); }}
+                onKeyDown={e => e.key === "Enter" && handleTokenSubmit()}
+                placeholder="e.g.  VC-ABC123"
+                maxLength={9}
+                style={{
+                  width:"100%", background:"#0a1628",
+                  border:`1.5px solid ${tokenError ? "#ef4444" : tokenInput ? "#2563eb" : "#1e3a5f"}`,
+                  color:"#e2e8f0", borderRadius:10, padding:"12px 16px",
+                  fontSize:18, fontWeight:700, letterSpacing:3,
+                  fontFamily:"monospace", boxSizing:"border-box", outline:"none",
+                  textTransform:"uppercase", transition:"border-color .15s",
+                }}
+              />
+              {tokenError && (
+                <div style={{ color:"#ef4444", fontSize:12, marginTop:5 }}>⚠ {tokenError}</div>
+              )}
+            </div>
+            <button
+              onClick={handleTokenSubmit}
+              disabled={checking}
+              style={{
+                padding:"12px 24px", background: checking ? "#1e293b" : "#2563eb",
+                color:"white", border:"none", borderRadius:10, cursor: checking ? "not-allowed" : "pointer",
+                fontWeight:700, fontSize:14, flexShrink:0, transition:"background .15s",
+              }}>
+              {checking ? "Checking…" : "Enter Lab →"}
+            </button>
+          </div>
+          <div style={{ color:"#334155", fontSize:11, marginTop:8 }}>
+            Your teacher will share a code like <code style={{ color:"#475569" }}>VC-XXXXXX</code> or <code style={{ color:"#475569" }}>CC-XXXXXX</code> for your assignment.
+          </div>
+        </div>
+      </div>
 
       {/* ── Hero ── */}
       <div style={{ background:"linear-gradient(180deg,#0d1b2e 0%,#060d18 60%)",
@@ -163,17 +271,17 @@ const LabSelection: React.FC<Props> = ({ onSelect, onTeacherPanel }) => {
 
         <h1 style={{ color:"white", fontSize:"clamp(24px,3.5vw,40px)", fontWeight:900, margin:"0 0 16px",
           lineHeight:1.15, letterSpacing:-0.5 }}>
-          Select Your{" "}
+          Self-Practice{" "}
           <span style={{ background:"linear-gradient(135deg,#60a5fa,#a78bfa)",
             WebkitBackgroundClip:"text", WebkitTextFillColor:"transparent" }}>
-            Cream Practical
+            Lab Mode
           </span>
         </h1>
-        <p style={{ color:"#64748b", fontSize:"clamp(13px,1.2vw,15px)", maxWidth:"min(560px,90vw)", margin:"0 auto",
+        <p style={{ color:"#64748b", fontSize:"clamp(13px,1.2vw,15px)", maxWidth:"min(580px,90vw)", margin:"0 auto",
           lineHeight:1.75 }}>
-          Simulate real pharmaceutical cream preparation in a fully interactive virtual lab.
-          Follow the protocol, control temperatures, mix phases correctly, and evaluate
-          your final product — just like a real pharmacy lab.
+          Use these practicals for <strong style={{ color:"#94a3b8" }}>self-training</strong>.
+          For a teacher assignment, enter your code above.
+          Data from self-practice is stored locally on your device.
         </p>
       </div>
 

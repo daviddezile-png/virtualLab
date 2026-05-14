@@ -4,6 +4,8 @@ import ApparatusDetailModal from "./ApparatusDetailModal";
 import ProtocolSidebar from "./ProtocolSidebar";
 import EvaluationPanel from "./EvaluationPanel";
 import { getInitialApparatus, getInitialApparatusColdCream, Apparatus } from "./apparatusData";
+import { Assignment, BASE_RECIPES } from "../utils/assignmentStore";
+import { logLabMilestone } from "../utils/auditStore";
 
 // Maps source bottle ID → composition key
 const BOTTLE_INGREDIENT: Record<string, string> = {
@@ -1582,20 +1584,34 @@ interface InteractiveLabCanvasProps {
   currentStep: SimulationStep;
   onApparatusClick?: (apparatus: Apparatus) => void;
   practicalId?: string;
+  assignment?: Assignment | null;
+  labExpired?: boolean;
 }
 
 const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
   currentStep,
   onApparatusClick,
   practicalId = "vanishing-cream",
+  assignment = null,
+  labExpired = false,
 }) => {
   const isColdCream = practicalId === "cold-cream";
+
+  // Multiplier = 1 for self-practice (base recipe), or scaled for assignment mode
+  const multiplier = assignment
+    ? +(assignment.targetGrams / BASE_RECIPES[assignment.practicalId].totalGrams).toFixed(4)
+    : 1;
   const canvasRef     = useRef<HTMLCanvasElement>(null);
   const holdStirRef   = useRef<{ rodId: string; targetId: string } | null>(null);
   const draggingRef   = useRef<{ id: string; offsetX: number; offsetY: number } | null>(null);
   const prevAppRef    = useRef<Apparatus[]>([]);
   const notifIdRef    = useRef(0);
   const milestoneRef  = useRef<Set<string>>(new Set()); // prevents duplicate one-shot alerts
+
+  // ── Undo history ──────────────────────────────────────────────────────────
+  const historyRef  = useRef<Apparatus[][]>([]);  // snapshots stack, newest at end
+  const MAX_HISTORY = 25;
+
   const [notifications, setNotifications] = useState<StepNotif[]>([]);
 
   const addNotif = useCallback((message: string, type: StepNotif["type"], detail?: string) => {
@@ -1639,6 +1655,26 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
       ? getInitialApparatusColdCream(LEFT_GAP, shelfY, TABLE_Y)
       : getInitialApparatus(LEFT_GAP, shelfY, TABLE_Y),
   );
+
+  // latestApparatusRef mirrors apparatus without using setApparatus as a snapshot vehicle
+  const latestApparatusRef = useRef<Apparatus[]>(apparatus);
+  useEffect(() => { latestApparatusRef.current = apparatus; }, [apparatus]);
+
+  // Snapshot before each action; undo pops back to the last snapshot
+  const pushHistory = useCallback(() => {
+    historyRef.current = [
+      ...historyRef.current,
+      latestApparatusRef.current.map(a => ({ ...a, data: a.data ? { ...a.data } : a.data })),
+    ].slice(-MAX_HISTORY);
+  }, []);
+
+  const undo = useCallback(() => {
+    if (historyRef.current.length === 0) return;
+    const prev = historyRef.current[historyRef.current.length - 1];
+    historyRef.current = historyRef.current.slice(0, -1);
+    setApparatus(prev);
+  }, []);
+
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [showEvaluationPanel, setShowEvaluationPanel] = useState(false);
   const [selectedPourAmount, setSelectedPourAmount] = useState(0);
@@ -2489,31 +2525,44 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
             delete pourStartRef.current[tid];
 
             const checkPour = (
-              key: string, label: string, min: number, max: number, unit: string,
+              key: string, label: string, baseMin: number, baseMax: number, unit: string,
             ) => {
               const added = +((endComp[key] ?? 0) - (startComp[key] ?? 0)).toFixed(1);
-              if (added < 0.05) return;
-              if (added >= min && added <= max)
+              if (added < 0.02) return;
+              const min = +(baseMin * multiplier).toFixed(2);
+              const max = +(baseMax * multiplier).toFixed(2);
+              if (added >= min && added <= max) {
                 addNotif(`✓ ${label}: ${added} ${unit}`, "success",
-                  `Correct amount — ideal ${min}–${max} ${unit}`);
-              else if (added < min)
-                addNotif(`⚠ ${label}: only ${added} ${unit} — too little`, "warning",
-                  `Ideal is ${min}–${max} ${unit}`);
-              else
+                  `Correct amount — target ${min}–${max} ${unit}`);
+                logLabMilestone(practicalId, `${label} poured: ${added} ${unit} ✓`);
+              } else if (added < min) {
+                addNotif(`⚠ ${label}: ${added} ${unit} — too little`, "warning",
+                  `Target is ${min}–${max} ${unit}`);
+                logLabMilestone(practicalId, `${label} poured: ${added} ${unit} ⚠ too little`);
+              } else {
                 addNotif(`⚠ ${label}: ${added} ${unit} — too much`, "warning",
-                  `Ideal is ${min}–${max} ${unit}`);
+                  `Target is ${min}–${max} ${unit}`);
+                logLabMilestone(practicalId, `${label} poured: ${added} ${unit} ⚠ too much`);
+              }
             };
 
-            checkPour("water",         "Distilled water",       65, 75, "mL");
-            checkPour("liquidParaffin","Liquid paraffin",         5, 10, "mL");
-            checkPour("glycerin",      "Glycerin",                2,  5, "mL");
-            checkPour("koh",           "KOH & Triethanolamine", 0.5,  2, "mL");
+            if (isColdCream) {
+              checkPour("water",         "Distilled water",   35, 50, "mL");
+              checkPour("liquidParaffin","Liquid paraffin",   30, 40, "mL");
+              checkPour("borax",         "Borax solution",     2,  5, "mL");
+            } else {
+              checkPour("water",         "Distilled water",   65, 75, "mL");
+              checkPour("liquidParaffin","Liquid paraffin",    5, 10, "mL");
+              checkPour("glycerin",      "Glycerin",           2,  5, "mL");
+              checkPour("koh",           "KOH & Triethanolamine", 0.5, 2, "mL");
+            }
           }
         } else if (p.data?.isPouring && !curr.data?.isPouring &&
                    (curr.type === "beaker" || curr.type === "cylinder")) {
           // Beaker/cylinder-to-beaker mix completed — give a positive mixing confirmation
           if (curr.type === "beaker")
             addNotif("Phases combined ✓", "success", "Continue stirring to complete emulsification");
+          logLabMilestone(practicalId, "Oil and aqueous phases combined in mixing beaker");
           // Always clean up the snapshot to prevent orphan entries
           delete pourStartRef.current[p.data?.pouringTargetId ?? ""];
         }
@@ -2525,42 +2574,86 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
         const currT = curr.data?.liquidTemperature ?? 25;
         const name  = curr.name;
 
-        if (prevT < 70 && currT >= 70 && hit(`melt-${curr.id}`))
+        if (prevT < 70 && currT >= 70 && hit(`melt-${curr.id}`)) {
           addNotif(`${name} — stearic acid melting`, "info", "Solid turning to liquid at 70°C ✓");
+          logLabMilestone(practicalId, `${name} reached 70°C — stearic acid melting`);
+        }
 
-        if (prevT < 75 && currT >= 75 && hit(`target75-${curr.id}`))
+        if (prevT < 75 && currT >= 75 && hit(`target75-${curr.id}`)) {
           addNotif(`✓ ${name} reached 75°C`, "success", "Correct temperature for emulsification");
+          logLabMilestone(practicalId, `${name} reached target temperature 75°C ✓`);
+        }
 
-        if (prevT < 80 && currT >= 80 && hit(`over80-${curr.id}`))
+        if (prevT < 80 && currT >= 80 && hit(`over80-${curr.id}`)) {
           addNotif(`⚠ ${name} exceeded 80°C`, "warning", `Now ${Math.round(currT)}°C — ideal max is 80°C`);
+          logLabMilestone(practicalId, `⚠ ${name} exceeded 80°C — overheating`);
+        }
 
-        if (prevT > 40 && currT <= 40 && hit(`cooled-${curr.id}`))
+        if (prevT > 40 && currT <= 40 && hit(`cooled-${curr.id}`)) {
           addNotif(`✓ ${name} cooled to ≤40°C`, "success", "Cooling step completed correctly");
+          logLabMilestone(practicalId, `${name} cooled to ≤40°C — cooling step complete ✓`);
+        }
 
         // Solid stearic acid deposited by spatula (instant, not a pour animation)
         const prevSolid = p.data?.solidStearicGrams ?? 0;
         const currSolid = curr.data?.solidStearicGrams ?? 0;
         if (currSolid > prevSolid) {
-          const added = +(currSolid - prevSolid).toFixed(1);
-          // Ranges match evaluation engine: pass 15–20 g, warn 12–23 g, fail otherwise
-          if (added >= 15 && added <= 20)
-            addNotif(`✓ Stearic acid: ${added} g`, "success", "Correct amount (ideal 15–20 g)");
-          else if (added >= 12 && added <= 23)
-            addNotif(`⚠ Stearic acid: ${added} g — marginal`, "warning", "Ideal is 15–20 g — borderline amount");
-          else if (added < 12)
-            addNotif(`✗ Stearic acid: ${added} g — too little`, "error", "Ideal is 15–20 g");
-          else
-            addNotif(`✗ Stearic acid: ${added} g — too much`, "error", "Ideal is 15–20 g");
+          const added  = +(currSolid - prevSolid).toFixed(1);
+          const sMin   = +(15 * multiplier).toFixed(1);
+          const sMax   = +(20 * multiplier).toFixed(1);
+          const sWarnL = +(12 * multiplier).toFixed(1);
+          const sWarnH = +(23 * multiplier).toFixed(1);
+          const hint   = `Target is ${sMin}–${sMax} g`;
+          if (added >= sMin && added <= sMax) {
+            addNotif(`✓ Stearic acid: ${added} g`, "success", `Correct amount (${hint})`);
+            logLabMilestone(practicalId, `Stearic acid weighed: ${added} g ✓ (target ${sMin}–${sMax} g)`);
+          } else if (added >= sWarnL && added <= sWarnH) {
+            addNotif(`⚠ Stearic acid: ${added} g — marginal`, "warning", `${hint} — borderline amount`);
+            logLabMilestone(practicalId, `Stearic acid weighed: ${added} g ⚠ borderline (target ${sMin}–${sMax} g)`);
+          } else if (added < sWarnL) {
+            addNotif(`✗ Stearic acid: ${added} g — too little`, "error", hint);
+            logLabMilestone(practicalId, `Stearic acid weighed: ${added} g ✗ too little (target ${sMin}–${sMax} g)`);
+          } else {
+            addNotif(`✗ Stearic acid: ${added} g — too much`, "error", hint);
+            logLabMilestone(practicalId, `Stearic acid weighed: ${added} g ✗ too much (target ${sMin}–${sMax} g)`);
+          }
+        }
+
+        // Solid beeswax deposited by spatula (cold cream)
+        const prevWax = p.data?.solidBeeswaxGrams ?? 0;
+        const currWax = curr.data?.solidBeeswaxGrams ?? 0;
+        if (currWax > prevWax) {
+          const added  = +(currWax - prevWax).toFixed(1);
+          const wMin   = +(10 * multiplier).toFixed(1);
+          const wMax   = +(16 * multiplier).toFixed(1);
+          const wWarnL = +(8  * multiplier).toFixed(1);
+          const wWarnH = +(18 * multiplier).toFixed(1);
+          const hint   = `Target is ${wMin}–${wMax} g`;
+          if (added >= wMin && added <= wMax) {
+            addNotif(`✓ Beeswax: ${added} g`, "success", `Correct amount (${hint})`);
+            logLabMilestone(practicalId, `Beeswax weighed: ${added} g ✓ (target ${wMin}–${wMax} g)`);
+          } else if (added >= wWarnL && added <= wWarnH) {
+            addNotif(`⚠ Beeswax: ${added} g — marginal`, "warning", `${hint} — borderline amount`);
+            logLabMilestone(practicalId, `Beeswax weighed: ${added} g ⚠ borderline (target ${wMin}–${wMax} g)`);
+          } else if (added < wWarnL) {
+            addNotif(`✗ Beeswax: ${added} g — too little`, "error", hint);
+            logLabMilestone(practicalId, `Beeswax weighed: ${added} g ✗ too little (target ${wMin}–${wMax} g)`);
+          } else {
+            addNotif(`✗ Beeswax: ${added} g — too much`, "error", hint);
+            logLabMilestone(practicalId, `Beeswax weighed: ${added} g ✗ too much (target ${wMin}–${wMax} g)`);
+          }
         }
       }
 
       // ── Stirring rod ───────────────────────────────────────────────────────
-      if (curr.type === "stirringrod" && !p.data?.isStirring && curr.data?.isStirring)
+      if (curr.type === "stirringrod" && !p.data?.isStirring && curr.data?.isStirring) {
         addNotif("Stirring in progress", "info", "Hold for at least 30 seconds for full emulsification");
+        logLabMilestone(practicalId, "Stirring started — mixing phases");
+      }
     });
 
     prevAppRef.current = apparatus;
-  }, [apparatus, addNotif]);
+  }, [apparatus, addNotif, multiplier, isColdCream, practicalId]);
 
   // Animation frame — runs whenever hot plate is on OR stirring is active
   useEffect(() => {
@@ -2725,6 +2818,7 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
     }
 
     if (dragging) {
+      pushHistory(); // ← snapshot the position before the drag is finalised
       // Check if dropped over a valid target (beaker or cylinder, lid off)
       const dragged = apparatus.find((a) => a.id === dragging.id);
       if (
@@ -2807,21 +2901,25 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
             );
           }
         } else {
-          // Empty — if blade overlaps the stearic acid bottle, open the amount picker
-          const bottle = apparatus.find(
+          // Empty spatula — check if blade overlaps a solid container (stearic acid or beeswax)
+          const solidContainer = apparatus.find(
             (a) =>
-              a.id === "container-stearic-acid" &&
-              (a.data?.isSolid) &&
+              (a.id === "container-stearic-acid" || a.id === "container-beeswax") &&
+              a.data?.isSolid &&
               (a.data?.currentVolume ?? 0) > 0 &&
               bladeCX >= a.x && bladeCX <= a.x + a.width &&
               bladeY  >= a.y && bladeY  <= a.y + a.height,
           );
-          if (bottle) {
-            const available = Math.floor((bottle.data?.currentVolume ?? 0) * (bottle.data?.density ?? 0.847));
+          if (solidContainer) {
+            const density   = solidContainer.data?.density ?? 0.847;
+            const available = Math.floor((solidContainer.data?.currentVolume ?? 0) * density);
             if (available > 0) {
-              const maxScoop = Math.min(available, 50);
-              setSelectedScoopGrams(Math.min(18, maxScoop));
-              setShowScoopModal({ spatulaId: dragged.id, sourceId: bottle.id, maxGrams: maxScoop });
+              // Scaled default: 18g stearic or 12g beeswax, multiplied by assignment multiplier
+              const baseGrams    = solidContainer.id === "container-beeswax" ? 12 : 18;
+              const defaultGrams = Math.max(1, Math.round(baseGrams * multiplier));
+              const maxScoop     = Math.min(available, 50);
+              setSelectedScoopGrams(Math.min(defaultGrams, maxScoop));
+              setShowScoopModal({ spatulaId: dragged.id, sourceId: solidContainer.id, maxGrams: maxScoop });
             }
           }
         }
@@ -3134,6 +3232,7 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
                         boxShadow: isAnimatingPour ? "none" : "0 4px 18px rgba(37,99,235,0.45)",
                         transition:"all 0.15s" }}
                       onClick={() => {
+                    pushHistory(); // ← snapshot before pour
                     const amount    = currentAmount;
                     // Snapshot source state at pour-start so fractions are stable
                     const srcStartVol  = source.data?.currentVolume ?? amount;
@@ -3357,6 +3456,7 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
                   <button
                     className={`px-5 py-2 rounded font-semibold text-white ${isOn ? "bg-red-500 hover:bg-red-600" : "bg-orange-500 hover:bg-orange-600"}`}
                     onClick={() => {
+                      pushHistory(); // ← snapshot before hotplate toggle
                       setApparatus((prev) =>
                         prev.map((a) =>
                           a.type === "hotplate"
@@ -3764,15 +3864,30 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
 
       {/* Spatula Scoop Modal */}
       {showScoopModal && (() => {
-        const src = apparatus.find((a) => a.id === showScoopModal.sourceId);
+        const src        = apparatus.find((a) => a.id === showScoopModal.sourceId);
         if (!src) return null;
+        const isBeeswaxScoop = showScoopModal.sourceId === "container-beeswax";
+        const solidName      = isBeeswaxScoop ? "Beeswax" : "Stearic Acid";
+        const baseAmount     = isBeeswaxScoop ? 12 : 18;
+        const targetGrams    = +(baseAmount * multiplier).toFixed(1);
+        const density        = src.data?.density ?? (isBeeswaxScoop ? 0.96 : 0.847);
         return (
           <div style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.35)",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center" }}>
             <div style={{ background:"white",borderRadius:14,padding:32,minWidth:340,boxShadow:"0 8px 40px #0003" }}>
-              <h2 style={{ fontWeight:700,fontSize:18,marginBottom:8 }}>Scoop Stearic Acid</h2>
-              <p style={{ color:"#475569",fontSize:14,marginBottom:20 }}>
-                Use the spatula to measure <b>solid stearic acid</b> into the beaker.<br/>
-                Available: <b>{Math.round((src.data?.currentVolume ?? 0) * (src.data?.density ?? 0.847))} g</b>
+              <h2 style={{ fontWeight:700,fontSize:18,marginBottom:8 }}>Scoop {solidName}</h2>
+              <p style={{ color:"#475569",fontSize:14,marginBottom:4 }}>
+                Measure <b>solid {solidName.toLowerCase()}</b> into the beaker.
+              </p>
+              {/* Assignment target hint */}
+              {assignment && (
+                <div style={{ background:"#eff6ff", border:"1px solid #bfdbfe", borderRadius:8,
+                  padding:"8px 12px", marginBottom:12, fontSize:13, color:"#1d4ed8" }}>
+                  🎯 Assignment target: <strong>{targetGrams} g</strong>
+                  <span style={{ color:"#6b7280", fontWeight:400 }}> ({assignment.targetGrams} g cream × {multiplier})</span>
+                </div>
+              )}
+              <p style={{ color:"#64748b",fontSize:13,marginBottom:20 }}>
+                Available: <b>{Math.round((src.data?.currentVolume ?? 0) * density)} g</b>
               </p>
               <div style={{ marginBottom:20 }}>
                 <div style={{ display:"flex",alignItems:"center",gap:14,marginBottom:8 }}>
@@ -3791,6 +3906,7 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
                 <button
                   style={{ flex:1,background:"#92400e",color:"white",border:"none",borderRadius:8,padding:"10px 0",fontWeight:700,fontSize:14,cursor:"pointer" }}
                   onClick={() => {
+                    pushHistory(); // ← snapshot before scoop
                     const grams = selectedScoopGrams;
                     const volRemoved = grams / (src.data?.density ?? 0.847);
                     setApparatus((prev) => prev.map((a) => {
@@ -3838,11 +3954,44 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
         ⚗ Evaluate
       </button>
 
+      {/* ── Undo button ─── */}
+      <button
+        onClick={undo}
+        disabled={historyRef.current.length === 0}
+        title={historyRef.current.length === 0
+          ? "Nothing to undo"
+          : `Undo last action (${historyRef.current.length} step${historyRef.current.length > 1 ? "s" : ""} in history)`}
+        style={{
+          position: "absolute",
+          top: 14,
+          right: 420,
+          background: historyRef.current.length === 0 ? "#1e293b" : "#334155",
+          color: historyRef.current.length === 0 ? "#475569" : "#e2e8f0",
+          border: "none",
+          borderRadius: 10,
+          padding: "9px 16px",
+          fontWeight: 700,
+          fontSize: 13,
+          cursor: historyRef.current.length === 0 ? "not-allowed" : "pointer",
+          zIndex: 50,
+          display: "flex",
+          alignItems: "center",
+          gap: 6,
+          transition: "background .15s, color .15s",
+        }}
+      >
+        ↩ Undo
+      </button>
+
       <EvaluationPanel
         isOpen={showEvaluationPanel}
         onClose={() => setShowEvaluationPanel(false)}
         apparatus={apparatus}
         practicalId={practicalId}
+        assignment={assignment}
+        sessionStartAt={assignment ? (
+          (() => { try { const k = "vlab_timer_" + assignment.token; const v = localStorage.getItem(k); return v ? parseInt(v,10) : null; } catch { return null; } })()
+        ) : null}
       />
 
       {/* ── Large floating thermometer display ─────────────────────────────
@@ -4026,6 +4175,65 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
           </button>
         );
       })()}
+
+      {/* ── Time-expired overlay — blocks all interactions ───────────────── */}
+      {labExpired && (
+        <div style={{
+          position:     "absolute",
+          inset:        0,
+          zIndex:       500,
+          background:   "rgba(0,0,0,0.78)",
+          backdropFilter: "blur(6px)",
+          display:      "flex",
+          alignItems:   "center",
+          justifyContent: "center",
+          flexDirection: "column",
+          gap:          0,
+          pointerEvents: "all",
+        }}>
+          <div style={{
+            background:    "#0f172a",
+            border:        "1.5px solid #ef4444",
+            borderRadius:  20,
+            padding:       "44px 52px",
+            textAlign:     "center",
+            maxWidth:      440,
+            boxShadow:     "0 24px 60px rgba(239,68,68,0.25)",
+          }}>
+            {/* Animated clock icon */}
+            <div style={{
+              width: 72, height: 72, borderRadius: "50%",
+              background: "rgba(239,68,68,0.12)",
+              border: "2px solid rgba(239,68,68,0.4)",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              margin: "0 auto 18px",
+            }}>
+              <svg width="36" height="36" viewBox="0 0 24 24" fill="none"
+                stroke="#ef4444" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="10" />
+                <polyline points="12 6 12 12 16 14" />
+              </svg>
+            </div>
+
+            <div style={{ color: "#ef4444", fontWeight: 900, fontSize: 26,
+              letterSpacing: -0.5, marginBottom: 10 }}>
+              Time's Up!
+            </div>
+            <div style={{ color: "#94a3b8", fontSize: 15, lineHeight: 1.7, marginBottom: 20 }}>
+              The time limit set by your teacher has expired.<br />
+              Your lab session has been locked.
+            </div>
+            <div style={{
+              background: "rgba(239,68,68,0.08)",
+              border: "1px solid rgba(239,68,68,0.25)",
+              borderRadius: 10, padding: "10px 16px",
+              color: "#fca5a5", fontSize: 13,
+            }}>
+              Please contact your teacher to review your results.
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
