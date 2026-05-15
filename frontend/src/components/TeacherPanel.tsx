@@ -1,4 +1,4 @@
-import React, { useState, useRef, useContext, createContext } from "react";
+import React, { useState, useRef, useContext, createContext, useEffect } from "react";
 import {
   LayoutDashboard, TestTubes, ClipboardList, Users, BarChart2,
   ClipboardCheck, Megaphone, Settings, ArrowLeft, Sun, Moon, Menu,
@@ -6,8 +6,35 @@ import {
   GripVertical, TrendingUp, Award, Clock, FileText, Bell,
   FlaskConical, FlaskRound, Beaker, User, BookOpen, Shield,
   LogOut, CheckCircle, AlertCircle, Activity, UserPlus, Filter,
-  Save, RefreshCw, LucideIcon,
+  Save, RefreshCw, LucideIcon, Key, Hash, Calculator, Zap,
 } from "lucide-react";
+import {
+  Assignment, PracticalId, BASE_RECIPES,
+  getAllAssignments, saveAssignment, deleteAssignment, generateToken, isCodeExpired,
+} from "../utils/assignmentStore";
+import { getAllUsers, registerUser } from "../utils/userStore";
+import { getAllSubmissions, getStats, LabSubmission } from "../utils/submissionStore";
+import {
+  getAllQuestions, saveQuestion, deleteQuestion,
+  QAQuestion, QAPractical, getAllAnswers,
+} from "../utils/qaStore";
+import {
+  getAllAnnouncements, saveAnnouncement, deleteAnnouncement,
+  Announcement as StoredAnnouncement,
+} from "../utils/announcementStore";
+
+// Persistent settings helpers
+const SETTINGS_KEY = "vlab_teacher_settings";
+const loadSettings = () => {
+  try { return JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? "{}"); }
+  catch { return {}; }
+};
+const persistSettings = (s: Record<string, unknown>) =>
+  localStorage.setItem(SETTINGS_KEY, JSON.stringify(s));
+
+// Helper: students who have registered in the app
+const getAllRegisteredStudents = () =>
+  getAllUsers().filter(u => u.role === "student");
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Theme tokens
@@ -65,7 +92,7 @@ const useTheme = () => useContext(ThemeCtx);
 // ─────────────────────────────────────────────────────────────────────────────
 
 type Section =
-  | "dashboard" | "practicals" | "questions" | "students"
+  | "dashboard" | "questions" | "students"
   | "analytics" | "submissions" | "announcements" | "settings";
 
 interface Student {
@@ -294,112 +321,136 @@ const Avatar: React.FC<{ name:string; size?:number }> = ({ name, size=32 }) => (
 // Dashboard
 // ─────────────────────────────────────────────────────────────────────────────
 
+const resultBadge = (r: "PASS"|"AVERAGE"|"FAIL", C: ReturnType<typeof useTheme>["C"]) => {
+  const map = {
+    PASS:    [C.green,  `${C.green}18`],
+    AVERAGE: [C.amber,  `${C.amber}18`],
+    FAIL:    [C.red,    `${C.red}18`],
+  } as Record<string, [string,string]>;
+  const [color, bg] = map[r] ?? [C.txtSec, C.surface];
+  return (
+    <span style={{ background:bg, color, borderRadius:20,
+      padding:"2px 10px", fontSize:11, fontWeight:700 }}>{r}</span>
+  );
+};
+
 const Dashboard: React.FC = () => {
   const { C } = useTheme();
+  const stats    = getStats();
+  const allSubs  = getAllSubmissions()
+    .sort((a,b) => new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime());
+  const students = getAllRegisteredStudents();
 
   const quickActions = [
-    { Icon:Upload,   label:"Upload Questions",  color:C.accent  },
-    { Icon:UserPlus, label:"Add Student",        color:C.green   },
-    { Icon:Megaphone,label:"Send Announcement",  color:C.purple  },
-    { Icon:Download, label:"Export Analytics",   color:C.amber   },
-  ];
-
-  const feed = [
-    { Icon:ClipboardCheck, msg:"Eva Njoroge submitted Cold Cream",       time:"30 min ago" },
-    { Icon:FlaskConical,   msg:"Amara Nkosi started Vanishing Cream",    time:"2 hrs ago"  },
-    { Icon:Award,          msg:"Chloe Mwangi scored 94% on Cold Cream",  time:"3 hrs ago"  },
-    { Icon:Megaphone,      msg:"Announcement sent to all students",      time:"5 hrs ago"  },
+    { Icon:ClipboardList, label:"Create Assignment",   color:C.accent  },
+    { Icon:Megaphone,     label:"Send Announcement",   color:C.purple  },
+    { Icon:Download,      label:"Export Analytics",    color:C.amber   },
+    { Icon:RefreshCw,     label:"Refresh Data",        color:C.green   },
   ];
 
   return (
     <div>
-      <SectionHeading title="Dashboard" sub="Welcome back. Here's what's happening in your lab today." />
+      <SectionHeading title="Dashboard" sub="Real-time overview of your lab sessions." />
 
       <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))", gap:16, marginBottom:28 }}>
-        <StatCard label="Total Students"    value={10}   sub="2 inactive"          Icon={Users}         accent={C.accent} />
-        <StatCard label="Active Practicals" value={2}    sub="1 draft"             Icon={FlaskConical}  accent="#7c3aed"  />
-        <StatCard label="Submissions Today" value={3}    sub="+5 this week"        Icon={ClipboardCheck}accent={C.green}  />
-        <StatCard label="Class Average"     value="83%"  sub="↑ 4% from last week" Icon={TrendingUp}    accent={C.amber}  />
+        <StatCard label="Registered Students" value={students.length} sub="Self-registered accounts"   Icon={Users}         accent={C.accent} />
+        <StatCard label="Total Submissions"   value={stats.total}     sub={`${stats.todayCount} today`} Icon={ClipboardCheck} accent={C.green}  />
+        <StatCard label="Class Average"       value={stats.total > 0 ? `${stats.classAvg}%` : "—"} sub="Based on real evals" Icon={TrendingUp} accent={C.amber} />
+        <StatCard label="Avg Duration"        value={stats.total > 0 ? `${stats.avgDur} min` : "—"} sub="Time per practical" Icon={Clock}      accent="#7c3aed" />
       </div>
 
-      <div style={{ display:"grid", gridTemplateColumns:"1fr 340px", gap:20, alignItems:"start" }}>
-        {/* Recent submissions table */}
+      <div style={{ display:"grid", gridTemplateColumns:"1fr 300px", gap:20, alignItems:"start" }}>
+        {/* Recent real submissions */}
         <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:14,
           overflow:"hidden", boxShadow:`0 1px 4px ${C.shadow}` }}>
           <div style={{ padding:"14px 20px", borderBottom:`1px solid ${C.border}`,
             display:"flex", justifyContent:"space-between", alignItems:"center" }}>
             <span style={{ color:C.txtPri, fontWeight:700, fontSize:14 }}>Recent Submissions</span>
-            <span style={{ color:C.accent, fontSize:12, cursor:"pointer" }}>View all →</span>
+            <span style={{ color:C.txtMut, fontSize:12 }}>{allSubs.length} total</span>
           </div>
-          <table style={{ width:"100%", borderCollapse:"collapse" }}>
-            <TableHead cols={["Student","Practical","Score","Status","Time"]} />
-            <tbody>
-              {SUBMISSIONS.slice(0,5).map((s,i) => (
-                <tr key={s.id} style={{ background: i%2===0?"transparent":`${C.surface}88` }}>
-                  <td style={{ padding:"11px 14px" }}>
-                    <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-                      <Avatar name={s.student} size={26} />
-                      <span style={{ color:C.txtPri, fontSize:13 }}>{s.student}</span>
-                    </div>
-                  </td>
-                  <td style={{ padding:"11px 14px", color:C.txtSec, fontSize:12 }}>{s.practical}</td>
-                  <td style={{ padding:"11px 14px" }}><ScoreBar score={s.score} /></td>
-                  <td style={{ padding:"11px 14px" }}><StatusBadge status={s.status} /></td>
-                  <td style={{ padding:"11px 14px", color:C.txtMut, fontSize:12 }}>{s.duration}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          {allSubs.length === 0 ? (
+            <div style={{ padding:"32px 20px", textAlign:"center", color:C.txtMut }}>
+              <ClipboardCheck size={28} style={{ marginBottom:8, opacity:0.3 }} />
+              <div style={{ fontSize:13 }}>No submissions yet. Students will appear here after evaluating a practical.</div>
+            </div>
+          ) : (
+            <table style={{ width:"100%", borderCollapse:"collapse" }}>
+              <TableHead cols={["Student","Practical","Score","Result","Duration"]} />
+              <tbody>
+                {allSubs.slice(0,6).map((s,i) => (
+                  <tr key={s.id} style={{ background: i%2===0?"transparent":`${C.surface}88` }}>
+                    <td style={{ padding:"10px 14px" }}>
+                      <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                        <Avatar name={s.studentName} size={26} />
+                        <div>
+                          <div style={{ color:C.txtPri, fontSize:13 }}>{s.studentName}</div>
+                          {s.studentReg && <div style={{ color:C.txtMut, fontSize:10 }}>{s.studentReg}</div>}
+                        </div>
+                      </div>
+                    </td>
+                    <td style={{ padding:"10px 14px", color:C.txtSec, fontSize:12 }}>
+                      {s.practicalId === "vanishing-cream" ? "Vanishing Cream" : "Cold Cream"}
+                    </td>
+                    <td style={{ padding:"10px 14px", minWidth:110 }}><ScoreBar score={s.scorePct} /></td>
+                    <td style={{ padding:"10px 14px" }}>{resultBadge(s.result, C)}</td>
+                    <td style={{ padding:"10px 14px", color:C.txtMut, fontSize:12 }}>
+                      {s.durationSec > 0 ? `${Math.round(s.durationSec/60)} min` : "—"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
         </div>
 
-        {/* Right column */}
-        <div style={{ display:"flex", flexDirection:"column", gap:16 }}>
-          {/* Quick actions */}
-          <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:14,
-            padding:18, boxShadow:`0 1px 4px ${C.shadow}` }}>
-            <div style={{ color:C.txtPri, fontWeight:700, fontSize:14, marginBottom:14 }}>Quick Actions</div>
-            {quickActions.map(({ Icon:Ic, label, color }) => (
-              <button key={label} style={{ width:"100%", display:"flex", alignItems:"center", gap:10,
-                background:"transparent", border:`1px solid ${C.border}`, borderRadius:8,
-                padding:"10px 12px", marginBottom:8, cursor:"pointer", color:C.txtSec,
-                fontSize:13, fontWeight:600 }}>
-                <span style={{ width:30, height:30, borderRadius:8, background:`${color}18`,
-                  display:"flex", alignItems:"center", justifyContent:"center" }}>
-                  <Ic size={16} color={color} strokeWidth={2} />
-                </span>
-                {label}
-              </button>
-            ))}
-          </div>
+        {/* Quick actions */}
+        <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:14,
+          padding:18, boxShadow:`0 1px 4px ${C.shadow}` }}>
+          <div style={{ color:C.txtPri, fontWeight:700, fontSize:14, marginBottom:14 }}>Quick Actions</div>
+          {quickActions.map(({ Icon:Ic, label, color }) => (
+            <button key={label} style={{ width:"100%", display:"flex", alignItems:"center", gap:10,
+              background:"transparent", border:`1px solid ${C.border}`, borderRadius:8,
+              padding:"10px 12px", marginBottom:8, cursor:"pointer", color:C.txtSec,
+              fontSize:13, fontWeight:600 }}>
+              <span style={{ width:30, height:30, borderRadius:8, background:`${color}18`,
+                display:"flex", alignItems:"center", justifyContent:"center" }}>
+                <Ic size={16} color={color} strokeWidth={2} />
+              </span>
+              {label}
+            </button>
+          ))}
 
-          {/* Activity feed */}
-          <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:14,
-            padding:18, boxShadow:`0 1px 4px ${C.shadow}` }}>
-            <div style={{ color:C.txtPri, fontWeight:700, fontSize:14, marginBottom:14 }}>Activity Feed</div>
-            {feed.map(({ Icon:Ic, msg, time }, i) => (
-              <div key={i} style={{ display:"flex", gap:10, alignItems:"flex-start", marginBottom:12 }}>
-                <div style={{ width:28, height:28, borderRadius:8, background:C.surface,
-                  border:`1px solid ${C.border}`, display:"flex", alignItems:"center",
-                  justifyContent:"center", flexShrink:0 }}>
-                  <Ic size={14} color={C.txtSec} strokeWidth={1.8} />
+          {/* Pass/Average/Fail breakdown */}
+          {stats.total > 0 && (
+            <div style={{ marginTop:16, paddingTop:16, borderTop:`1px solid ${C.border}` }}>
+              <div style={{ color:C.txtMut, fontSize:11, fontWeight:700, textTransform:"uppercase",
+                letterSpacing:0.8, marginBottom:10 }}>Result Breakdown</div>
+              {([
+                { label:"Pass",    count:stats.passed,  color:C.green },
+                { label:"Average", count:stats.average, color:C.amber },
+                { label:"Fail",    count:stats.failed,  color:C.red   },
+              ]).map(r => (
+                <div key={r.label} style={{ marginBottom:8 }}>
+                  <div style={{ display:"flex", justifyContent:"space-between", marginBottom:3 }}>
+                    <span style={{ color:C.txtSec, fontSize:12 }}>{r.label}</span>
+                    <span style={{ color:r.color, fontWeight:700, fontSize:12 }}>{r.count}</span>
+                  </div>
+                  <div style={{ height:5, background:C.surface, borderRadius:3, overflow:"hidden" }}>
+                    <div style={{ width:`${stats.total>0?(r.count/stats.total)*100:0}%`,
+                      height:"100%", background:r.color, borderRadius:3 }} />
+                  </div>
                 </div>
-                <div>
-                  <div style={{ color:C.txtSec, fontSize:12 }}>{msg}</div>
-                  <div style={{ color:C.txtMut, fontSize:11, marginTop:2 }}>{time}</div>
-                </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
     </div>
   );
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Practicals
-// ─────────────────────────────────────────────────────────────────────────────
-
+// Placeholder kept to avoid removing the original Practicals component references
+// (it's no longer in the nav — just remove dead code silently)
 const Practicals: React.FC = () => {
   const { C } = useTheme();
   const [list, setList] = useState(PRACTICALS);
@@ -493,173 +544,735 @@ const Practicals: React.FC = () => {
 // Questions
 // ─────────────────────────────────────────────────────────────────────────────
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Assignments sub-tab inside Questions
+// ─────────────────────────────────────────────────────────────────────────────
+
+const AssignmentsTab: React.FC = () => {
+  const { C } = useTheme();
+
+  // Form state
+  const [practicalId,       setPracticalId]       = useState<PracticalId>("vanishing-cream");
+  const [taskText,          setTaskText]           = useState("");
+  const [targetGrams,       setTargetGrams]        = useState<string>("50");
+  const [timeLimitMinutes,  setTimeLimitMinutes]   = useState<string>("45");
+  const [codeExpiresAt,     setCodeExpiresAt]      = useState<string>("");    // datetime-local value
+  const [assignments,       setAssignments]        = useState<Assignment[]>(() => getAllAssignments());
+  const [copiedToken,       setCopiedToken]        = useState<string|null>(null);
+  const [generated,         setGenerated]          = useState<Assignment|null>(null);
+
+  // Reload from localStorage whenever the tab re-renders
+  useEffect(() => { setAssignments(getAllAssignments()); }, []);
+
+  const recipe     = BASE_RECIPES[practicalId];
+  const grams      = parseFloat(targetGrams) || 0;
+  const timeLimit  = parseInt(timeLimitMinutes, 10) || 0;
+  const multiplier = grams > 0 ? +(grams / recipe.totalGrams).toFixed(4) : 0;
+
+  const handleGenerate = () => {
+    if (!taskText.trim() || grams <= 0) return;
+    const assignment: Assignment = {
+      token:            generateToken(practicalId),
+      practicalId,
+      title:            taskText.trim(),
+      targetGrams:      grams,
+      timeLimitMinutes: timeLimit,
+      codeExpiresAt:    codeExpiresAt ? new Date(codeExpiresAt).toISOString() : null,
+      createdAt:        new Date().toISOString(),
+      createdBy:        "Teacher",
+      uses:             0,
+    };
+    saveAssignment(assignment);
+    setAssignments(getAllAssignments());
+    setGenerated(assignment);
+    setTaskText("");
+    setTargetGrams("50");
+    setTimeLimitMinutes("45");
+    setCodeExpiresAt("");
+  };
+
+  const handleCopy = (token: string) => {
+    navigator.clipboard.writeText(token).catch(() => {});
+    setCopiedToken(token);
+    setTimeout(() => setCopiedToken(null), 2000);
+  };
+
+  const handleDelete = (token: string) => {
+    deleteAssignment(token);
+    setAssignments(getAllAssignments());
+    if (generated?.token === token) setGenerated(null);
+  };
+
+  const lbl: React.CSSProperties = {
+    color: C.txtMut, fontSize: 11, display: "block",
+    marginBottom: 5, textTransform: "uppercase", letterSpacing: 0.7,
+  };
+
+  const practicalName = practicalId === "vanishing-cream" ? "Vanishing Cream" : "Cold Cream";
+
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20, alignItems: "start" }}>
+
+      {/* ── Create assignment ── */}
+      <div style={{ background: C.card, border: `1px solid ${C.border}`,
+        borderRadius: 14, padding: 22, boxShadow: `0 1px 4px ${C.shadow}` }}>
+
+        <div style={{ color: C.txtPri, fontWeight: 800, fontSize: 15, marginBottom: 18,
+          display: "flex", alignItems: "center", gap: 8 }}>
+          <Zap size={16} color={C.accent} strokeWidth={2} /> Create Volume Assignment
+        </div>
+
+        {/* Practical selector */}
+        <label style={lbl}>Select Practical</label>
+        <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+          {(["vanishing-cream","cold-cream"] as PracticalId[]).map(id => (
+            <button key={id} onClick={() => setPracticalId(id)} style={{
+              flex: 1, padding: "9px 12px", borderRadius: 8, cursor: "pointer",
+              fontWeight: 600, fontSize: 12, border: "none",
+              background: practicalId === id ? C.accent : C.surface,
+              color:      practicalId === id ? "white" : C.txtSec,
+              display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+            }}>
+              {id === "vanishing-cream"
+                ? <FlaskConical size={14} strokeWidth={2} />
+                : <FlaskRound   size={14} strokeWidth={2} />}
+              {id === "vanishing-cream" ? "Vanishing Cream" : "Cold Cream"}
+            </button>
+          ))}
+        </div>
+
+        {/* Target volume */}
+        <label style={lbl}>Target Volume (grams of cream to prepare)</label>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
+          <input
+            type="number" min={1} max={500} value={targetGrams}
+            onChange={e => setTargetGrams(e.target.value)}
+            style={{ flex: 1, background: C.surface, border: `1px solid ${C.border2}`,
+              color: C.txtPri, borderRadius: 8, padding: "9px 12px", fontSize: 18,
+              fontWeight: 700, fontFamily: "monospace", outline: "none", boxSizing: "border-box" }}
+          />
+          <span style={{ color: C.txtMut, fontSize: 14 }}>g</span>
+        </div>
+
+        {/* Live multiplier preview */}
+        {grams > 0 && (
+          <div style={{ background: `${C.accent}10`, border: `1px solid ${C.accent}44`,
+            borderRadius: 8, padding: "8px 12px", marginBottom: 16,
+            display: "flex", alignItems: "center", gap: 8 }}>
+            <Calculator size={14} color={C.accent} />
+            <span style={{ color: C.txtSec, fontSize: 12 }}>
+              Multiplier =
+              <strong style={{ color: C.accent, fontFamily: "monospace", marginLeft: 6 }}>
+                {grams} ÷ {recipe.totalGrams} = {multiplier}
+              </strong>
+            </span>
+          </div>
+        )}
+
+        {/* Reagent preview table */}
+        {grams > 0 && (
+          <div style={{ background: C.surface, border: `1px solid ${C.border}`,
+            borderRadius: 8, padding: "10px 12px", marginBottom: 16 }}>
+            <div style={{ color: C.txtMut, fontSize: 10, textTransform: "uppercase",
+              letterSpacing: 0.8, marginBottom: 8, fontWeight: 700 }}>Scaled Reagent Amounts</div>
+            {recipe.reagents.map((r, i) => (
+              <div key={i} style={{ display: "flex", justifyContent: "space-between",
+                padding: "4px 0", borderBottom: i < recipe.reagents.length-1 ? `1px solid ${C.border}` : "none" }}>
+                <span style={{ color: C.txtSec, fontSize: 12 }}>{r.name}</span>
+                <span style={{ color: C.green, fontFamily: "monospace", fontSize: 12, fontWeight: 600 }}>
+                  {+(r.amount * multiplier).toFixed(2)} {r.unit}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Time limit */}
+        <label style={lbl}>Time Limit for Completion</label>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
+          <input
+            type="number" min={0} max={300} value={timeLimitMinutes}
+            onChange={e => setTimeLimitMinutes(e.target.value)}
+            style={{ width: 100, background: C.surface, border: `1px solid ${C.border2}`,
+              color: C.txtPri, borderRadius: 8, padding: "9px 12px", fontSize: 18,
+              fontWeight: 700, fontFamily: "monospace", outline: "none", boxSizing: "border-box" }}
+          />
+          <span style={{ color: C.txtMut, fontSize: 14 }}>minutes</span>
+          <span style={{ color: C.txtMut, fontSize: 12 }}>(0 = no limit)</span>
+        </div>
+        {timeLimit > 0 && (
+          <div style={{ background: `${C.amber}10`, border: `1px solid ${C.amber}44`,
+            borderRadius: 8, padding: "8px 12px", marginBottom: 16,
+            display: "flex", alignItems: "center", gap: 8 }}>
+            <Clock size={14} color={C.amber} />
+            <span style={{ color: C.txtSec, fontSize: 12 }}>
+              Students will have <strong style={{ color: C.amber }}>{timeLimit} minutes</strong> from
+              the moment they enter the lab. Timer starts automatically on entry.
+            </span>
+          </div>
+        )}
+
+        {/* Code expiry date */}
+        <label style={lbl}>Code Expiry Date &amp; Time (optional)</label>
+        <div style={{ marginBottom: 6 }}>
+          <input
+            type="datetime-local"
+            value={codeExpiresAt}
+            onChange={e => setCodeExpiresAt(e.target.value)}
+            min={new Date().toISOString().slice(0, 16)}
+            style={{ width: "100%", background: C.surface, border: `1px solid ${C.border2}`,
+              color: C.txtPri, borderRadius: 8, padding: "9px 12px", fontSize: 13,
+              outline: "none", boxSizing: "border-box", fontFamily: "inherit",
+              colorScheme: "dark" }}
+          />
+        </div>
+        {codeExpiresAt && (
+          <div style={{ background: `${C.red}10`, border: `1px solid ${C.red}44`,
+            borderRadius: 8, padding: "8px 12px", marginBottom: 16,
+            display: "flex", alignItems: "center", gap: 8 }}>
+            <AlertCircle size={14} color={C.red} />
+            <span style={{ color: C.txtSec, fontSize: 12 }}>
+              Code will stop working after{" "}
+              <strong style={{ color: C.red }}>
+                {new Date(codeExpiresAt).toLocaleString()}
+              </strong>
+            </span>
+          </div>
+        )}
+        {!codeExpiresAt && (
+          <div style={{ color: C.txtMut, fontSize: 11, marginBottom: 16 }}>
+            Leave blank for a permanent code (no expiry).
+          </div>
+        )}
+
+        {/* Task text */}
+        <label style={lbl}>Assignment Question / Task Description</label>
+        <TTextarea
+          value={taskText}
+          onChange={e => setTaskText(e.target.value)}
+          rows={3}
+          placeholder={`e.g. "Prepare ${grams || 50}g of ${practicalName}. Calculate the multiplier and use the correct scaled amounts of each reagent."`}
+          style={{ marginBottom: 16 }}
+        />
+
+        <Btn
+          label="Generate Assignment Code"
+          Icon={Key}
+          onClick={handleGenerate}
+        />
+
+        {/* Newly generated token spotlight */}
+        {generated && (
+          <div style={{ marginTop: 16, background: `${C.green}10`,
+            border: `1px solid ${C.green}44`, borderRadius: 12, padding: 16 }}>
+            <div style={{ color: C.green, fontWeight: 700, fontSize: 13, marginBottom: 10,
+              display: "flex", alignItems: "center", gap: 6 }}>
+              <CheckCircle size={15} strokeWidth={2.5} /> Assignment Created!
+            </div>
+            <div style={{ color: C.txtSec, fontSize: 12, marginBottom: 6 }}>
+              Share this code with your students:
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <code style={{ flex: 1, background: C.surface, border: `1px solid ${C.border2}`,
+                color: C.accent, borderRadius: 8, padding: "10px 14px",
+                fontSize: 20, fontWeight: 800, letterSpacing: 3, textAlign: "center",
+                display: "block" }}>
+                {generated.token}
+              </code>
+              <button onClick={() => handleCopy(generated.token)} style={{
+                background: copiedToken === generated.token ? `${C.green}20` : C.surface,
+                border: `1px solid ${copiedToken === generated.token ? C.green : C.border2}`,
+                color: copiedToken === generated.token ? C.green : C.txtSec,
+                borderRadius: 8, padding: "10px 12px", cursor: "pointer",
+                display: "flex", alignItems: "center", gap: 5, fontSize: 12, fontWeight: 600,
+              }}>
+                {copiedToken === generated.token
+                  ? <><CheckCircle size={13} strokeWidth={2.5} /> Copied</>
+                  : <><Copy size={13} strokeWidth={2} /> Copy</>}
+              </button>
+            </div>
+            <div style={{ color: C.txtMut, fontSize: 11, marginTop: 8 }}>
+              Students enter this code on the home screen to start the assignment.
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* ── Assignment list ── */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        <div style={{ color: C.txtPri, fontWeight: 700, fontSize: 14,
+          display: "flex", alignItems: "center", gap: 8 }}>
+          <Hash size={15} color={C.accent} strokeWidth={2} />
+          Active Assignments ({assignments.length})
+        </div>
+
+        {assignments.length === 0 ? (
+          <div style={{ background: C.card, border: `2px dashed ${C.border2}`,
+            borderRadius: 12, padding: "32px 20px", textAlign: "center", color: C.txtMut }}>
+            <Key size={28} style={{ marginBottom: 8, opacity: 0.4 }} />
+            <div style={{ fontSize: 14, fontWeight: 600 }}>No assignments yet</div>
+            <div style={{ fontSize: 12, marginTop: 4 }}>Generate a code on the left to get started.</div>
+          </div>
+        ) : (
+          assignments.slice().reverse().map(a => {
+            const rec    = BASE_RECIPES[a.practicalId];
+            const mult   = +(a.targetGrams / rec.totalGrams).toFixed(4);
+            const PIcon  = a.practicalId === "vanishing-cream" ? FlaskConical : FlaskRound;
+            const pColor = a.practicalId === "vanishing-cream" ? "#2563eb" : "#7c3aed";
+            return (
+              <div key={a.token} style={{ background: C.card, border: `1px solid ${C.border}`,
+                borderRadius: 12, padding: 16, boxShadow: `0 1px 3px ${C.shadow}` }}>
+                {/* Header */}
+                <div style={{ display: "flex", justifyContent: "space-between",
+                  alignItems: "flex-start", marginBottom: 10 }}>
+                  <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                    <div style={{ width: 34, height: 34, borderRadius: 8,
+                      background: `${pColor}18`, display: "flex",
+                      alignItems: "center", justifyContent: "center" }}>
+                      <PIcon size={18} color={pColor} strokeWidth={1.8} />
+                    </div>
+                    <div>
+                      <code style={{ color: C.accent, fontWeight: 800, fontSize: 15,
+                        letterSpacing: 2 }}>{a.token}</code>
+                      <div style={{ color: C.txtMut, fontSize: 11, marginTop: 1 }}>
+                        {a.practicalId === "vanishing-cream" ? "Vanishing Cream" : "Cold Cream"}
+                        &nbsp;· Created {new Date(a.createdAt).toLocaleDateString()}
+                        &nbsp;· {a.uses} use{a.uses !== 1 ? "s" : ""}
+                      </div>
+                    </div>
+                  </div>
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <button onClick={() => handleCopy(a.token)} style={{
+                      background: copiedToken === a.token ? `${C.green}18` : "transparent",
+                      border: `1px solid ${copiedToken === a.token ? C.green : C.border}`,
+                      color: copiedToken === a.token ? C.green : C.txtMut,
+                      borderRadius: 6, padding: "5px 8px", cursor: "pointer",
+                      display: "flex", alignItems: "center", gap: 4, fontSize: 12,
+                    }}>
+                      {copiedToken === a.token
+                        ? <><CheckCircle size={12} strokeWidth={2.5} /> Copied</>
+                        : <><Copy size={12} strokeWidth={2} /> Copy</>}
+                    </button>
+                    <button onClick={() => handleDelete(a.token)} style={{
+                      background: `${C.red}10`, border: "none",
+                      color: C.red, borderRadius: 6, padding: "5px 8px",
+                      cursor: "pointer", display: "flex", alignItems: "center",
+                    }}>
+                      <Trash2 size={13} strokeWidth={2} />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Task text */}
+                <div style={{ color: C.txtSec, fontSize: 13, lineHeight: 1.6,
+                  marginBottom: 10, borderLeft: `3px solid ${pColor}`,
+                  paddingLeft: 10 }}>{a.title}</div>
+
+                {/* Target + multiplier + time chips */}
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <span style={{ background: `${C.green}12`, border: `1px solid ${C.green}44`,
+                    color: C.green, borderRadius: 6, padding: "3px 10px",
+                    fontSize: 11, fontWeight: 700 }}>
+                    Target: {a.targetGrams} g
+                  </span>
+                  <span style={{ background: `${C.accent}12`, border: `1px solid ${C.accent}44`,
+                    color: C.accent, borderRadius: 6, padding: "3px 10px",
+                    fontSize: 11, fontWeight: 700, fontFamily: "monospace" }}>
+                    × {mult}
+                  </span>
+                  <span style={{ background: C.surface, border: `1px solid ${C.border}`,
+                    color: C.txtMut, borderRadius: 6, padding: "3px 10px", fontSize: 11 }}>
+                    Base: {rec.totalGrams} g
+                  </span>
+                  {/* Session time limit */}
+                  <span style={{
+                    background: a.timeLimitMinutes > 0 ? `${C.amber}12` : C.surface,
+                    border: `1px solid ${a.timeLimitMinutes > 0 ? `${C.amber}44` : C.border}`,
+                    color: a.timeLimitMinutes > 0 ? C.amber : C.txtMut,
+                    borderRadius: 6, padding: "3px 10px", fontSize: 11, fontWeight: 700,
+                    display: "flex", alignItems: "center", gap: 4,
+                  }}>
+                    <Clock size={11} strokeWidth={2.5} />
+                    {a.timeLimitMinutes > 0 ? `${a.timeLimitMinutes} min` : "No time limit"}
+                  </span>
+                  {/* Code expiry */}
+                  {a.codeExpiresAt ? (
+                    <span style={{
+                      background: isCodeExpired(a) ? `${C.red}12` : `${C.purple}12`,
+                      border: `1px solid ${isCodeExpired(a) ? `${C.red}44` : `${C.purple}44`}`,
+                      color: isCodeExpired(a) ? C.red : C.purple,
+                      borderRadius: 6, padding: "3px 10px", fontSize: 11, fontWeight: 700,
+                      display: "flex", alignItems: "center", gap: 4,
+                    }}>
+                      <AlertCircle size={11} strokeWidth={2.5} />
+                      {isCodeExpired(a)
+                        ? "Code expired"
+                        : `Expires ${new Date(a.codeExpiresAt).toLocaleDateString()}`}
+                    </span>
+                  ) : (
+                    <span style={{ background: C.surface, border: `1px solid ${C.border}`,
+                      color: C.txtMut, borderRadius: 6, padding: "3px 10px", fontSize: 11,
+                      display: "flex", alignItems: "center", gap: 4 }}>
+                      <CheckCircle size={11} strokeWidth={2.5} color={C.green} />
+                      Permanent code
+                    </span>
+                  )}
+                </div>
+              </div>
+            );
+          })
+        )}
+      </div>
+    </div>
+  );
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Questions section (tabbed: Assignments + Q&A Bank)
+// ─────────────────────────────────────────────────────────────────────────────
+
 const Questions: React.FC = () => {
   const { C } = useTheme();
-  const [questions, setQuestions] = useState<Question[]>(QUESTIONS_VC);
-  const [addingNew, setAddingNew] = useState(false);
-  const [newQ, setNewQ] = useState<Partial<Question>>({ type:"short", points:5, text:"", options:["","","",""] });
-  const [dragging, setDragging] = useState<string|null>(null);
-  const fileRef = useRef<HTMLInputElement>(null);
+  const [tab,          setTab]          = useState<"assignments"|"bank">("assignments");
+  const [bankPractical,setBankPractical]= useState<QAPractical>("vanishing-cream");
+  const [addingNew,    setAddingNew]    = useState(false);
+  const [dragging,     setDragging]     = useState<string|null>(null);
+  const [refresh,      setRefresh]      = useState(0);
+
+  // Load questions from persistent store
+  const questions = getAllQuestions().filter(q =>
+    q.practicalId === bankPractical || q.practicalId === "all"
+  );
+
+  const [newQ, setNewQ] = useState<{
+    text:string; type:"mcq"|"short"; points:number;
+    options:string[]; correctAnswer:string; practicalId:QAPractical;
+  }>({ text:"", type:"mcq", points:2, options:["","","",""], correctAnswer:"", practicalId:bankPractical });
 
   const totalPts = questions.reduce((s,q) => s+q.points, 0);
-  const deleteQ  = (id:string) => setQuestions(prev => prev.filter(q => q.id!==id));
+
+  const deleteQ = (id:string) => { deleteQuestion(id); setRefresh(r=>r+1); };
 
   const addQ = () => {
-    if (!newQ.text?.trim()) return;
-    setQuestions(prev => [...prev, {
-      id:`q${Date.now()}`, text:newQ.text!, type:newQ.type as Question["type"],
-      points:newQ.points??5,
-      options: newQ.type==="mcq" ? newQ.options?.filter(Boolean) : undefined,
-    }]);
-    setNewQ({ type:"short", points:5, text:"", options:["","","",""] });
+    if (!newQ.text.trim()) return;
+    if (newQ.type === "mcq") {
+      const validOpts = newQ.options.filter(Boolean);
+      if (validOpts.length < 2) return;
+      if (!newQ.correctAnswer) return;
+    }
+    const q: QAQuestion = {
+      id:            `qab_${Date.now()}`,
+      practicalId:   newQ.practicalId,
+      text:          newQ.text.trim(),
+      type:          newQ.type,
+      options:       newQ.type === "mcq" ? newQ.options.filter(Boolean) : [],
+      correctAnswer: newQ.correctAnswer.trim(),
+      points:        newQ.points,
+      createdAt:     new Date().toISOString(),
+      createdBy:     "Teacher",
+    };
+    saveQuestion(q);
+    setRefresh(r=>r+1);
+    setNewQ({ text:"", type:"mcq", points:2, options:["","","",""], correctAnswer:"", practicalId:newQ.practicalId });
     setAddingNew(false);
   };
 
-  const typeLabel: Record<Question["type"],string> = { mcq:"MCQ", short:"Short Answer", long:"Long Answer" };
-  const typeColor: Record<Question["type"],string>  = { mcq:C.accent, short:C.green, long:C.purple };
+  const typeColor = { mcq:C.accent, short:C.green };
+
+  // Answer stats for each question
+  const allAnswers = getAllAnswers();
+  const answerCount = (qid:string) => allAnswers.filter(a => a.questionId === qid).length;
+  const correctCount = (qid:string) => allAnswers.filter(a => a.questionId === qid && a.isCorrect).length;
 
   return (
     <div>
-      <SectionHeading title="Questions" sub="Upload or manually create questions for each practical."
-        action={<Btn label="Add Question" Icon={Plus} onClick={() => setAddingNew(true)} />} />
+      <SectionHeading
+        title="Assignments & Q&A Bank"
+        sub="Create volume-based assignments, or build a Q&A question bank for each practical."
+        action={tab === "bank" ? <Btn label="Add Question" Icon={Plus} onClick={() => setAddingNew(true)} /> : undefined}
+      />
 
-      {/* Practical tabs */}
-      <div style={{ display:"flex", gap:8, marginBottom:24 }}>
-        {PRACTICALS.filter(p => p.id!=="acid-base").map((p,i) => (
-          <button key={p.id} style={{ padding:"8px 18px", borderRadius:8, cursor:"pointer",
-            fontWeight:600, fontSize:13, border:"none",
-            background: i===0 ? C.accent : C.card,
-            color: i===0 ? "white" : C.txtSec,
-            display:"flex", alignItems:"center", gap:6 }}>
-            <p.Icon size={14} strokeWidth={2} />
-            {p.name}
+      {/* Tab switcher */}
+      <div style={{ display:"flex", gap:4, marginBottom:24,
+        background:C.surface, padding:4, borderRadius:10,
+        width:"fit-content", border:`1px solid ${C.border}` }}>
+        {([
+          { id:"assignments", label:"Volume Assignments", Icon:Key          },
+          { id:"bank",        label:"Q&A Bank",           Icon:ClipboardList },
+        ] as const).map(t => (
+          <button key={t.id} onClick={() => setTab(t.id)} style={{
+            padding:"8px 16px", borderRadius:8, cursor:"pointer", border:"none",
+            fontWeight:600, fontSize:13,
+            background: tab===t.id ? C.accent : "transparent",
+            color:      tab===t.id ? "white"  : C.txtSec,
+            display:"flex", alignItems:"center", gap:6, transition:"background .15s",
+          }}>
+            <t.Icon size={14} strokeWidth={2} /> {t.label}
           </button>
         ))}
       </div>
 
-      {/* Upload zone */}
-      <div onClick={() => fileRef.current?.click()} style={{
-        border:`2px dashed ${C.border2}`, borderRadius:12, padding:"28px 20px",
-        textAlign:"center", cursor:"pointer", marginBottom:24, background:C.surface }}>
-        <input ref={fileRef} type="file" accept=".pdf,.docx,.txt" style={{ display:"none" }} />
-        <div style={{ display:"flex", justifyContent:"center", marginBottom:10 }}>
-          <div style={{ width:52, height:52, borderRadius:14, background:`${C.accent}18`,
-            display:"flex", alignItems:"center", justifyContent:"center" }}>
-            <Upload size={26} color={C.accent} strokeWidth={1.8} />
-          </div>
-        </div>
-        <div style={{ color:C.txtPri, fontWeight:700, fontSize:14 }}>Upload Question Sheet</div>
-        <div style={{ color:C.txtSec, fontSize:12, marginTop:4 }}>Drag & drop or click — PDF, DOCX, TXT</div>
-        <div style={{ display:"inline-flex", alignItems:"center", gap:6, marginTop:12,
-          padding:"7px 18px", background:C.accent, color:"white",
-          borderRadius:8, fontSize:12, fontWeight:600 }}>
-          <FileText size={13} strokeWidth={2} /> Choose File
-        </div>
-      </div>
+      {tab === "assignments" && <AssignmentsTab />}
 
-      {/* List header */}
-      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14 }}>
-        <span style={{ color:C.txtSec, fontSize:13 }}>{questions.length} questions · {totalPts} total points</span>
-        <Btn label="Save Order" Icon={Save} variant="ghost" small />
-      </div>
-
-      <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
-        {questions.map((q,i) => (
-          <div key={q.id} draggable
-            onDragStart={() => setDragging(q.id)}
-            onDragOver={e => e.preventDefault()}
-            onDrop={() => {
-              if (!dragging||dragging===q.id) return;
-              const from = questions.findIndex(x => x.id===dragging);
-              const arr  = [...questions];
-              const [item] = arr.splice(from,1);
-              arr.splice(i,0,item);
-              setQuestions(arr);
-              setDragging(null);
-            }}
-            style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:12,
-              padding:"14px 16px", cursor:"grab", display:"flex", gap:14, alignItems:"flex-start",
-              opacity: dragging===q.id ? 0.4 : 1, boxShadow:`0 1px 3px ${C.shadow}` }}>
-            <div style={{ color:C.txtMut, marginTop:2, flexShrink:0 }}>
-              <GripVertical size={16} strokeWidth={1.8} />
-            </div>
-            <div style={{ flex:1 }}>
-              <div style={{ display:"flex", gap:8, alignItems:"center", marginBottom:6 }}>
-                <span style={{ color:C.txtMut, fontSize:12 }}>Q{i+1}</span>
-                <span style={{ background:`${typeColor[q.type]}18`, color:typeColor[q.type],
-                  borderRadius:20, padding:"2px 10px", fontSize:11, fontWeight:700 }}>
-                  {typeLabel[q.type]}
-                </span>
-                <span style={{ color:C.txtMut, fontSize:12, marginLeft:"auto" }}>{q.points} pts</span>
-              </div>
-              <div style={{ color:C.txtPri, fontSize:13, lineHeight:1.6 }}>{q.text}</div>
-              {q.options && (
-                <div style={{ display:"flex", flexWrap:"wrap", gap:6, marginTop:8 }}>
-                  {q.options.map((opt,oi) => (
-                    <span key={oi} style={{ background:C.surface, border:`1px solid ${C.border}`,
-                      borderRadius:6, padding:"3px 10px", fontSize:12, color:C.txtSec }}>
-                      {String.fromCharCode(65+oi)}. {opt}
-                    </span>
-                  ))}
-                </div>
-              )}
-            </div>
-            <div style={{ display:"flex", gap:6, flexShrink:0 }}>
-              <button style={{ background:"transparent", border:`1px solid ${C.border}`,
-                color:C.txtMut, borderRadius:6, padding:"5px 8px", cursor:"pointer",
-                display:"flex", alignItems:"center" }}>
-                <Edit size={13} strokeWidth={2} />
+      {tab === "bank" && (
+        <div>
+          {/* Practical selector */}
+          <div style={{ display:"flex", gap:8, marginBottom:20 }}>
+            {([
+              { id:"vanishing-cream", label:"Vanishing Cream", Icon:FlaskConical, color:"#2563eb" },
+              { id:"cold-cream",      label:"Cold Cream",      Icon:FlaskRound,   color:"#7c3aed" },
+              { id:"all",             label:"All Practicals",  Icon:Beaker,       color:C.green   },
+            ] as {id:QAPractical;label:string;Icon:LucideIcon;color:string}[]).map(p => (
+              <button key={p.id} onClick={() => { setBankPractical(p.id); setRefresh(r=>r+1); }}
+                style={{ padding:"8px 16px", borderRadius:8, cursor:"pointer",
+                  fontWeight:600, fontSize:12, border:"none",
+                  background: bankPractical===p.id ? p.color : C.card,
+                  color: bankPractical===p.id ? "white" : C.txtSec,
+                  display:"flex", alignItems:"center", gap:6 }}>
+                <p.Icon size={13} strokeWidth={2} /> {p.label}
               </button>
-              <button onClick={() => deleteQ(q.id)}
-                style={{ background:`${C.red}10`, border:"none", color:C.red,
-                  borderRadius:6, padding:"5px 8px", cursor:"pointer",
-                  display:"flex", alignItems:"center" }}>
-                <Trash2 size={13} strokeWidth={2} />
-              </button>
-            </div>
-          </div>
-        ))}
-      </div>
-
-      {/* Add form */}
-      {addingNew && (
-        <div style={{ marginTop:16, background:C.card, border:`1px solid ${C.accent}55`,
-          borderRadius:14, padding:20, boxShadow:`0 2px 8px ${C.shadow}` }}>
-          <div style={{ color:C.txtPri, fontWeight:700, fontSize:14, marginBottom:16 }}>New Question</div>
-          <div style={{ display:"flex", gap:10, marginBottom:14, flexWrap:"wrap" }}>
-            {(["short","mcq","long"] as Question["type"][]).map(t => (
-              <button key={t} onClick={() => setNewQ(p => ({ ...p, type:t }))} style={{
-                padding:"6px 14px", borderRadius:8, cursor:"pointer", fontSize:12, fontWeight:600,
-                border:"none", background: newQ.type===t ? C.accent : C.surface,
-                color: newQ.type===t ? "white" : C.txtSec,
-              }}>{typeLabel[t]}</button>
             ))}
-            <div style={{ marginLeft:"auto", display:"flex", alignItems:"center", gap:8 }}>
-              <label style={{ color:C.txtMut, fontSize:12 }}>Points</label>
-              <input type="number" value={newQ.points??5}
-                onChange={e => setNewQ(p => ({ ...p, points:+e.target.value }))}
-                style={{ width:60, background:C.surface, border:`1px solid ${C.border2}`,
-                  color:C.txtPri, borderRadius:6, padding:"5px 8px", fontSize:13, textAlign:"center" }} />
-            </div>
           </div>
-          <TTextarea placeholder="Enter question text…" value={newQ.text??""} rows={3}
-            onChange={e => setNewQ(p => ({ ...p, text:e.target.value }))} />
-          {newQ.type==="mcq" && (
-            <div style={{ marginTop:12, display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
-              {(newQ.options??["","","",""]).map((opt,i) => (
-                <TInput key={i} placeholder={`Option ${String.fromCharCode(65+i)}`} value={opt}
-                  onChange={e => {
-                    const opts = [...(newQ.options??["","","",""])];
-                    opts[i] = e.target.value;
-                    setNewQ(p => ({ ...p, options:opts }));
-                  }} />
-              ))}
+
+          {/* Question list */}
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:12 }}>
+            <span style={{ color:C.txtSec, fontSize:13 }}>
+              {questions.length} question{questions.length!==1?"s":""} · {totalPts} total pts
+            </span>
+          </div>
+
+          {questions.length === 0 && !addingNew && (
+            <div style={{ background:C.card, border:`2px dashed ${C.border2}`, borderRadius:12,
+              padding:"32px 20px", textAlign:"center", color:C.txtMut, marginBottom:14 }}>
+              <ClipboardList size={30} style={{ marginBottom:8, opacity:0.3 }} />
+              <div style={{ fontSize:13 }}>No questions yet. Click "Add Question" to create one.</div>
             </div>
           )}
-          <div style={{ display:"flex", gap:8, marginTop:14, justifyContent:"flex-end" }}>
-            <Btn label="Cancel"       Icon={RefreshCw} variant="ghost" small onClick={() => setAddingNew(false)} />
-            <Btn label="Add Question" Icon={Plus}       small onClick={addQ} />
+
+          <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+            {questions.map((q,i) => {
+              const ac = answerCount(q.id);
+              const cc = correctCount(q.id);
+              return (
+                <div key={q.id} draggable
+                  onDragStart={() => setDragging(q.id)}
+                  onDragOver={e => e.preventDefault()}
+                  onDrop={() => setDragging(null)}
+                  style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:12,
+                    padding:"14px 16px", display:"flex", gap:14, alignItems:"flex-start",
+                    opacity: dragging===q.id ? 0.4 : 1, boxShadow:`0 1px 3px ${C.shadow}` }}>
+                  <div style={{ color:C.txtMut, marginTop:2, cursor:"grab", flexShrink:0 }}>
+                    <GripVertical size={16} strokeWidth={1.8} />
+                  </div>
+                  <div style={{ flex:1 }}>
+                    <div style={{ display:"flex", gap:8, alignItems:"center", marginBottom:6 }}>
+                      <span style={{ color:C.txtMut, fontSize:12 }}>Q{i+1}</span>
+                      <span style={{ background:`${typeColor[q.type]}18`, color:typeColor[q.type],
+                        borderRadius:20, padding:"2px 10px", fontSize:11, fontWeight:700 }}>
+                        {q.type === "mcq" ? "Multiple Choice" : "Short Answer"}
+                      </span>
+                      <span style={{ color:C.txtMut, fontSize:12 }}>{q.points} pt{q.points>1?"s":""}</span>
+                      {/* Stats */}
+                      {ac > 0 && (
+                        <span style={{ color:C.txtMut, fontSize:11, marginLeft:"auto" }}>
+                          {ac} answered · {q.type==="mcq" ? `${cc}/${ac} correct` : "pending review"}
+                        </span>
+                      )}
+                    </div>
+                    <div style={{ color:C.txtPri, fontSize:13, lineHeight:1.6, marginBottom:8 }}>{q.text}</div>
+
+                    {/* MCQ options with correct highlighted */}
+                    {q.type === "mcq" && q.options.length > 0 && (
+                      <div style={{ display:"flex", flexDirection:"column", gap:5 }}>
+                        {q.options.map((opt, oi) => {
+                          const isCorrect = opt === q.correctAnswer;
+                          return (
+                            <div key={oi} style={{
+                              display:"flex", alignItems:"center", gap:8,
+                              padding:"6px 10px", borderRadius:7,
+                              background: isCorrect ? `${C.green}12` : C.surface,
+                              border: `1px solid ${isCorrect ? `${C.green}44` : C.border}`,
+                            }}>
+                              <span style={{
+                                width:20, height:20, borderRadius:"50%", flexShrink:0,
+                                background: isCorrect ? C.green : C.border2,
+                                display:"flex", alignItems:"center", justifyContent:"center",
+                              }}>
+                                {isCorrect
+                                  ? <CheckCircle size={13} color="white" strokeWidth={3} />
+                                  : <span style={{ color:C.txtMut, fontSize:10, fontWeight:700 }}>
+                                      {String.fromCharCode(65+oi)}
+                                    </span>}
+                              </span>
+                              <span style={{ color: isCorrect ? C.green : C.txtSec, fontSize:12,
+                                fontWeight: isCorrect ? 700 : 400 }}>
+                                {opt}
+                              </span>
+                              {isCorrect && (
+                                <span style={{ marginLeft:"auto", color:C.green, fontSize:10,
+                                  fontWeight:700, textTransform:"uppercase", letterSpacing:0.5 }}>
+                                  Correct
+                                </span>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    {/* Short answer model */}
+                    {q.type === "short" && q.correctAnswer && (
+                      <div style={{ background:`${C.purple}10`, border:`1px solid ${C.purple}44`,
+                        borderRadius:8, padding:"7px 12px", fontSize:12, color:C.purple, marginTop:4 }}>
+                        <strong>Model answer:</strong> {q.correctAnswer}
+                      </div>
+                    )}
+                  </div>
+                  <button onClick={() => deleteQ(q.id)}
+                    style={{ background:`${C.red}10`, border:"none", color:C.red,
+                      borderRadius:6, padding:"5px 8px", cursor:"pointer",
+                      display:"flex", alignItems:"center", flexShrink:0 }}>
+                    <Trash2 size={13} strokeWidth={2} />
+                  </button>
+                </div>
+              );
+            })}
           </div>
+
+          {/* Add question form */}
+          {addingNew && (
+            <div style={{ marginTop:14, background:C.card, border:`1px solid ${C.accent}55`,
+              borderRadius:14, padding:22, boxShadow:`0 2px 8px ${C.shadow}` }}>
+              <div style={{ color:C.txtPri, fontWeight:800, fontSize:15, marginBottom:16 }}>
+                New Question
+              </div>
+
+              {/* Type + practical + points row */}
+              <div style={{ display:"flex", gap:10, marginBottom:16, flexWrap:"wrap" }}>
+                {(["mcq","short"] as const).map(t => (
+                  <button key={t} type="button" onClick={() => setNewQ(p => ({ ...p, type:t, correctAnswer:"" }))}
+                    style={{ padding:"7px 16px", borderRadius:8, cursor:"pointer",
+                      fontSize:12, fontWeight:600, border:"none",
+                      background: newQ.type===t ? C.accent : C.surface,
+                      color: newQ.type===t ? "white" : C.txtSec }}>
+                    {t === "mcq" ? "Multiple Choice" : "Short Answer"}
+                  </button>
+                ))}
+                <div style={{ marginLeft:"auto", display:"flex", alignItems:"center", gap:8 }}>
+                  <label style={{ color:C.txtMut, fontSize:12 }}>Points</label>
+                  <input type="number" min={1} value={newQ.points}
+                    onChange={e => setNewQ(p => ({ ...p, points:+e.target.value }))}
+                    style={{ width:60, background:C.surface, border:`1px solid ${C.border2}`,
+                      color:C.txtPri, borderRadius:6, padding:"5px 8px", fontSize:13, textAlign:"center" }} />
+                </div>
+              </div>
+
+              {/* Practical scope */}
+              <div style={{ marginBottom:14 }}>
+                <label style={{ color:C.txtMut, fontSize:11, fontWeight:700, display:"block",
+                  marginBottom:6, textTransform:"uppercase", letterSpacing:0.7 }}>Practical</label>
+                <div style={{ display:"flex", gap:6 }}>
+                  {(["vanishing-cream","cold-cream","all"] as QAPractical[]).map(p => (
+                    <button key={p} type="button"
+                      onClick={() => setNewQ(prev => ({ ...prev, practicalId:p }))}
+                      style={{ padding:"6px 12px", borderRadius:7, cursor:"pointer",
+                        fontSize:11, fontWeight:600, border:"none",
+                        background: newQ.practicalId===p ? C.accent : C.surface,
+                        color: newQ.practicalId===p ? "white" : C.txtSec }}>
+                      {p === "vanishing-cream" ? "Vanishing" : p === "cold-cream" ? "Cold Cream" : "All"}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Question text */}
+              <label style={{ color:C.txtMut, fontSize:11, fontWeight:700, display:"block",
+                marginBottom:6, textTransform:"uppercase", letterSpacing:0.7 }}>Question</label>
+              <TTextarea placeholder="Enter your question…" value={newQ.text} rows={3}
+                onChange={e => setNewQ(p => ({ ...p, text:e.target.value }))}
+                style={{ marginBottom:14 }} />
+
+              {/* MCQ options + correct answer */}
+              {newQ.type === "mcq" && (
+                <div style={{ marginBottom:14 }}>
+                  <label style={{ color:C.txtMut, fontSize:11, fontWeight:700, display:"block",
+                    marginBottom:8, textTransform:"uppercase", letterSpacing:0.7 }}>
+                    Options — click the circle to mark the correct answer
+                  </label>
+                  <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+                    {newQ.options.map((opt, oi) => {
+                      const isCorrect = newQ.correctAnswer === opt && opt.trim() !== "";
+                      return (
+                        <div key={oi} style={{ display:"flex", alignItems:"center", gap:8 }}>
+                          <button type="button"
+                            onClick={() => opt.trim() && setNewQ(p => ({ ...p, correctAnswer: opt }))}
+                            title="Mark as correct answer"
+                            style={{
+                              width:28, height:28, borderRadius:"50%", border:"none",
+                              flexShrink:0, cursor: opt.trim() ? "pointer" : "default",
+                              background: isCorrect ? C.green : C.border2,
+                              display:"flex", alignItems:"center", justifyContent:"center",
+                              transition:"background .15s",
+                            }}>
+                            {isCorrect
+                              ? <CheckCircle size={15} color="white" strokeWidth={3} />
+                              : <span style={{ color:C.txtPri, fontSize:11, fontWeight:700 }}>
+                                  {String.fromCharCode(65+oi)}
+                                </span>}
+                          </button>
+                          <TInput
+                            placeholder={`Option ${String.fromCharCode(65+oi)}`}
+                            value={opt}
+                            style={{ flex:1 }}
+                            onChange={e => {
+                              const opts = [...newQ.options];
+                              const oldVal = opts[oi];
+                              opts[oi] = e.target.value;
+                              // If this was the correct answer, update it
+                              const newCorrect = newQ.correctAnswer === oldVal ? e.target.value : newQ.correctAnswer;
+                              setNewQ(p => ({ ...p, options:opts, correctAnswer:newCorrect }));
+                            }}
+                          />
+                        </div>
+                      );
+                    })}
+                  </div>
+                  {!newQ.correctAnswer && newQ.options.some(Boolean) && (
+                    <div style={{ color:C.amber, fontSize:12, marginTop:8,
+                      display:"flex", alignItems:"center", gap:5 }}>
+                      <AlertCircle size={13} /> Click the circle next to the correct option to mark it.
+                    </div>
+                  )}
+                  {newQ.correctAnswer && (
+                    <div style={{ color:C.green, fontSize:12, marginTop:8,
+                      display:"flex", alignItems:"center", gap:5 }}>
+                      <CheckCircle size={13} strokeWidth={2.5} /> Correct answer: <strong>{newQ.correctAnswer}</strong>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Short answer: model answer (optional) */}
+              {newQ.type === "short" && (
+                <div style={{ marginBottom:14 }}>
+                  <label style={{ color:C.txtMut, fontSize:11, fontWeight:700, display:"block",
+                    marginBottom:6, textTransform:"uppercase", letterSpacing:0.7 }}>
+                    Model / Expected Answer <span style={{ color:C.txtMut, fontWeight:400 }}>(optional — shown to student after submit)</span>
+                  </label>
+                  <TTextarea
+                    placeholder="e.g. O/W emulsion — oil droplets dispersed in water phase…"
+                    value={newQ.correctAnswer} rows={2}
+                    onChange={e => setNewQ(p => ({ ...p, correctAnswer:e.target.value }))}
+                  />
+                </div>
+              )}
+
+              <div style={{ display:"flex", gap:8, justifyContent:"flex-end", marginTop:6 }}>
+                <Btn label="Cancel"       Icon={RefreshCw} variant="ghost" small onClick={() => setAddingNew(false)} />
+                <Btn label="Save Question" Icon={Save}      small onClick={addQ} />
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -670,130 +1283,210 @@ const Questions: React.FC = () => {
 // Students
 // ─────────────────────────────────────────────────────────────────────────────
 
+// Real students are read directly from the auth user store
 const Students: React.FC = () => {
   const { C } = useTheme();
-  const [students, setStudents] = useState(STUDENTS);
-  const [search,   setSearch]   = useState("");
-  const [filter,   setFilter]   = useState<"all"|"active"|"inactive">("all");
-  const [showAdd,  setShowAdd]  = useState(false);
-  const [newName,  setNewName]  = useState("");
-  const [newEmail, setNewEmail] = useState("");
+  const [search,      setSearch]      = useState("");
+  const [refresh,     setRefresh]     = useState(0);
+  const [showAdd,     setShowAdd]     = useState(false);
+  const [newName,     setNewName]     = useState("");
+  const [newEmail,    setNewEmail]    = useState("");
+  const [newReg,      setNewReg]      = useState("");
+  const [newPass,     setNewPass]     = useState("");
+  const [addError,    setAddError]    = useState<string|null>(null);
+  const [addOk,       setAddOk]       = useState(false);
 
-  const filtered = students.filter(s => {
-    const ms = s.name.toLowerCase().includes(search.toLowerCase()) ||
-               s.email.toLowerCase().includes(search.toLowerCase());
-    return ms && (filter==="all" || s.status===filter);
-  });
+  const allStudents = getAllRegisteredStudents();
+  const filtered = allStudents.filter(u =>
+    u.fullName.toLowerCase().includes(search.toLowerCase()) ||
+    u.email.toLowerCase().includes(search.toLowerCase()) ||
+    (u.regNumber ?? "").toLowerCase().includes(search.toLowerCase())
+  );
 
-  const addStudent = () => {
-    if (!newName.trim()||!newEmail.trim()) return;
-    setStudents(prev => [...prev, {
-      id:`s${Date.now()}`, name:newName, email:newEmail,
-      enrolled: new Date().toISOString().slice(0,10),
-      completed:0, lastActive:"Just added", avgScore:0, status:"active",
-    }]);
-    setNewName(""); setNewEmail(""); setShowAdd(false);
+  const removeStudent = (id: string) => {
+    const users = getAllUsers().filter(u => u.id !== id);
+    localStorage.setItem("vlab_users", JSON.stringify(users));
+    setRefresh(r => r + 1);
+  };
+
+  const resetForm = () => {
+    setNewName(""); setNewEmail(""); setNewReg(""); setNewPass(""); setAddError(null);
+  };
+
+  const handleAddStudent = () => {
+    setAddError(null);
+    const result = registerUser({
+      role: "student", fullName: newName, email: newEmail,
+      password: newPass, regNumber: newReg,
+    });
+    if (!result.ok) { setAddError(result.error ?? "Failed"); return; }
+    resetForm();
+    setAddOk(true);
+    setRefresh(r => r + 1);
+    setTimeout(() => { setAddOk(false); setShowAdd(false); }, 2000);
+  };
+
+  const inp: React.CSSProperties = {
+    width:"100%", background:C.surface, border:`1px solid ${C.border2}`,
+    color:C.txtPri, borderRadius:8, padding:"9px 12px", fontSize:13,
+    boxSizing:"border-box", outline:"none",
+  };
+  const lbl: React.CSSProperties = {
+    color:C.txtMut, fontSize:11, fontWeight:700, display:"block",
+    marginBottom:5, textTransform:"uppercase", letterSpacing:0.7,
   };
 
   return (
     <div>
-      <SectionHeading title="Students" sub="Manage enrolled students and track their progress."
+      <SectionHeading
+        title="Students"
+        sub={`${allStudents.length} student${allStudents.length !== 1 ? "s" : ""} in the system.`}
         action={
           <div style={{ display:"flex", gap:8 }}>
+            <Btn label="Add Student" Icon={UserPlus} small
+              onClick={() => { resetForm(); setShowAdd(v => !v); }} />
+            <Btn label="Refresh" Icon={RefreshCw} variant="ghost" small
+              onClick={() => setRefresh(r => r + 1)} />
             <Btn label="Export CSV" Icon={Download} variant="ghost" small />
-            <Btn label="Add Student" Icon={UserPlus} onClick={() => setShowAdd(true)} />
           </div>
-        } />
+        }
+      />
 
+      {/* ── Add Student inline form ── */}
       {showAdd && (
-        <div style={{ background:C.card, border:`1px solid ${C.accent}55`, borderRadius:12,
-          padding:16, marginBottom:20, display:"flex", gap:10, flexWrap:"wrap",
-          alignItems:"flex-end", boxShadow:`0 2px 8px ${C.shadow}` }}>
-          <div style={{ flex:1, minWidth:180 }}>
-            <label style={{ color:C.txtMut, fontSize:11, display:"block", marginBottom:5,
-              textTransform:"uppercase", letterSpacing:0.7 }}>Full Name</label>
-            <TInput value={newName} onChange={e => setNewName(e.target.value)} placeholder="e.g. Alice Wambua" />
+        <div style={{ background:C.card, border:`1px solid ${C.accent}55`,
+          borderRadius:12, padding:"18px 20px", marginBottom:20,
+          boxShadow:`0 2px 10px ${C.shadow}` }}>
+          <div style={{ color:C.txtPri, fontWeight:800, fontSize:14, marginBottom:14,
+            display:"flex", alignItems:"center", gap:8 }}>
+            <UserPlus size={15} color={C.accent} strokeWidth={2} />
+            Register New Student
           </div>
-          <div style={{ flex:1, minWidth:200 }}>
-            <label style={{ color:C.txtMut, fontSize:11, display:"block", marginBottom:5,
-              textTransform:"uppercase", letterSpacing:0.7 }}>Email</label>
-            <TInput value={newEmail} onChange={e => setNewEmail(e.target.value)} placeholder="student@school.edu" />
+          <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))", gap:12, marginBottom:12 }}>
+            <div>
+              <label style={lbl}>Full Name</label>
+              <input value={newName} onChange={e => setNewName(e.target.value)}
+                placeholder="e.g. Amara Nkosi" style={inp} />
+            </div>
+            <div>
+              <label style={lbl}>Reg Number</label>
+              <input value={newReg} onChange={e => setNewReg(e.target.value)}
+                placeholder="T24-001" style={inp} />
+            </div>
+            <div>
+              <label style={lbl}>Email</label>
+              <input type="email" value={newEmail} onChange={e => setNewEmail(e.target.value)}
+                placeholder="student@school.edu" style={inp} />
+            </div>
+            <div>
+              <label style={lbl}>Password (min 6 chars)</label>
+              <input type="password" value={newPass} onChange={e => setNewPass(e.target.value)}
+                placeholder="••••••••" style={inp} />
+            </div>
           </div>
-          <Btn label="Add"    Icon={Plus}     small onClick={addStudent} />
-          <Btn label="Cancel" Icon={RefreshCw} variant="ghost" small onClick={() => setShowAdd(false)} />
+          {addError && (
+            <div style={{ color:"#f87171", fontSize:12, marginBottom:10,
+              display:"flex", alignItems:"center", gap:6 }}>
+              <AlertCircle size={13} /> {addError}
+            </div>
+          )}
+          {addOk && (
+            <div style={{ color:C.green, fontSize:12, marginBottom:10,
+              display:"flex", alignItems:"center", gap:6 }}>
+              <CheckCircle size={13} strokeWidth={2.5} /> Student account created successfully!
+            </div>
+          )}
+          <div style={{ display:"flex", gap:8 }}>
+            <Btn label="Create Student" Icon={UserPlus} small onClick={handleAddStudent} />
+            <Btn label="Cancel" variant="ghost" small Icon={RefreshCw}
+              onClick={() => { setShowAdd(false); resetForm(); }} />
+          </div>
+          <div style={{ color:C.txtMut, fontSize:11, marginTop:10 }}>
+            The student will log in with the email and password you set. Share their credentials with them directly.
+          </div>
         </div>
       )}
 
-      {/* Filter bar */}
-      <div style={{ display:"flex", gap:10, marginBottom:18, flexWrap:"wrap" }}>
-        <div style={{ flex:1, minWidth:220, position:"relative" }}>
+      {/* Search */}
+      <div style={{ display:"flex", gap:10, marginBottom:18 }}>
+        <div style={{ flex:1, position:"relative" }}>
           <span style={{ position:"absolute", left:11, top:"50%", transform:"translateY(-50%)",
             pointerEvents:"none", display:"flex" }}>
             <Search size={15} color={C.txtMut} />
           </span>
-          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search students…"
+          <input value={search} onChange={e => setSearch(e.target.value)}
+            placeholder="Search by name, email, or reg number…"
             style={{ width:"100%", background:C.card, border:`1px solid ${C.border}`,
               color:C.txtPri, borderRadius:8, padding:"9px 12px 9px 34px",
               fontSize:13, boxSizing:"border-box", outline:"none" }} />
         </div>
-        <div style={{ display:"flex", gap:6 }}>
-          {(["all","active","inactive"] as const).map(f => (
-            <button key={f} onClick={() => setFilter(f)} style={{
-              padding:"8px 16px", borderRadius:8, cursor:"pointer", fontWeight:600,
-              fontSize:12, border:"none", textTransform:"capitalize",
-              background: filter===f ? C.accent : C.card,
-              color: filter===f ? "white" : C.txtSec,
-            }}>{f}</button>
-          ))}
-        </div>
       </div>
 
-      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:14,
-        overflow:"hidden", boxShadow:`0 1px 4px ${C.shadow}` }}>
-        <table style={{ width:"100%", borderCollapse:"collapse" }}>
-          <TableHead cols={["Student","Email","Enrolled","Done","Avg Score","Last Active","Status",""]} />
-          <tbody>
-            {filtered.map((s,i) => (
-              <tr key={s.id} style={{ background: i%2===0?"transparent":`${C.surface}88`,
-                borderBottom:`1px solid ${C.border}` }}>
-                <td style={{ padding:"12px 14px" }}>
-                  <div style={{ display:"flex", alignItems:"center", gap:10 }}>
-                    <Avatar name={s.name} />
-                    <span style={{ color:C.txtPri, fontSize:13, fontWeight:600 }}>{s.name}</span>
-                  </div>
-                </td>
-                <td style={{ padding:"12px 14px", color:C.txtSec, fontSize:12 }}>{s.email}</td>
-                <td style={{ padding:"12px 14px", color:C.txtMut, fontSize:12 }}>{s.enrolled}</td>
-                <td style={{ padding:"12px 14px", color:C.txtPri, fontSize:13, textAlign:"center" }}>{s.completed}/2</td>
-                <td style={{ padding:"12px 14px", minWidth:120 }}>
-                  {s.avgScore>0 ? <ScoreBar score={s.avgScore}/> : <span style={{ color:C.txtMut }}>—</span>}
-                </td>
-                <td style={{ padding:"12px 14px", color:C.txtMut, fontSize:12 }}>{s.lastActive}</td>
-                <td style={{ padding:"12px 14px" }}><StatusBadge status={s.status} /></td>
-                <td style={{ padding:"12px 14px" }}>
-                  <div style={{ display:"flex", gap:6 }}>
-                    <button style={{ background:"transparent", border:`1px solid ${C.border}`,
-                      color:C.txtSec, borderRadius:6, padding:"5px 8px", cursor:"pointer",
-                      display:"flex", alignItems:"center", gap:4, fontSize:12 }}>
-                      <Eye size={13} strokeWidth={2}/> View
-                    </button>
-                    <button style={{ background:`${C.red}10`, border:"none", color:C.red,
-                      borderRadius:6, padding:"5px 8px", cursor:"pointer",
-                      display:"flex", alignItems:"center" }}>
-                      <Trash2 size={13} strokeWidth={2} />
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        {filtered.length===0 && (
-          <div style={{ padding:40, textAlign:"center", color:C.txtMut }}>No students found.</div>
-        )}
-      </div>
+      {allStudents.length === 0 ? (
+        <div style={{ background:C.card, border:`2px dashed ${C.border2}`, borderRadius:14,
+          padding:"48px 20px", textAlign:"center" }}>
+          <Users size={36} color={C.txtMut} style={{ marginBottom:12, opacity:0.4 }} />
+          <div style={{ color:C.txtPri, fontWeight:700, fontSize:15, marginBottom:6 }}>
+            No students yet
+          </div>
+          <div style={{ color:C.txtMut, fontSize:13 }}>
+            Add students above or ask them to self-register on the app.
+          </div>
+        </div>
+      ) : (
+        <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:14,
+          overflow:"hidden", boxShadow:`0 1px 4px ${C.shadow}` }}>
+          <table style={{ width:"100%", borderCollapse:"collapse" }}>
+            <TableHead cols={["Student","Email","Reg Number","Joined",""]} />
+            <tbody>
+              {filtered.map((u, i) => (
+                <tr key={u.id} style={{ background: i%2===0 ? "transparent" : `${C.surface}88`,
+                  borderBottom:`1px solid ${C.border}` }}>
+                  <td style={{ padding:"12px 14px" }}>
+                    <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+                      <Avatar name={u.fullName} />
+                      <span style={{ color:C.txtPri, fontSize:13, fontWeight:600 }}>{u.fullName}</span>
+                    </div>
+                  </td>
+                  <td style={{ padding:"12px 14px", color:C.txtSec, fontSize:12 }}>{u.email}</td>
+                  <td style={{ padding:"12px 14px" }}>
+                    {u.regNumber
+                      ? <code style={{ background:`${C.green}12`, color:C.green,
+                          border:`1px solid ${C.green}44`, borderRadius:5,
+                          padding:"2px 8px", fontSize:12, fontWeight:700 }}>
+                          {u.regNumber}
+                        </code>
+                      : <span style={{ color:C.txtMut, fontSize:12 }}>—</span>}
+                  </td>
+                  <td style={{ padding:"12px 14px", color:C.txtMut, fontSize:12 }}>
+                    {new Date(u.createdAt).toLocaleDateString()}
+                  </td>
+                  <td style={{ padding:"12px 14px" }}>
+                    <div style={{ display:"flex", gap:6 }}>
+                      <span style={{ background:`${C.green}12`, border:`1px solid ${C.green}44`,
+                        color:C.green, borderRadius:20, padding:"2px 10px",
+                        fontSize:11, fontWeight:700 }}>Active</span>
+                      <button onClick={() => removeStudent(u.id)}
+                        style={{ background:"rgba(239,68,68,0.1)", border:"none", color:"#f87171",
+                          borderRadius:6, padding:"5px 8px", cursor:"pointer",
+                          display:"flex", alignItems:"center" }}>
+                        <Trash2 size={13} strokeWidth={2} />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {filtered.length === 0 && (
+            <div style={{ padding:32, textAlign:"center", color:C.txtMut }}>
+              No students match your search.
+            </div>
+          )}
+        </div>
+      )}
       <div style={{ color:C.txtMut, fontSize:12, marginTop:10 }}>
-        Showing {filtered.length} of {students.length} students
+        Showing {filtered.length} of {allStudents.length} registered students
       </div>
     </div>
   );
@@ -807,148 +1500,157 @@ const Analytics: React.FC = () => {
   const { C } = useTheme();
   const [pFilter, setPFilter] = useState("all");
 
-  const barData = [
-    { label:"Vanishing Cream", score:82, color:"#2563eb", count:7 },
-    { label:"Cold Cream",      score:84, color:"#7c3aed", count:5 },
-  ];
-  const sections = [
-    { label:"Context (Understanding)", avg:88 },
-    { label:"Prediction (Pre-lab)",    avg:76 },
-    { label:"Protocol (Procedure)",    avg:91 },
-    { label:"Correct Temperatures",    avg:84 },
-    { label:"Stirring Duration",       avg:72 },
-    { label:"pH Measurement",          avg:79 },
-    { label:"Viscosity Measurement",   avg:68 },
-    { label:"Reflection Questions",    avg:74 },
-  ];
-  const dist = [
-    { range:"90–100", count:3, color:C.green  },
-    { range:"80–89",  count:4, color:"#4ade80" },
-    { range:"70–79",  count:2, color:C.amber  },
-    { range:"60–69",  count:1, color:"#fb923c" },
-    { range:"< 60",   count:0, color:C.red    },
-  ];
-  const maxC = Math.max(...dist.map(d => d.count));
+  const allSubs = getAllSubmissions();
+  const filtered = pFilter === "all" ? allSubs : allSubs.filter(s => s.practicalId === pFilter);
+  const stats    = getStats();
+
+  // Per-practical averages from real data
+  const vcSubs = allSubs.filter(s => s.practicalId === "vanishing-cream");
+  const ccSubs = allSubs.filter(s => s.practicalId === "cold-cream");
+  const vcAvg  = vcSubs.length > 0 ? Math.round(vcSubs.reduce((a,s) => a+s.scorePct,0)/vcSubs.length) : 0;
+  const ccAvg  = ccSubs.length > 0 ? Math.round(ccSubs.reduce((a,s) => a+s.scorePct,0)/ccSubs.length) : 0;
+
+  // Score distribution from real data
+  const ranges = [
+    { range:"90–100", min:90, max:101, color:C.green  },
+    { range:"80–89",  min:80, max:90,  color:"#4ade80" },
+    { range:"70–79",  min:70, max:80,  color:C.amber  },
+    { range:"60–69",  min:60, max:70,  color:"#fb923c" },
+    { range:"< 60",   min:0,  max:60,  color:C.red    },
+  ].map(r => ({ ...r, count: filtered.filter(s => s.scorePct >= r.min && s.scorePct < r.max).length }));
+  const maxC = Math.max(...ranges.map(d => d.count), 1);
+
+  // Top performers / needs attention from real submissions
+  const studentAvgs = new Map<string, { name:string; reg?:string; scores:number[] }>();
+  filtered.forEach(s => {
+    const cur = studentAvgs.get(s.studentId) ?? { name:s.studentName, reg:s.studentReg, scores:[] };
+    cur.scores.push(s.scorePct);
+    studentAvgs.set(s.studentId, cur);
+  });
+  const studentList = Array.from(studentAvgs.entries()).map(([id,v]) => ({
+    id, name:v.name, reg:v.reg,
+    avg: Math.round(v.scores.reduce((a,b)=>a+b,0)/v.scores.length),
+    count: v.scores.length,
+  }));
+  const topStudents  = studentList.filter(s => s.avg >= 80).sort((a,b) => b.avg-a.avg);
+  const needsHelp    = studentList.filter(s => s.avg < 70).sort((a,b) => a.avg-b.avg);
 
   return (
     <div>
-      <SectionHeading title="Analytics" sub="Detailed performance breakdown across all practicals."
-        action={<Btn label="Export Report" Icon={Download} variant="ghost" />} />
+      <SectionHeading title="Analytics" sub="Real performance data from student lab sessions."
+        action={<Btn label="Refresh" Icon={RefreshCw} variant="ghost" small onClick={() => setPFilter(f=>f)} />} />
 
-      <div style={{ display:"flex", gap:8, marginBottom:24, flexWrap:"wrap" }}>
+      <div style={{ display:"flex", gap:8, marginBottom:24 }}>
         {["all","vanishing-cream","cold-cream"].map(f => (
           <button key={f} onClick={() => setPFilter(f)} style={{
             padding:"7px 16px", borderRadius:8, cursor:"pointer", fontWeight:600,
             fontSize:12, border:"none",
             background: pFilter===f ? C.accent : C.card,
             color: pFilter===f ? "white" : C.txtSec,
-          }}>{f==="all"?"All Practicals":f.replace("-"," ").replace(/\b\w/g,c=>c.toUpperCase())}</button>
+          }}>{f==="all"?"All Practicals":f.replace("-"," ").replace(/\b\w/g,(c:string)=>c.toUpperCase())}</button>
         ))}
       </div>
 
       <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))", gap:14, marginBottom:28 }}>
-        <StatCard label="Submissions"     value={10}   sub="7 graded · 1 pending" Icon={ClipboardCheck} accent={C.accent} />
-        <StatCard label="Class Average"   value="83%"  sub="↑ 4% this week"       Icon={TrendingUp}     accent={C.green}  />
-        <StatCard label="Completion Rate" value="80%"  sub="8/10 students"         Icon={CheckCircle}    accent="#7c3aed"  />
-        <StatCard label="Avg Duration"    value="56m"  sub="Range: 42–73 min"     Icon={Clock}          accent={C.amber}  />
+        <StatCard label="Total Submissions" value={filtered.length} sub={`${stats.todayCount} today`} Icon={ClipboardCheck} accent={C.accent} />
+        <StatCard label="Class Average"     value={filtered.length>0 ? `${Math.round(filtered.reduce((a,s)=>a+s.scorePct,0)/filtered.length)}%` : "—"} sub="All evaluated sessions" Icon={TrendingUp} accent={C.green} />
+        <StatCard label="Pass Rate"         value={filtered.length>0 ? `${Math.round(filtered.filter(s=>s.result==="PASS").length/filtered.length*100)}%` : "—"} sub="PASS result" Icon={CheckCircle} accent="#7c3aed" />
+        <StatCard label="Avg Duration"      value={stats.avgDur > 0 ? `${stats.avgDur} min` : "—"} sub="Per session" Icon={Clock} accent={C.amber} />
       </div>
 
-      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:20, marginBottom:20 }}>
-        {/* Score bars */}
-        <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:14,
-          padding:20, boxShadow:`0 1px 4px ${C.shadow}` }}>
-          <div style={{ color:C.txtPri, fontWeight:700, fontSize:14, marginBottom:18,
-            display:"flex", alignItems:"center", gap:8 }}>
-            <BarChart2 size={16} color={C.accent} strokeWidth={2} /> Average Score by Practical
-          </div>
-          {barData.map(d => (
-            <div key={d.label} style={{ marginBottom:16 }}>
-              <div style={{ display:"flex", justifyContent:"space-between", marginBottom:6 }}>
-                <span style={{ color:C.txtSec, fontSize:13 }}>{d.label}</span>
-                <span style={{ color:C.txtPri, fontWeight:700, fontSize:13 }}>{d.score}%</span>
-              </div>
-              <div style={{ height:10, background:C.surface, borderRadius:5, overflow:"hidden",
-                border:`1px solid ${C.border}` }}>
-                <div style={{ width:`${d.score}%`, height:"100%", background:d.color, borderRadius:5 }} />
-              </div>
-              <div style={{ color:C.txtMut, fontSize:11, marginTop:4 }}>{d.count} submissions</div>
-            </div>
-          ))}
+      {allSubs.length === 0 ? (
+        <div style={{ background:C.card, border:`2px dashed ${C.border2}`, borderRadius:14,
+          padding:"48px 20px", textAlign:"center" }}>
+          <BarChart2 size={36} color={C.txtMut} style={{ marginBottom:12, opacity:0.3 }} />
+          <div style={{ color:C.txtPri, fontWeight:700, fontSize:15, marginBottom:6 }}>No data yet</div>
+          <div style={{ color:C.txtMut, fontSize:13 }}>Analytics will populate as students evaluate their practicals.</div>
         </div>
+      ) : (
+        <>
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:20, marginBottom:20 }}>
+            {/* Score by practical */}
+            <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:14,
+              padding:20, boxShadow:`0 1px 4px ${C.shadow}` }}>
+              <div style={{ color:C.txtPri, fontWeight:700, fontSize:14, marginBottom:18,
+                display:"flex", alignItems:"center", gap:8 }}>
+                <BarChart2 size={16} color={C.accent} strokeWidth={2} /> Average Score by Practical
+              </div>
+              {[
+                { label:"Vanishing Cream", score:vcAvg, color:"#2563eb", count:vcSubs.length },
+                { label:"Cold Cream",      score:ccAvg, color:"#7c3aed", count:ccSubs.length },
+              ].map(d => (
+                <div key={d.label} style={{ marginBottom:16 }}>
+                  <div style={{ display:"flex", justifyContent:"space-between", marginBottom:6 }}>
+                    <span style={{ color:C.txtSec, fontSize:13 }}>{d.label}</span>
+                    <span style={{ color:C.txtPri, fontWeight:700, fontSize:13 }}>
+                      {d.count > 0 ? `${d.score}%` : "No data"}
+                    </span>
+                  </div>
+                  <div style={{ height:10, background:C.surface, borderRadius:5, overflow:"hidden",
+                    border:`1px solid ${C.border}` }}>
+                    <div style={{ width:`${d.score}%`, height:"100%", background:d.color, borderRadius:5 }} />
+                  </div>
+                  <div style={{ color:C.txtMut, fontSize:11, marginTop:4 }}>{d.count} submission{d.count!==1?"s":""}</div>
+                </div>
+              ))}
+            </div>
 
-        {/* Distribution */}
-        <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:14,
-          padding:20, boxShadow:`0 1px 4px ${C.shadow}` }}>
-          <div style={{ color:C.txtPri, fontWeight:700, fontSize:14, marginBottom:18,
-            display:"flex", alignItems:"center", gap:8 }}>
-            <Activity size={16} color={C.accent} strokeWidth={2} /> Score Distribution
+            {/* Score distribution */}
+            <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:14,
+              padding:20, boxShadow:`0 1px 4px ${C.shadow}` }}>
+              <div style={{ color:C.txtPri, fontWeight:700, fontSize:14, marginBottom:18,
+                display:"flex", alignItems:"center", gap:8 }}>
+                <Activity size={16} color={C.accent} strokeWidth={2} /> Score Distribution
+              </div>
+              <div style={{ display:"flex", gap:10, alignItems:"flex-end", height:120 }}>
+                {ranges.map(d => (
+                  <div key={d.range} style={{ flex:1, display:"flex", flexDirection:"column",
+                    alignItems:"center", gap:4 }}>
+                    <span style={{ color:C.txtSec, fontSize:11 }}>{d.count}</span>
+                    <div style={{ width:"100%", borderRadius:"4px 4px 0 0",
+                      background: d.count>0 ? d.color : C.border,
+                      height: `${(d.count/maxC)*90}px`,
+                      minHeight: d.count>0 ? 8 : 4 }} />
+                    <span style={{ color:C.txtMut, fontSize:10, textAlign:"center", lineHeight:1.2 }}>{d.range}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
           </div>
-          <div style={{ display:"flex", gap:10, alignItems:"flex-end", height:120 }}>
-            {dist.map(d => (
-              <div key={d.range} style={{ flex:1, display:"flex", flexDirection:"column",
-                alignItems:"center", gap:4 }}>
-                <span style={{ color:C.txtSec, fontSize:11 }}>{d.count}</span>
-                <div style={{ width:"100%", borderRadius:"4px 4px 0 0",
-                  background: d.count>0 ? d.color : C.border,
-                  height: maxC>0 ? `${(d.count/maxC)*90}px` : "4px",
-                  minHeight: d.count>0 ? 8 : 4 }} />
-                <span style={{ color:C.txtMut, fontSize:10, textAlign:"center", lineHeight:1.2 }}>{d.range}</span>
+
+          {/* Top performers / needs attention */}
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:20 }}>
+            {[
+              { title:"Top Performers",  list:topStudents, color:C.green, Icon:Award        },
+              { title:"Needs Attention", list:needsHelp,   color:C.amber, Icon:AlertCircle  },
+            ].map(({ title, list, color, Icon:Ic }) => (
+              <div key={title} style={{ background:C.card, border:`1px solid ${C.border}`,
+                borderRadius:14, padding:18, boxShadow:`0 1px 4px ${C.shadow}` }}>
+                <div style={{ color:C.txtPri, fontWeight:700, fontSize:14, marginBottom:14,
+                  display:"flex", alignItems:"center", gap:8 }}>
+                  <Ic size={15} color={color} strokeWidth={2} /> {title}
+                </div>
+                {list.length===0
+                  ? <div style={{ color:C.txtMut, fontSize:13 }}>None at this time.</div>
+                  : list.map(s => (
+                    <div key={s.id} style={{ display:"flex", justifyContent:"space-between",
+                      alignItems:"center", padding:"8px 0", borderBottom:`1px solid ${C.border}` }}>
+                      <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                        <Avatar name={s.name} size={28} />
+                        <div>
+                          <div style={{ color:C.txtSec, fontSize:13 }}>{s.name}</div>
+                          {s.reg && <div style={{ color:C.txtMut, fontSize:10 }}>{s.reg} · {s.count} eval{s.count!==1?"s":""}</div>}
+                        </div>
+                      </div>
+                      <span style={{ color, fontWeight:700, fontSize:14 }}>{s.avg}%</span>
+                    </div>
+                  ))
+                }
               </div>
             ))}
           </div>
-        </div>
-      </div>
-
-      {/* Section breakdown */}
-      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:14,
-        padding:20, marginBottom:20, boxShadow:`0 1px 4px ${C.shadow}` }}>
-        <div style={{ color:C.txtPri, fontWeight:700, fontSize:14, marginBottom:16,
-          display:"flex", alignItems:"center", gap:8 }}>
-          <Filter size={15} color={C.accent} strokeWidth={2} /> Performance by Section
-        </div>
-        <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
-          {sections.map(s => (
-            <div key={s.label} style={{ display:"grid", gridTemplateColumns:"220px 1fr 46px",
-              gap:12, alignItems:"center" }}>
-              <span style={{ color:C.txtSec, fontSize:12 }}>{s.label}</span>
-              <div style={{ height:8, background:C.surface, borderRadius:4, overflow:"hidden",
-                border:`1px solid ${C.border}` }}>
-                <div style={{ width:`${s.avg}%`, height:"100%", borderRadius:4,
-                  background: s.avg>=85 ? C.green : s.avg>=70 ? C.amber : C.red }} />
-              </div>
-              <span style={{ color:C.txtPri, fontWeight:700, fontSize:12 }}>{s.avg}%</span>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:20 }}>
-        {[
-          { title:"Top Performers",  list:STUDENTS.filter(s=>s.avgScore>=88).sort((a,b)=>b.avgScore-a.avgScore), color:C.green, Icon:Award },
-          { title:"Needs Attention", list:STUDENTS.filter(s=>s.avgScore>0&&s.avgScore<80).sort((a,b)=>a.avgScore-b.avgScore), color:C.amber, Icon:AlertCircle },
-        ].map(({ title, list, color, Icon:Ic }) => (
-          <div key={title} style={{ background:C.card, border:`1px solid ${C.border}`,
-            borderRadius:14, padding:18, boxShadow:`0 1px 4px ${C.shadow}` }}>
-            <div style={{ color:C.txtPri, fontWeight:700, fontSize:14, marginBottom:14,
-              display:"flex", alignItems:"center", gap:8 }}>
-              <Ic size={15} color={color} strokeWidth={2} /> {title}
-            </div>
-            {list.length===0
-              ? <div style={{ color:C.txtMut, fontSize:13 }}>None at this time.</div>
-              : list.map(s => (
-                <div key={s.id} style={{ display:"flex", justifyContent:"space-between",
-                  alignItems:"center", padding:"8px 0", borderBottom:`1px solid ${C.border}` }}>
-                  <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-                    <Avatar name={s.name} size={28} />
-                    <span style={{ color:C.txtSec, fontSize:13 }}>{s.name}</span>
-                  </div>
-                  <span style={{ color, fontWeight:700, fontSize:14 }}>{s.avgScore}%</span>
-                </div>
-              ))
-            }
-          </div>
-        ))}
-      </div>
+        </>
+      )}
     </div>
   );
 };
@@ -959,99 +1661,130 @@ const Analytics: React.FC = () => {
 
 const Submissions: React.FC = () => {
   const { C } = useTheme();
-  const [statusFilter,   setStatusFilter]   = useState<"all"|"graded"|"pending"|"failed">("all");
-  const [practicalFilter,setPracticalFilter] = useState("all");
-  const [search, setSearch] = useState("");
+  const [practicalFilter, setPracticalFilter] = useState("all");
+  const [resultFilter,    setResultFilter]    = useState<"all"|"PASS"|"AVERAGE"|"FAIL">("all");
+  const [modeFilter,      setModeFilter]      = useState<"all"|"assignment"|"practice">("all");
+  const [search,          setSearch]          = useState("");
+  const [refresh,         setRefresh]         = useState(0);
 
-  const filtered = SUBMISSIONS.filter(s =>
-    (statusFilter==="all"||s.status===statusFilter) &&
-    (practicalFilter==="all"||s.practical===practicalFilter) &&
-    s.student.toLowerCase().includes(search.toLowerCase())
+  const allSubs = getAllSubmissions()
+    .sort((a,b) => new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime());
+
+  const filtered = allSubs.filter(s =>
+    (practicalFilter === "all" || s.practicalId === practicalFilter) &&
+    (resultFilter    === "all" || s.result      === resultFilter)    &&
+    (modeFilter      === "all" || s.mode        === modeFilter)      &&
+    (s.studentName.toLowerCase().includes(search.toLowerCase()) ||
+     (s.studentReg ?? "").toLowerCase().includes(search.toLowerCase()))
   );
 
   return (
     <div>
-      <SectionHeading title="Submissions" sub="View and grade all student practical submissions."
-        action={<Btn label="Export All" Icon={Download} variant="ghost" />} />
+      <SectionHeading title="Submissions" sub="All evaluated lab sessions from real students."
+        action={<Btn label="Refresh" Icon={RefreshCw} variant="ghost" small onClick={() => setRefresh(r=>r+1)} />} />
 
-      <div style={{ display:"flex", gap:10, marginBottom:20, flexWrap:"wrap" }}>
+      {/* Filters */}
+      <div style={{ display:"flex", gap:8, marginBottom:20, flexWrap:"wrap" }}>
         <div style={{ position:"relative", flex:1, minWidth:200 }}>
           <span style={{ position:"absolute", left:11, top:"50%", transform:"translateY(-50%)",
             pointerEvents:"none", display:"flex" }}>
             <Search size={15} color={C.txtMut} />
           </span>
-          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search student…"
+          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search by name or reg number…"
             style={{ width:"100%", background:C.card, border:`1px solid ${C.border}`,
-              color:C.txtPri, borderRadius:8, padding:"8px 12px 8px 32px",
+              color:C.txtPri, borderRadius:8, padding:"8px 12px 8px 34px",
               fontSize:13, boxSizing:"border-box", outline:"none" }} />
         </div>
         <select value={practicalFilter} onChange={e => setPracticalFilter(e.target.value)}
           style={{ background:C.card, border:`1px solid ${C.border}`, color:C.txtSec,
             borderRadius:8, padding:"8px 12px", fontSize:13, cursor:"pointer", outline:"none" }}>
           <option value="all">All Practicals</option>
-          <option value="Vanishing Cream">Vanishing Cream</option>
-          <option value="Cold Cream">Cold Cream</option>
+          <option value="vanishing-cream">Vanishing Cream</option>
+          <option value="cold-cream">Cold Cream</option>
         </select>
-        {(["all","graded","pending","failed"] as const).map(f => (
-          <button key={f} onClick={() => setStatusFilter(f)} style={{
-            padding:"8px 14px", borderRadius:8, cursor:"pointer", fontWeight:600,
+        {(["all","PASS","AVERAGE","FAIL"] as const).map(f => (
+          <button key={f} onClick={() => setResultFilter(f)} style={{
+            padding:"7px 12px", borderRadius:8, cursor:"pointer", fontWeight:600,
+            fontSize:12, border:"none",
+            background: resultFilter===f ? C.accent : C.card,
+            color: resultFilter===f ? "white" : C.txtSec,
+          }}>{f === "all" ? "All Results" : f}</button>
+        ))}
+        {(["all","assignment","practice"] as const).map(f => (
+          <button key={f} onClick={() => setModeFilter(f)} style={{
+            padding:"7px 12px", borderRadius:8, cursor:"pointer", fontWeight:600,
             fontSize:12, border:"none", textTransform:"capitalize",
-            background: statusFilter===f ? C.accent : C.card,
-            color: statusFilter===f ? "white" : C.txtSec,
-          }}>{f}</button>
+            background: modeFilter===f ? `${C.purple}55` : C.card,
+            color: modeFilter===f ? "white" : C.txtSec,
+          }}>{f === "all" ? "All Modes" : f}</button>
         ))}
       </div>
 
-      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:14,
-        overflow:"hidden", boxShadow:`0 1px 4px ${C.shadow}` }}>
-        <table style={{ width:"100%", borderCollapse:"collapse" }}>
-          <TableHead cols={["Student","Practical","Submitted","Duration","Score","Status","Actions"]} />
-          <tbody>
-            {filtered.map((s,i) => (
-              <tr key={s.id} style={{ background: i%2===0?"transparent":`${C.surface}88`,
-                borderBottom:`1px solid ${C.border}` }}>
-                <td style={{ padding:"12px 14px" }}>
-                  <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-                    <Avatar name={s.student} size={28} />
-                    <span style={{ color:C.txtPri, fontSize:13 }}>{s.student}</span>
-                  </div>
-                </td>
-                <td style={{ padding:"12px 14px", color:C.txtSec, fontSize:12 }}>{s.practical}</td>
-                <td style={{ padding:"12px 14px", color:C.txtMut, fontSize:12 }}>{s.submittedAt}</td>
-                <td style={{ padding:"12px 14px", color:C.txtMut, fontSize:12 }}>{s.duration}</td>
-                <td style={{ padding:"12px 14px", minWidth:110 }}>
-                  {s.status!=="pending"
-                    ? <ScoreBar score={s.score}/>
-                    : <span style={{ color:C.txtMut, fontSize:12 }}>Awaiting grade</span>}
-                </td>
-                <td style={{ padding:"12px 14px" }}><StatusBadge status={s.status} /></td>
-                <td style={{ padding:"12px 14px" }}>
-                  <div style={{ display:"flex", gap:6 }}>
-                    <button style={{ background:"transparent", border:`1px solid ${C.border}`,
-                      color:C.txtSec, borderRadius:6, padding:"5px 8px", cursor:"pointer",
-                      display:"flex", alignItems:"center", gap:4, fontSize:12 }}>
-                      <Eye size={13} strokeWidth={2} /> View
-                    </button>
-                    {s.status==="pending" && (
-                      <button style={{ background:`${C.green}10`, border:`1px solid ${C.green}44`,
-                        color:C.green, borderRadius:6, padding:"5px 8px", cursor:"pointer",
-                        display:"flex", alignItems:"center", gap:4, fontSize:12 }}>
-                        <CheckCircle size={13} strokeWidth={2} /> Grade
-                      </button>
-                    )}
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        {filtered.length===0 && (
-          <div style={{ padding:40, textAlign:"center", color:C.txtMut }}>No submissions found.</div>
-        )}
-      </div>
-      <div style={{ color:C.txtMut, fontSize:12, marginTop:10 }}>
-        {filtered.length} of {SUBMISSIONS.length} submissions
-      </div>
+      {allSubs.length === 0 ? (
+        <div style={{ background:C.card, border:`2px dashed ${C.border2}`, borderRadius:14,
+          padding:"48px 20px", textAlign:"center" }}>
+          <ClipboardCheck size={36} color={C.txtMut} style={{ marginBottom:12, opacity:0.3 }} />
+          <div style={{ color:C.txtPri, fontWeight:700, fontSize:15, marginBottom:6 }}>No submissions yet</div>
+          <div style={{ color:C.txtMut, fontSize:13 }}>
+            Submissions appear here automatically when a student clicks "Evaluate Result" in the lab.
+          </div>
+        </div>
+      ) : (
+        <>
+          <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:14,
+            overflow:"hidden", boxShadow:`0 1px 4px ${C.shadow}` }}>
+            <table style={{ width:"100%", borderCollapse:"collapse" }}>
+              <TableHead cols={["Student","Practical","Mode","Score","Result","pH","Viscosity","Duration","Submitted"]} />
+              <tbody>
+                {filtered.map((s,i) => (
+                  <tr key={s.id} style={{ background: i%2===0?"transparent":`${C.surface}88`,
+                    borderBottom:`1px solid ${C.border}` }}>
+                    <td style={{ padding:"11px 14px" }}>
+                      <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                        <Avatar name={s.studentName} size={28} />
+                        <div>
+                          <div style={{ color:C.txtPri, fontSize:13 }}>{s.studentName}</div>
+                          {s.studentReg && <div style={{ color:C.txtMut, fontSize:10 }}>{s.studentReg}</div>}
+                        </div>
+                      </div>
+                    </td>
+                    <td style={{ padding:"11px 14px", color:C.txtSec, fontSize:12 }}>
+                      {s.practicalId === "vanishing-cream" ? "Vanishing Cream" : "Cold Cream"}
+                    </td>
+                    <td style={{ padding:"11px 14px" }}>
+                      <span style={{ background: s.mode==="assignment" ? `${C.accent}18` : C.surface,
+                        color: s.mode==="assignment" ? C.accent : C.txtMut,
+                        border:`1px solid ${s.mode==="assignment" ? `${C.accent}44` : C.border}`,
+                        borderRadius:20, padding:"2px 8px", fontSize:11, fontWeight:700,
+                        textTransform:"capitalize" }}>{s.mode}</span>
+                    </td>
+                    <td style={{ padding:"11px 14px", minWidth:120 }}><ScoreBar score={s.scorePct} /></td>
+                    <td style={{ padding:"11px 14px" }}>{resultBadge(s.result, C)}</td>
+                    <td style={{ padding:"11px 14px", color:C.txtSec, fontSize:12, fontFamily:"monospace" }}>
+                      {s.ph.toFixed(2)}
+                    </td>
+                    <td style={{ padding:"11px 14px", color:C.txtSec, fontSize:12, fontFamily:"monospace" }}>
+                      {s.viscosity} cP
+                    </td>
+                    <td style={{ padding:"11px 14px", color:C.txtMut, fontSize:12 }}>
+                      {s.durationSec > 0 ? `${Math.round(s.durationSec/60)} min` : "—"}
+                    </td>
+                    <td style={{ padding:"11px 14px", color:C.txtMut, fontSize:11 }}>
+                      {new Date(s.submittedAt).toLocaleDateString()}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {filtered.length === 0 && (
+              <div style={{ padding:32, textAlign:"center", color:C.txtMut }}>No submissions match the filters.</div>
+            )}
+          </div>
+          <div style={{ color:C.txtMut, fontSize:12, marginTop:10 }}>
+            {filtered.length} of {allSubs.length} submissions
+          </div>
+        </>
+      )}
     </div>
   );
 };
@@ -1062,27 +1795,48 @@ const Submissions: React.FC = () => {
 
 const Announcements: React.FC = () => {
   const { C } = useTheme();
-  const [list, setList]   = useState(ANNOUNCEMENTS);
-  const [title, setTitle] = useState("");
-  const [body,  setBody]  = useState("");
+  const [list,   setList]   = useState<StoredAnnouncement[]>(() => getAllAnnouncements());
+  const [title,  setTitle]  = useState("");
+  const [body,   setBody]   = useState("");
   const [target, setTarget] = useState("All Students");
 
+  const reload = () => setList(getAllAnnouncements());
+
   const send = () => {
-    if (!title.trim()||!body.trim()) return;
-    setList(prev => [{ id:`a${Date.now()}`, title, body, target,
-      sentAt:new Date().toLocaleString(), read:0, total:10 }, ...prev]);
+    if (!title.trim() || !body.trim()) return;
+    const a: StoredAnnouncement = {
+      id:     `ann_${Date.now()}`,
+      title:  title.trim(),
+      body:   body.trim(),
+      target,
+      sentAt: new Date().toLocaleString(),
+      read:   0,
+      total:  getAllRegisteredStudents().length,
+    };
+    saveAnnouncement(a);
+    reload();
     setTitle(""); setBody("");
   };
+
+  const handleDelete = (id: string) => { deleteAnnouncement(id); reload(); };
 
   const lbl: React.CSSProperties = { color:C.txtMut, fontSize:11, display:"block",
     marginBottom:5, textTransform:"uppercase", letterSpacing:0.7 };
 
   return (
     <div>
-      <SectionHeading title="Announcements" sub="Broadcast messages to students." />
-      <div style={{ display:"grid", gridTemplateColumns:"1fr 380px", gap:20, alignItems:"start" }}>
+      <SectionHeading title="Announcements" sub="Broadcast messages to students."
+        action={<Btn label="Refresh" Icon={RefreshCw} variant="ghost" small onClick={reload} />} />
 
+      <div style={{ display:"grid", gridTemplateColumns:"1fr 380px", gap:20, alignItems:"start" }}>
         <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
+          {list.length === 0 && (
+            <div style={{ background:C.card, border:`2px dashed ${C.border2}`, borderRadius:12,
+              padding:"32px 20px", textAlign:"center", color:C.txtMut }}>
+              <Megaphone size={28} style={{ marginBottom:8, opacity:0.3 }} />
+              <div style={{ fontSize:13 }}>No announcements yet. Compose and send one on the right.</div>
+            </div>
+          )}
           {list.map(a => (
             <div key={a.id} style={{ background:C.card, border:`1px solid ${C.border}`,
               borderRadius:12, padding:18, boxShadow:`0 1px 4px ${C.shadow}` }}>
@@ -1092,17 +1846,20 @@ const Announcements: React.FC = () => {
                   <div style={{ color:C.txtPri, fontWeight:700, fontSize:14 }}>{a.title}</div>
                   <div style={{ color:C.txtMut, fontSize:11, marginTop:2 }}>{a.sentAt} · To: {a.target}</div>
                 </div>
-                <div style={{ background:`${C.green}12`, border:`1px solid ${C.green}44`,
-                  borderRadius:8, padding:"4px 10px", whiteSpace:"nowrap",
-                  color:C.green, fontSize:11, fontWeight:600, display:"flex", alignItems:"center", gap:4 }}>
-                  <Eye size={11} strokeWidth={2} /> {a.read}/{a.total} read
+                <div style={{ display:"flex", gap:6, alignItems:"center" }}>
+                  <span style={{ background:`${C.green}12`, border:`1px solid ${C.green}44`,
+                    borderRadius:8, padding:"4px 8px", color:C.green, fontSize:11, fontWeight:600 }}>
+                    {a.total} recipients
+                  </span>
+                  <button onClick={() => handleDelete(a.id)} style={{
+                    background:`${C.red}10`, border:"none", color:C.red,
+                    borderRadius:6, padding:"4px 7px", cursor:"pointer",
+                    display:"flex", alignItems:"center" }}>
+                    <Trash2 size={12} strokeWidth={2} />
+                  </button>
                 </div>
               </div>
               <p style={{ color:C.txtSec, fontSize:13, margin:0, lineHeight:1.6 }}>{a.body}</p>
-              <div style={{ marginTop:10, height:4, background:C.surface, borderRadius:2,
-                overflow:"hidden", border:`1px solid ${C.border}` }}>
-                <div style={{ width:`${(a.read/a.total)*100}%`, height:"100%", background:C.green, borderRadius:2 }} />
-              </div>
             </div>
           ))}
         </div>
@@ -1141,15 +1898,22 @@ const Announcements: React.FC = () => {
 
 const SettingsPanel: React.FC = () => {
   const { C } = useTheme();
-  const [timeLimit,   setTimeLimit]   = useState(90);
-  const [maxAttempts, setMaxAttempts] = useState(2);
-  const [passScore,   setPassScore]   = useState(60);
-  const [autoGrade,   setAutoGrade]   = useState(true);
-  const [emailAlerts, setEmailAlerts] = useState(true);
-  const [regOpen,     setRegOpen]     = useState(true);
+  const stored = loadSettings();
+
+  const [timeLimit,   setTimeLimit]   = useState<number>(stored.timeLimit   ?? 90);
+  const [maxAttempts, setMaxAttempts] = useState<number>(stored.maxAttempts ?? 2);
+  const [passScore,   setPassScore]   = useState<number>(stored.passScore   ?? 60);
+  const [autoGrade,   setAutoGrade]   = useState<boolean>(stored.autoGrade  ?? true);
+  const [emailAlerts, setEmailAlerts] = useState<boolean>(stored.emailAlerts ?? true);
+  const [regOpen,     setRegOpen]     = useState<boolean>(stored.regOpen    ?? true);
+  const [teacherEmail,setTeacherEmail]= useState<string>(stored.teacherEmail ?? "teacher@school.edu");
   const [saved,       setSaved]       = useState(false);
 
-  const save = () => { setSaved(true); setTimeout(() => setSaved(false), 2500); };
+  const save = () => {
+    persistSettings({ timeLimit, maxAttempts, passScore, autoGrade, emailAlerts, regOpen, teacherEmail });
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2500);
+  };
 
   const Toggle: React.FC<{ v:boolean; set:(x:boolean)=>void }> = ({ v, set }) => (
     <div onClick={() => set(!v)} style={{ width:44, height:24, borderRadius:12, cursor:"pointer",
@@ -1224,10 +1988,12 @@ const SettingsPanel: React.FC = () => {
             <code style={{ background:C.surface, border:`1px solid ${C.border2}`,
               color:C.accent, borderRadius:6, padding:"5px 12px", fontSize:13,
               letterSpacing:1.5, fontWeight:700 }}>VCLAB-2026</code>
-            <button style={{ background:"transparent", border:`1px solid ${C.border2}`,
-              color:C.txtMut, borderRadius:6, padding:"5px 8px", cursor:"pointer",
-              display:"flex", alignItems:"center" }}>
-              <Copy size={14} strokeWidth={2} />
+            <button
+              onClick={() => navigator.clipboard.writeText("VCLAB-2026").catch(()=>{})}
+              style={{ background:"transparent", border:`1px solid ${C.border2}`,
+                color:C.txtMut, borderRadius:6, padding:"5px 8px", cursor:"pointer",
+                display:"flex", alignItems:"center", gap:4, fontSize:12 }}>
+              <Copy size={13} strokeWidth={2} /> Copy
             </button>
           </div>
         </Row>
@@ -1238,10 +2004,13 @@ const SettingsPanel: React.FC = () => {
           <Toggle v={emailAlerts} set={setEmailAlerts} />
         </Row>
         <Row label="Teacher Email" sub="Address used for all system notifications">
-          <input defaultValue="teacher@school.edu"
+          <input
+            value={teacherEmail}
+            onChange={e => setTeacherEmail(e.target.value)}
             style={{ background:C.surface, border:`1px solid ${C.border2}`,
               color:C.txtPri, borderRadius:8, padding:"7px 12px", fontSize:13,
-              width:220, outline:"none" }} />
+              width:220, outline:"none" }}
+          />
         </Row>
       </Block>
 
@@ -1264,8 +2033,7 @@ const SettingsPanel: React.FC = () => {
 
 const NAV: { id:Section; label:string; Icon:LucideIcon }[] = [
   { id:"dashboard",     label:"Dashboard",     Icon:LayoutDashboard },
-  { id:"practicals",    label:"Practicals",    Icon:TestTubes       },
-  { id:"questions",     label:"Questions",     Icon:ClipboardList   },
+  { id:"questions",     label:"Assignments",   Icon:ClipboardList   },
   { id:"students",      label:"Students",      Icon:Users           },
   { id:"analytics",     label:"Analytics",     Icon:BarChart2       },
   { id:"submissions",   label:"Submissions",   Icon:ClipboardCheck  },
@@ -1274,7 +2042,7 @@ const NAV: { id:Section; label:string; Icon:LucideIcon }[] = [
 ];
 
 const LABELS: Record<Section,string> = {
-  dashboard:"Dashboard", practicals:"Practicals", questions:"Questions",
+  dashboard:"Dashboard", questions:"Assignments",
   students:"Students", analytics:"Analytics", submissions:"Submissions",
   announcements:"Announcements", settings:"Settings",
 };
@@ -1296,7 +2064,6 @@ const TeacherPanel: React.FC<Props> = ({ onBack }) => {
   const renderSection = () => {
     switch (section) {
       case "dashboard":     return <Dashboard />;
-      case "practicals":    return <Practicals />;
       case "questions":     return <Questions />;
       case "students":      return <Students />;
       case "analytics":     return <Analytics />;
@@ -1376,18 +2143,24 @@ const TeacherPanel: React.FC<Props> = ({ onBack }) => {
             })}
           </nav>
 
-          {/* Back */}
+          {/* Logout */}
           <div style={{ padding:"10px 8px", borderTop:`1px solid ${C.border}` }}>
-            <button onClick={onBack} style={{
-              width:"100%", display:"flex", alignItems:"center",
-              gap: sbOpen?10:0, justifyContent: sbOpen?"flex-start":"center",
-              padding: sbOpen?"10px 12px":"11px 0",
-              borderRadius:9, border:"none", cursor:"pointer",
-              background:"transparent", color:C.txtMut, fontSize:13, fontWeight:500,
-              transition:"color .15s",
-            }}>
-              <LogOut size={16} strokeWidth={1.8} />
-              {sbOpen && <span>Student View</span>}
+            <button onClick={onBack}
+              title="Logout"
+              style={{
+                width:"100%", display:"flex", alignItems:"center",
+                gap: sbOpen?10:0, justifyContent: sbOpen?"flex-start":"center",
+                padding: sbOpen?"11px 14px":"11px 0",
+                borderRadius:9, border:`1px solid ${C.red}33`, cursor:"pointer",
+                background:`${C.red}10`,
+                color:C.red, fontSize:13, fontWeight:700,
+                transition:"background .15s",
+              }}
+              onMouseEnter={e => (e.currentTarget.style.background = `${C.red}20`)}
+              onMouseLeave={e => (e.currentTarget.style.background = `${C.red}10`)}
+            >
+              <LogOut size={16} strokeWidth={2} />
+              {sbOpen && <span>Logout</span>}
             </button>
           </div>
         </aside>

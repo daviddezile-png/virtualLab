@@ -1,9 +1,20 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { evaluateFormulation, FormulationInput, EvaluationResult,
          evaluateColdCream, ColdCreamInput, ColdCreamResult } from "../simulation/engine";
 import { Apparatus } from "./apparatusData";
+import { Assignment } from "../utils/assignmentStore";
+import { saveSubmission } from "../utils/submissionStore";
+import { getCurrentUser } from "../utils/userStore";
+import { logEvaluationSubmitted } from "../utils/auditStore";
 
-interface Props { isOpen: boolean; onClose: () => void; apparatus: Apparatus[]; practicalId?: string; }
+interface Props {
+  isOpen:          boolean;
+  onClose:         () => void;
+  apparatus:       Apparatus[];
+  practicalId?:    string;
+  assignment?:     Assignment | null;
+  sessionStartAt?: number | null;
+}
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -225,9 +236,102 @@ const SectionTitle: React.FC<{ children: React.ReactNode }> = ({ children }) => 
   </div>
 );
 
+// ── Checklist builders (module-level so they can be called inside handleEvaluate) ─
+const buildChecklist = (r: EvaluationResult, f: FormulationInput, measuredVisc: number, measuredPH: number) => {
+  const td = Math.abs(f.oil_phase_temperature - f.aqueous_phase_temperature);
+  const dispVisc = r.predicted_viscosity;
+  const dispPH   = r.predicted_pH;
+  return [
+    { label:"Stearic Acid %",
+      got:`${r.percentages.stearic}%`, target:"15–20%",
+      status:(r.percentages.stearic>=15&&r.percentages.stearic<=20?"pass":r.percentages.stearic>=12&&r.percentages.stearic<=23?"warn":"fail") as "pass"|"warn"|"fail" },
+    { label:"Liquid Paraffin %",
+      got:`${r.percentages.paraffin}%`, target:"5–10%",
+      status:(r.percentages.paraffin>=5&&r.percentages.paraffin<=10?"pass":r.percentages.paraffin>=2&&r.percentages.paraffin<=13?"warn":"fail") as "pass"|"warn"|"fail" },
+    { label:"Glycerin %",
+      got:`${r.percentages.glycerin}%`, target:"2–5%",
+      status:(r.percentages.glycerin>=2&&r.percentages.glycerin<=5?"pass":r.percentages.glycerin>=0.5&&r.percentages.glycerin<=8?"warn":"fail") as "pass"|"warn"|"fail" },
+    { label:"KOH & TEA %",
+      got:`${r.percentages.koh}%`, target:"0.5–2%",
+      status:(r.percentages.koh>=0.5&&r.percentages.koh<=2?"pass":r.percentages.koh>0&&r.percentages.koh<=5?"warn":"fail") as "pass"|"warn"|"fail" },
+    { label:"Distilled Water %",
+      got:`${r.percentages.water}%`, target:"60–75%",
+      status:(r.percentages.water>=60&&r.percentages.water<=75?"pass":r.percentages.water>=57&&r.percentages.water<=78?"warn":"fail") as "pass"|"warn"|"fail" },
+    { label:"Oil Phase Temperature",
+      got:`${f.oil_phase_temperature}°C`, target:"70–80°C",
+      status:(f.oil_phase_temperature>=70&&f.oil_phase_temperature<=80?"pass":f.oil_phase_temperature>=60&&f.oil_phase_temperature<=90?"warn":"fail") as "pass"|"warn"|"fail" },
+    { label:"Aqueous Phase Temperature",
+      got:`${f.aqueous_phase_temperature}°C`, target:"70–80°C",
+      status:(f.aqueous_phase_temperature>=70&&f.aqueous_phase_temperature<=80?"pass":f.aqueous_phase_temperature>=60&&f.aqueous_phase_temperature<=90?"warn":"fail") as "pass"|"warn"|"fail" },
+    { label:"Phase Temperature Difference",
+      got:`${td.toFixed(1)}°C`, target:"≤5°C",
+      status:(td<=5?"pass":td<=10?"warn":"fail") as "pass"|"warn"|"fail" },
+    { label:"Mixing Order",
+      got:f.mixing_order==="aqueous_to_oil"?"Oil first, then Aqueous":"Aqueous first, then Oil",
+      target:"Oil first, then Aqueous",
+      status:(f.mixing_order==="aqueous_to_oil"?"pass":"fail") as "pass"|"warn"|"fail" },
+    { label:"Mixing Time",
+      got:`${f.mixing_time} s`, target:"≥30 s",
+      status:(f.mixing_time>=30?"pass":f.mixing_time>=20?"warn":"fail") as "pass"|"warn"|"fail" },
+    { label:"Cooling Temperature",
+      got:`${f.cooling_temperature}°C`, target:"≤40°C",
+      status:(f.cooling_temperature<=40?"pass":f.cooling_temperature<=50?"warn":"fail") as "pass"|"warn"|"fail" },
+    { label:"Cooling with Stirring",
+      got:f.cooling_stirring?"Yes":"No", target:"Yes",
+      status:(f.cooling_stirring?"pass":"fail") as "pass"|"warn"|"fail" },
+    { label:`pH${measuredPH>0 ? ` (meter: ${measuredPH.toFixed(2)})` : ""}`,
+      got:dispPH.toFixed(2), target:"5.0–7.0",
+      status:(dispPH>=5&&dispPH<=7?"pass":dispPH>=4.5&&dispPH<=8?"warn":"fail") as "pass"|"warn"|"fail" },
+    { label:`Viscosity${measuredVisc>0 ? ` (gauge: ${measuredVisc} cP)` : ""}`,
+      got:`${dispVisc} cP`, target:"1100–1800 cP",
+      status:(dispVisc>=1100&&dispVisc<=1800?"pass":dispVisc>=800&&dispVisc<=2200?"warn":"fail") as "pass"|"warn"|"fail" },
+  ];
+};
+
+const buildColdCreamChecklist = (r: ColdCreamResult, f: ColdCreamInput, measuredVisc: number, measuredPH: number) => {
+  const td = Math.abs(f.oil_phase_temperature - f.aqueous_phase_temperature);
+  const p  = r.percentages;
+  return [
+    { label:"Beeswax %",          got:`${p.beeswax}%`,  target:"10–16%",
+      status:(p.beeswax>=10&&p.beeswax<=16?"pass":p.beeswax>=8&&p.beeswax<=18?"warn":"fail") as "pass"|"warn"|"fail" },
+    { label:"Liquid Paraffin %",  got:`${p.paraffin}%`, target:"34–46%",
+      status:(p.paraffin>=34&&p.paraffin<=46?"pass":p.paraffin>=28&&p.paraffin<=52?"warn":"fail") as "pass"|"warn"|"fail" },
+    { label:"Borax Solution %",   got:`${p.borax}%`,    target:"2–5%",
+      status:(p.borax>=2&&p.borax<=5?"pass":p.borax>=1&&p.borax<=7?"warn":"fail") as "pass"|"warn"|"fail" },
+    { label:"Distilled Water %",  got:`${p.water}%`,    target:"38–52%",
+      status:(p.water>=38&&p.water<=52?"pass":p.water>=34&&p.water<=56?"warn":"fail") as "pass"|"warn"|"fail" },
+    { label:"Oil Phase Temperature",    got:`${f.oil_phase_temperature}°C`, target:"65–75°C",
+      status:(f.oil_phase_temperature>=65&&f.oil_phase_temperature<=75?"pass":f.oil_phase_temperature>=58&&f.oil_phase_temperature<=82?"warn":"fail") as "pass"|"warn"|"fail" },
+    { label:"Aqueous Phase Temperature",got:`${f.aqueous_phase_temperature}°C`, target:"65–75°C",
+      status:(f.aqueous_phase_temperature>=65&&f.aqueous_phase_temperature<=75?"pass":f.aqueous_phase_temperature>=58&&f.aqueous_phase_temperature<=82?"warn":"fail") as "pass"|"warn"|"fail" },
+    { label:"Phase Temperature Difference", got:`${td.toFixed(1)}°C`, target:"≤5°C",
+      status:(td<=5?"pass":td<=10?"warn":"fail") as "pass"|"warn"|"fail" },
+    { label:"Mixing Order",       got:f.mixing_order==="aqueous_to_oil"?"Oil first, then Aqueous":"Aqueous first, then Oil", target:"Oil first, then Aqueous",
+      status:(f.mixing_order==="aqueous_to_oil"?"pass":"fail") as "pass"|"warn"|"fail" },
+    { label:"Mixing Time",        got:`${f.mixing_time} s`, target:"≥20 s",
+      status:(f.mixing_time>=20?"pass":f.mixing_time>=12?"warn":"fail") as "pass"|"warn"|"fail" },
+    { label:"Cooling Temperature",got:`${f.cooling_temperature}°C`, target:"≤35°C",
+      status:(f.cooling_temperature<=35?"pass":f.cooling_temperature<=45?"warn":"fail") as "pass"|"warn"|"fail" },
+    { label:"Cooling with Stirring",got:f.cooling_stirring?"Yes":"No", target:"Yes",
+      status:(f.cooling_stirring?"pass":"fail") as "pass"|"warn"|"fail" },
+    { label:`pH${measuredPH>0?` (meter: ${measuredPH.toFixed(2)})`:""}`,
+      got:r.predicted_pH.toFixed(2), target:"6.0–7.5",
+      status:(r.predicted_pH>=6&&r.predicted_pH<=7.5?"pass":r.predicted_pH>=5.5&&r.predicted_pH<=8?"warn":"fail") as "pass"|"warn"|"fail" },
+    { label:`Viscosity${measuredVisc>0?` (gauge: ${measuredVisc} cP)`:""}`,
+      got:`${r.predicted_viscosity} cP`, target:"2000–6000 cP",
+      status:(r.predicted_viscosity>=2000&&r.predicted_viscosity<=6000?"pass":r.predicted_viscosity>=1500&&r.predicted_viscosity<=7000?"warn":"fail") as "pass"|"warn"|"fail" },
+  ];
+};
+
 // ── main component ─────────────────────────────────────────────────────────────
-const EvaluationPanel: React.FC<Props> = ({ isOpen, onClose, apparatus, practicalId = "vanishing-cream" }) => {
+const EvaluationPanel: React.FC<Props> = ({
+  isOpen, onClose, apparatus,
+  practicalId = "vanishing-cream",
+  assignment  = null,
+  sessionStartAt = null,
+}) => {
   const isColdCream = practicalId === "cold-cream";
+  const submittedRef = useRef(false); // prevents saving more than once per open
 
   const [form,      setForm]      = useState<FormulationInput>(() => readLabState(apparatus));
   const [ccForm,    setCcForm]    = useState<ColdCreamInput>(() => readColdCreamLabState(apparatus));
@@ -251,6 +355,9 @@ const EvaluationPanel: React.FC<Props> = ({ isOpen, onClose, apparatus, practica
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen]);
 
+  // Reset save-guard when the panel is re-opened (new session)
+  useEffect(() => { if (isOpen) submittedRef.current = false; }, [isOpen]);
+
   if (!isOpen) return null;
 
   const handleEvaluate = () => {
@@ -264,105 +371,81 @@ const EvaluationPanel: React.FC<Props> = ({ isOpen, onClose, apparatus, practica
     if (isColdCream) {
       const ccLive = readColdCreamLabState(apparatus);
       setCcForm(ccLive);
-      try { setCcResult(evaluateColdCream(ccLive)); }
-      catch { /* no ingredients */ }
+      try {
+        const r = evaluateColdCream(ccLive);
+        setCcResult(r);
+        if (!submittedRef.current) {
+          submittedRef.current = true;
+          const cl  = buildColdCreamChecklist(r, ccLive, liveVisc, livePH);
+          const pc  = cl.filter(i => i.status === "pass").length;
+          const wc  = cl.filter(i => i.status === "warn").length;
+          const ts  = 13;
+          const dr: "PASS"|"AVERAGE"|"FAIL" =
+            pc === ts ? "PASS" : pc + wc >= ts || pc >= 10 ? "AVERAGE" : "FAIL";
+          const sp  = Math.round((pc / ts) * 100);
+          const u   = getCurrentUser();
+          const now = Date.now();
+          try {
+            saveSubmission({
+              id: `sub_${now}_${Math.random().toString(36).slice(2,7)}`,
+              token: assignment?.token ?? "", practicalId,
+              mode: assignment ? "assignment" : "practice",
+              studentId: u?.id ?? "anonymous", studentName: u?.fullName ?? "Anonymous",
+              studentReg: u?.regNumber,
+              submittedAt: new Date(now).toISOString(),
+              durationSec: sessionStartAt ? Math.round((now - sessionStartAt) / 1000) : 0,
+              score10: Math.round((r.score / 18) * 100) / 10,
+              scorePct: sp, passCount: pc, totalSteps: ts, result: dr,
+              ph: r.predicted_pH, viscosity: r.predicted_viscosity,
+              stability: r.stability ?? "unknown", synced: false,
+            });
+            logEvaluationSubmitted(practicalId, sp, dr);
+          } catch (saveErr) {
+            console.error("[EvaluationPanel] save failed:", saveErr);
+          }
+        }
+      } catch { /* no ingredients */ }
     } else {
       const live = readLabState(apparatus);
       setForm(live);
-      try { setResult(evaluateFormulation(live)); }
-      catch { /* no ingredients yet */ }
+      try {
+        const r = evaluateFormulation(live);
+        setResult(r);
+        if (!submittedRef.current) {
+          submittedRef.current = true;
+          const cl  = buildChecklist(r, live, liveVisc, livePH);
+          const pc  = cl.filter(i => i.status === "pass").length;
+          const wc  = cl.filter(i => i.status === "warn").length;
+          const ts  = 14;
+          const dr: "PASS"|"AVERAGE"|"FAIL" =
+            pc === ts ? "PASS" : pc + wc >= ts || pc >= 10 ? "AVERAGE" : "FAIL";
+          const sp  = Math.round((pc / ts) * 100);
+          const u   = getCurrentUser();
+          const now = Date.now();
+          try {
+            saveSubmission({
+              id: `sub_${now}_${Math.random().toString(36).slice(2,7)}`,
+              token: assignment?.token ?? "", practicalId,
+              mode: assignment ? "assignment" : "practice",
+              studentId: u?.id ?? "anonymous", studentName: u?.fullName ?? "Anonymous",
+              studentReg: u?.regNumber,
+              submittedAt: new Date(now).toISOString(),
+              durationSec: sessionStartAt ? Math.round((now - sessionStartAt) / 1000) : 0,
+              score10: Math.round((r.score / 18) * 100) / 10,
+              scorePct: sp, passCount: pc, totalSteps: ts, result: dr,
+              ph: r.predicted_pH, viscosity: r.predicted_viscosity,
+              stability: r.stability ?? "unknown", synced: false,
+            });
+            logEvaluationSubmitted(practicalId, sp, dr);
+          } catch (saveErr) {
+            console.error("[EvaluationPanel] save failed:", saveErr);
+          }
+        }
+      } catch { /* no ingredients yet */ }
     }
   };
 
-
-  const buildChecklist = (r: EvaluationResult, f: FormulationInput, measuredVisc: number, measuredPH: number) => {
-    const td = Math.abs(f.oil_phase_temperature - f.aqueous_phase_temperature);
-    // Always use formula-computed values for scoring (they are the settled/correct values).
-    // The gauge/meter readings are shown as secondary info but don't affect pass/fail.
-    const dispVisc = r.predicted_viscosity;
-    const dispPH   = r.predicted_pH;
-    return [
-      { label:"Stearic Acid %",
-        got:`${r.percentages.stearic}%`, target:"15–20%",
-        status:(r.percentages.stearic>=15&&r.percentages.stearic<=20?"pass":r.percentages.stearic>=12&&r.percentages.stearic<=23?"warn":"fail") as "pass"|"warn"|"fail" },
-      { label:"Liquid Paraffin %",
-        got:`${r.percentages.paraffin}%`, target:"5–10%",
-        status:(r.percentages.paraffin>=5&&r.percentages.paraffin<=10?"pass":r.percentages.paraffin>=2&&r.percentages.paraffin<=13?"warn":"fail") as "pass"|"warn"|"fail" },
-      { label:"Glycerin %",
-        got:`${r.percentages.glycerin}%`, target:"2–5%",
-        status:(r.percentages.glycerin>=2&&r.percentages.glycerin<=5?"pass":r.percentages.glycerin>=0.5&&r.percentages.glycerin<=8?"warn":"fail") as "pass"|"warn"|"fail" },
-      { label:"KOH & TEA %",
-        got:`${r.percentages.koh}%`, target:"0.5–2%",
-        status:(r.percentages.koh>=0.5&&r.percentages.koh<=2?"pass":r.percentages.koh>0&&r.percentages.koh<=5?"warn":"fail") as "pass"|"warn"|"fail" },
-      { label:"Distilled Water %",
-        got:`${r.percentages.water}%`, target:"60–75%",
-        status:(r.percentages.water>=60&&r.percentages.water<=75?"pass":r.percentages.water>=57&&r.percentages.water<=78?"warn":"fail") as "pass"|"warn"|"fail" },
-      { label:"Oil Phase Temperature",
-        got:`${f.oil_phase_temperature}°C`, target:"70–80°C",
-        status:(f.oil_phase_temperature>=70&&f.oil_phase_temperature<=80?"pass":f.oil_phase_temperature>=60&&f.oil_phase_temperature<=90?"warn":"fail") as "pass"|"warn"|"fail" },
-      { label:"Aqueous Phase Temperature",
-        got:`${f.aqueous_phase_temperature}°C`, target:"70–80°C",
-        status:(f.aqueous_phase_temperature>=70&&f.aqueous_phase_temperature<=80?"pass":f.aqueous_phase_temperature>=60&&f.aqueous_phase_temperature<=90?"warn":"fail") as "pass"|"warn"|"fail" },
-      { label:"Phase Temperature Difference",
-        got:`${td.toFixed(1)}°C`, target:"≤5°C",
-        status:(td<=5?"pass":td<=10?"warn":"fail") as "pass"|"warn"|"fail" },
-      { label:"Mixing Order",
-        got:f.mixing_order==="aqueous_to_oil"?"Oil first, then Aqueous":"Aqueous first, then Oil",
-        target:"Oil first, then Aqueous",
-        status:(f.mixing_order==="aqueous_to_oil"?"pass":"fail") as "pass"|"warn"|"fail" },
-      { label:"Mixing Time",
-        got:`${f.mixing_time} s`, target:"≥30 s",
-        status:(f.mixing_time>=30?"pass":f.mixing_time>=20?"warn":"fail") as "pass"|"warn"|"fail" },
-      { label:"Cooling Temperature",
-        got:`${f.cooling_temperature}°C`, target:"≤40°C",
-        status:(f.cooling_temperature<=40?"pass":f.cooling_temperature<=50?"warn":"fail") as "pass"|"warn"|"fail" },
-      { label:"Cooling with Stirring",
-        got:f.cooling_stirring?"Yes":"No", target:"Yes",
-        status:(f.cooling_stirring?"pass":"fail") as "pass"|"warn"|"fail" },
-      { label:`pH${measuredPH>0 ? ` (meter: ${measuredPH.toFixed(2)})` : ""}`,
-        got:dispPH.toFixed(2), target:"5.0–7.0",
-        status:(dispPH>=5&&dispPH<=7?"pass":dispPH>=4.5&&dispPH<=8?"warn":"fail") as "pass"|"warn"|"fail" },
-      { label:`Viscosity${measuredVisc>0 ? ` (gauge: ${measuredVisc} cP)` : ""}`,
-        got:`${dispVisc} cP`, target:"1100–1800 cP",
-        status:(dispVisc>=1100&&dispVisc<=1800?"pass":dispVisc>=800&&dispVisc<=2200?"warn":"fail") as "pass"|"warn"|"fail" },
-    ];
-  };
-
-  // Cold cream checklist
-  const buildColdCreamChecklist = (r: ColdCreamResult, f: ColdCreamInput, measuredVisc: number, measuredPH: number) => {
-    const td = Math.abs(f.oil_phase_temperature - f.aqueous_phase_temperature);
-    const p  = r.percentages;
-    return [
-      { label:"Beeswax %",          got:`${p.beeswax}%`,  target:"10–16%",
-        status:(p.beeswax>=10&&p.beeswax<=16?"pass":p.beeswax>=8&&p.beeswax<=18?"warn":"fail") as "pass"|"warn"|"fail" },
-      { label:"Liquid Paraffin %",  got:`${p.paraffin}%`, target:"34–46%",
-        status:(p.paraffin>=34&&p.paraffin<=46?"pass":p.paraffin>=28&&p.paraffin<=52?"warn":"fail") as "pass"|"warn"|"fail" },
-      { label:"Borax Solution %",   got:`${p.borax}%`,    target:"2–5%",
-        status:(p.borax>=2&&p.borax<=5?"pass":p.borax>=1&&p.borax<=7?"warn":"fail") as "pass"|"warn"|"fail" },
-      { label:"Distilled Water %",  got:`${p.water}%`,    target:"38–52%",
-        status:(p.water>=38&&p.water<=52?"pass":p.water>=34&&p.water<=56?"warn":"fail") as "pass"|"warn"|"fail" },
-      { label:"Oil Phase Temperature",    got:`${f.oil_phase_temperature}°C`, target:"65–75°C",
-        status:(f.oil_phase_temperature>=65&&f.oil_phase_temperature<=75?"pass":f.oil_phase_temperature>=58&&f.oil_phase_temperature<=82?"warn":"fail") as "pass"|"warn"|"fail" },
-      { label:"Aqueous Phase Temperature",got:`${f.aqueous_phase_temperature}°C`, target:"65–75°C",
-        status:(f.aqueous_phase_temperature>=65&&f.aqueous_phase_temperature<=75?"pass":f.aqueous_phase_temperature>=58&&f.aqueous_phase_temperature<=82?"warn":"fail") as "pass"|"warn"|"fail" },
-      { label:"Phase Temperature Difference", got:`${td.toFixed(1)}°C`, target:"≤5°C",
-        status:(td<=5?"pass":td<=10?"warn":"fail") as "pass"|"warn"|"fail" },
-      { label:"Mixing Order",       got:f.mixing_order==="aqueous_to_oil"?"Oil first, then Aqueous":"Aqueous first, then Oil", target:"Oil first, then Aqueous",
-        status:(f.mixing_order==="aqueous_to_oil"?"pass":"fail") as "pass"|"warn"|"fail" },
-      { label:"Mixing Time",        got:`${f.mixing_time} s`, target:"≥20 s",
-        status:(f.mixing_time>=20?"pass":f.mixing_time>=12?"warn":"fail") as "pass"|"warn"|"fail" },
-      { label:"Cooling Temperature",got:`${f.cooling_temperature}°C`, target:"≤35°C",
-        status:(f.cooling_temperature<=35?"pass":f.cooling_temperature<=45?"warn":"fail") as "pass"|"warn"|"fail" },
-      { label:"Cooling with Stirring",got:f.cooling_stirring?"Yes":"No", target:"Yes",
-        status:(f.cooling_stirring?"pass":"fail") as "pass"|"warn"|"fail" },
-      { label:`pH${measuredPH>0?` (meter: ${measuredPH.toFixed(2)})`:""}`,
-        got:r.predicted_pH.toFixed(2), target:"6.0–7.5",
-        status:(r.predicted_pH>=6&&r.predicted_pH<=7.5?"pass":r.predicted_pH>=5.5&&r.predicted_pH<=8?"warn":"fail") as "pass"|"warn"|"fail" },
-      { label:`Viscosity${measuredVisc>0?` (gauge: ${measuredVisc} cP)`:""}`,
-        got:`${r.predicted_viscosity} cP`, target:"2000–6000 cP",
-        status:(r.predicted_viscosity>=2000&&r.predicted_viscosity<=6000?"pass":r.predicted_viscosity>=1500&&r.predicted_viscosity<=7000?"warn":"fail") as "pass"|"warn"|"fail" },
-    ];
-  };
+  const activeResult = isColdCream ? ccResult : result;
 
   const checklist  = isColdCream
     ? (ccResult ? buildColdCreamChecklist(ccResult, ccForm, gaugeVisc, meterPH) : [])
@@ -371,11 +454,9 @@ const EvaluationPanel: React.FC<Props> = ({ isOpen, onClose, apparatus, practica
   const warnCount  = checklist.filter(i => i.status==="warn").length;
   const totalSteps = isColdCream ? 13 : 14;
 
-  // Display result is driven by the CHECKLIST, not the engine's internal result field,
-  // so 14/14 correct always shows PASS regardless of engine weighting quirks.
   const displayResult: "PASS" | "AVERAGE" | "FAIL" =
     passCount === totalSteps               ? "PASS"
-    : passCount + warnCount >= totalSteps  ? "AVERAGE"   // all pass or warn, none hard-fail
+    : passCount + warnCount >= totalSteps  ? "AVERAGE"
     : passCount >= 10                      ? "AVERAGE"
     :                                        "FAIL";
 
@@ -389,7 +470,6 @@ const EvaluationPanel: React.FC<Props> = ({ isOpen, onClose, apparatus, practica
     ? ccForm.beeswax + ccForm.liquid_paraffin + ccForm.borax + ccForm.water
     : form.stearic_acid + form.liquid_paraffin + form.glycerin + form.potassium_hydroxide + form.water;
   const hasIngredients = totalIngredients > 0.1;
-  const activeResult   = isColdCream ? ccResult : result;
 
   return (
     <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.85)",
