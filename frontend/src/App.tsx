@@ -43,6 +43,11 @@ function App() {
   const [appState, setAppState] = useState<AppState>(() => {
     const u = getCurrentUser();
     if (!u) return "landing";
+    // Pending/rejected teachers who somehow have a session are kicked out
+    if (u.role === "teacher" && (u.status === "pending" || u.status === "rejected")) {
+      logoutUser();
+      return "landing";
+    }
     if (u.role === "admin")   return "admin";
     if (u.role === "teacher") return "teacher";
     return "selection";

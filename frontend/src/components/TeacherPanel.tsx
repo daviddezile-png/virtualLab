@@ -1318,6 +1318,7 @@ const Students: React.FC = () => {
     const result = registerUser({
       role: "student", fullName: newName, email: newEmail,
       password: newPass, regNumber: newReg,
+      forceActive: true,   // teacher-created student accounts are active immediately
     });
     if (!result.ok) { setAddError(result.error ?? "Failed"); return; }
     resetForm();

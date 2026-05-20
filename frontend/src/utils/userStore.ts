@@ -3,17 +3,19 @@
 // ─────────────────────────────────────────────────────────────────────────────
 import { logUserRegistered, logUserLogin } from "./auditStore";
 
-export type Role = "admin" | "teacher" | "student";
+export type Role       = "admin" | "teacher" | "student";
+export type UserStatus = "active" | "pending" | "rejected";
 
 export interface User {
   id:           string;
   role:         Role;
   fullName:     string;
   email:        string;
-  regNumber?:   string;   // students only
+  regNumber?:   string;      // students only
   passwordHash: string;
   createdAt:    string;
-  seeded?:      boolean;  // true for the default admin — cannot be deleted
+  seeded?:      boolean;     // true for the default admin — cannot be deleted
+  status?:      UserStatus;  // undefined treated as "active" for backward compat
 }
 
 const USERS_KEY   = "vlab_users";
@@ -80,14 +82,16 @@ export const seedDefaultAdmin = (): void => {
 };
 
 // ── Auth API (teacher + student only — admins are seeded or created internally)
-export interface AuthResult { ok: boolean; error?: string; user?: User; }
+// pending: true means the teacher registered but is awaiting admin approval (not logged in)
+export interface AuthResult { ok: boolean; error?: string; user?: User; pending?: boolean; }
 
 export interface RegisterInput {
-  role:       "teacher" | "student";   // admins cannot self-register
-  fullName:   string;
-  email:      string;
-  password:   string;
-  regNumber?: string;
+  role:         "teacher" | "student";   // admins cannot self-register
+  fullName:     string;
+  email:        string;
+  password:     string;
+  regNumber?:   string;
+  forceActive?: boolean;  // set true when admin/teacher creates account on behalf of user
 }
 
 export const registerUser = (input: RegisterInput): AuthResult => {
@@ -104,6 +108,11 @@ export const registerUser = (input: RegisterInput): AuthResult => {
   if (findUserByEmail(email))
     return { ok: false, error: "An account with this email already exists" };
 
+  // Teachers who self-register go into "pending" until admin approves.
+  // forceActive bypasses this (used when admin/teacher creates an account for someone).
+  const status: UserStatus =
+    input.role === "teacher" && !input.forceActive ? "pending" : "active";
+
   const newUser: User = {
     id:           `u${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
     role:         input.role,
@@ -112,21 +121,44 @@ export const registerUser = (input: RegisterInput): AuthResult => {
     regNumber:    input.role === "student" ? input.regNumber!.trim() : undefined,
     passwordHash: hash(input.password),
     createdAt:    new Date().toISOString(),
+    status,
   };
 
   persistUsers([...getAllUsers(), newUser]);
-  persistSession(newUser);
+  // Pending teachers are NOT logged in — they must wait for admin approval
+  if (status === "active") persistSession(newUser);
   logUserRegistered(newUser.id, newUser.fullName, newUser.role);
-  return { ok: true, user: newUser };
+  return { ok: true, user: newUser, pending: status === "pending" };
 };
 
 export const loginUser = (email: string, password: string): AuthResult => {
   const user = findUserByEmail(email);
-  if (!user)                               return { ok: false, error: "No account found with that email" };
+  if (!user)                                return { ok: false, error: "No account found with that email" };
   if (user.passwordHash !== hash(password)) return { ok: false, error: "Incorrect password" };
+  const status = user.status ?? "active";
+  if (status === "pending")
+    return { ok: false, error: "Your account is awaiting admin approval. You will be notified when access is granted." };
+  if (status === "rejected")
+    return { ok: false, error: "Your account registration has been rejected. Please contact your administrator." };
   persistSession(user);
   logUserLogin(user.id, user.fullName, user.role);
   return { ok: true, user };
+};
+
+// ── Teacher approval (admin-only) ─────────────────────────────────────────────
+export const getPendingTeachers = (): User[] =>
+  getAllUsers().filter(u => u.role === "teacher" && (u.status ?? "active") === "pending");
+
+export const approveTeacher = (id: string): void => {
+  persistUsers(getAllUsers().map(u =>
+    u.id === id ? { ...u, status: "active" as UserStatus } : u
+  ));
+};
+
+export const rejectTeacher = (id: string): void => {
+  persistUsers(getAllUsers().map(u =>
+    u.id === id ? { ...u, status: "rejected" as UserStatus } : u
+  ));
 };
 
 // ── Admin-only: create another admin account (called from inside AdminPanel) ──

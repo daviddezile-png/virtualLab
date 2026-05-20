@@ -7,7 +7,11 @@ import {
   RefreshCw, Download, Lock, Unlock, Clock, Award, Database,
   FileText, AlertTriangle, ChevronRight, LucideIcon,
 } from "lucide-react";
-import { getAllUsers, User, logoutUser, createAdminUser, registerUser, ThemeMode, getStoredTheme, storeTheme } from "../utils/userStore";
+import {
+  getAllUsers, User, logoutUser, createAdminUser, registerUser,
+  getPendingTeachers, approveTeacher, rejectTeacher,
+  ThemeMode, getStoredTheme, storeTheme,
+} from "../utils/userStore";
 import { getAllSubmissions, getStats } from "../utils/submissionStore";
 import { getAllAssignments, isCodeExpired, deleteAssignment } from "../utils/assignmentStore";
 import { getAllQuestions, getAllAnswers, deleteQuestion } from "../utils/qaStore";
@@ -42,7 +46,7 @@ const useTheme = () => useContext(ThemeCtx);
 // ─────────────────────────────────────────────────────────────────────────────
 // Section type
 // ─────────────────────────────────────────────────────────────────────────────
-type Section = "dashboard"|"users"|"assignments"|"submissions"|"questions"
+type Section = "dashboard"|"users"|"approvals"|"assignments"|"submissions"|"questions"
              |"announcements"|"analytics"|"settings"|"auditlog";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -329,7 +333,8 @@ const UserManager: React.FC = () => {
       result = createAdminUser(newName, newEmail, newPass);
     } else {
       result = registerUser({ role: newRole, fullName: newName, email: newEmail,
-        password: newPass, regNumber: newRole === "student" ? newReg : undefined });
+        password: newPass, regNumber: newRole === "student" ? newReg : undefined,
+        forceActive: true });   // admin-created accounts are active immediately
     }
     if (!result.ok) { setAddError(result.error ?? "Failed"); return; }
     resetForm();
@@ -1273,24 +1278,239 @@ const AuditLog: React.FC = () => {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// Teacher Approvals
+// ─────────────────────────────────────────────────────────────────────────────
+const TeacherApprovals: React.FC = () => {
+  const { C } = useTheme();
+  const [refresh, setRefresh] = useState(0);
+  const pending  = getPendingTeachers();
+
+  const handleApprove = (id: string) => {
+    approveTeacher(id);
+    setRefresh(r => r + 1);
+  };
+
+  const handleReject = (id: string) => {
+    rejectTeacher(id);
+    setRefresh(r => r + 1);
+  };
+
+  // also show recently rejected so admin can reverse
+  const allTeachers = getAllUsers().filter(u => u.role === "teacher");
+  const rejected    = allTeachers.filter(u => u.status === "rejected");
+  const approved    = allTeachers.filter(u => (u.status ?? "active") === "active");
+
+  return (
+    <div>
+      <SectionHeading
+        title="Teacher Approvals"
+        sub="Review and approve teacher registrations before they can access the system."
+        action={
+          <Btn label="Refresh" Icon={RefreshCw} variant="ghost" small
+            onClick={() => setRefresh(r => r + 1)} />
+        }
+      />
+
+      {/* Stats strip */}
+      <div style={{ display:"flex", gap:12, marginBottom:24, flexWrap:"wrap" }}>
+        {[
+          { label:"Pending Review", value:pending.length,   color:"#ca8a04", bg:"rgba(234,179,8,0.1)",   border:"rgba(234,179,8,0.3)"  },
+          { label:"Approved",       value:approved.length,  color:C.accent,  bg:`${C.accent}10`,         border:`${C.accent}44`        },
+          { label:"Rejected",       value:rejected.length,  color:C.red,     bg:`${C.red}10`,            border:`${C.red}44`           },
+        ].map(s => (
+          <div key={s.label} style={{ background:s.bg, border:`1px solid ${s.border}`,
+            borderRadius:12, padding:"14px 20px", flex:"1 1 140px" }}>
+            <div style={{ color:s.color, fontSize:26, fontWeight:900 }}>{s.value}</div>
+            <div style={{ color:C.txtMut, fontSize:12, marginTop:2 }}>{s.label}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* ── Pending ── */}
+      <div style={{ color:C.txtMut, fontSize:11, fontWeight:700, letterSpacing:1.5,
+        textTransform:"uppercase", marginBottom:10 }}>
+        Pending Approval ({pending.length})
+      </div>
+
+      {pending.length === 0 ? (
+        <div style={{ background:C.card, border:`2px dashed ${C.border2}`, borderRadius:14,
+          padding:"40px 20px", textAlign:"center", marginBottom:28 }}>
+          <GraduationCap size={36} color={C.txtMut} style={{ marginBottom:10, opacity:0.4 }} />
+          <div style={{ color:C.txtPri, fontWeight:700, fontSize:15, marginBottom:5 }}>
+            No pending teachers
+          </div>
+          <div style={{ color:C.txtMut, fontSize:13 }}>
+            All teacher registrations have been reviewed.
+          </div>
+        </div>
+      ) : (
+        <div style={{ display:"flex", flexDirection:"column", gap:12, marginBottom:28 }}>
+          {pending.map(u => (
+            <div key={u.id} style={{
+              background:C.card, border:`1px solid rgba(234,179,8,0.4)`,
+              borderRadius:12, padding:"16px 18px",
+              display:"flex", alignItems:"center", gap:14, flexWrap:"wrap",
+              boxShadow:`0 2px 8px ${C.shadow}`,
+            }}>
+              {/* Avatar */}
+              <div style={{
+                width:44, height:44, borderRadius:"50%", flexShrink:0,
+                background:"rgba(234,179,8,0.15)", border:"2px solid rgba(234,179,8,0.4)",
+                display:"flex", alignItems:"center", justifyContent:"center",
+                fontSize:17, fontWeight:800, color:"#ca8a04",
+              }}>
+                {u.fullName.charAt(0).toUpperCase()}
+              </div>
+
+              {/* Info */}
+              <div style={{ flex:1, minWidth:180 }}>
+                <div style={{ color:C.txtPri, fontWeight:700, fontSize:14 }}>{u.fullName}</div>
+                <div style={{ color:C.txtMut, fontSize:12, marginTop:2 }}>{u.email}</div>
+                <div style={{ color:C.txtMut, fontSize:11, marginTop:2 }}>
+                  Registered: {new Date(u.createdAt).toLocaleString()}
+                </div>
+              </div>
+
+              {/* Badge */}
+              <div style={{
+                background:"rgba(234,179,8,0.1)", border:"1px solid rgba(234,179,8,0.4)",
+                borderRadius:20, padding:"4px 12px",
+                color:"#ca8a04", fontSize:11, fontWeight:700, flexShrink:0,
+              }}>
+                ⏳ Pending
+              </div>
+
+              {/* Actions */}
+              <div style={{ display:"flex", gap:8, flexShrink:0 }}>
+                <button onClick={() => handleApprove(u.id)} style={{
+                  display:"flex", alignItems:"center", gap:6,
+                  background:`${C.accent}18`, border:`1px solid ${C.accent}66`,
+                  color:C.accent, borderRadius:8, padding:"8px 16px",
+                  fontSize:13, fontWeight:700, cursor:"pointer",
+                }}>
+                  <CheckCircle size={14} strokeWidth={2.5} /> Approve
+                </button>
+                <button onClick={() => handleReject(u.id)} style={{
+                  display:"flex", alignItems:"center", gap:6,
+                  background:`${C.red}10`, border:`1px solid ${C.red}66`,
+                  color:C.red, borderRadius:8, padding:"8px 16px",
+                  fontSize:13, fontWeight:700, cursor:"pointer",
+                }}>
+                  <AlertCircle size={14} strokeWidth={2.5} /> Reject
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* ── Rejected (can be reversed) ── */}
+      {rejected.length > 0 && (
+        <>
+          <div style={{ color:C.txtMut, fontSize:11, fontWeight:700, letterSpacing:1.5,
+            textTransform:"uppercase", marginBottom:10 }}>
+            Rejected ({rejected.length})
+          </div>
+          <div style={{ display:"flex", flexDirection:"column", gap:10, marginBottom:28 }}>
+            {rejected.map(u => (
+              <div key={u.id} style={{
+                background:C.card, border:`1px solid ${C.red}44`,
+                borderRadius:12, padding:"14px 18px",
+                display:"flex", alignItems:"center", gap:12, flexWrap:"wrap",
+              }}>
+                <div style={{
+                  width:40, height:40, borderRadius:"50%", flexShrink:0,
+                  background:`${C.red}10`, border:`1px solid ${C.red}44`,
+                  display:"flex", alignItems:"center", justifyContent:"center",
+                  fontSize:15, fontWeight:800, color:C.red,
+                }}>
+                  {u.fullName.charAt(0).toUpperCase()}
+                </div>
+                <div style={{ flex:1, minWidth:160 }}>
+                  <div style={{ color:C.txtPri, fontWeight:600, fontSize:13 }}>{u.fullName}</div>
+                  <div style={{ color:C.txtMut, fontSize:12 }}>{u.email}</div>
+                </div>
+                <div style={{ background:`${C.red}10`, border:`1px solid ${C.red}44`,
+                  borderRadius:20, padding:"3px 12px",
+                  color:C.red, fontSize:11, fontWeight:700 }}>
+                  ✗ Rejected
+                </div>
+                <button onClick={() => handleApprove(u.id)} style={{
+                  display:"flex", alignItems:"center", gap:5,
+                  background:`${C.accent}10`, border:`1px solid ${C.accent}55`,
+                  color:C.accent, borderRadius:8, padding:"6px 14px",
+                  fontSize:12, fontWeight:700, cursor:"pointer",
+                }}>
+                  <CheckCircle size={13} /> Reverse — Approve
+                </button>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+
+      {/* ── Approved teachers ── */}
+      {approved.length > 0 && (
+        <>
+          <div style={{ color:C.txtMut, fontSize:11, fontWeight:700, letterSpacing:1.5,
+            textTransform:"uppercase", marginBottom:10 }}>
+            Approved Teachers ({approved.length})
+          </div>
+          <div style={{ background:C.card, border:`1px solid ${C.border}`,
+            borderRadius:14, overflow:"hidden" }}>
+            <table style={{ width:"100%", borderCollapse:"collapse" }}>
+              <TableHead cols={["Teacher","Email","Joined","Status"]} />
+              <tbody>
+                {approved.map((u, i) => (
+                  <tr key={u.id} style={{ background:i%2===0?"transparent":`${C.surface}88`,
+                    borderBottom:`1px solid ${C.border}` }}>
+                    <td style={{ padding:"11px 14px" }}>
+                      <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+                        <Avatar name={u.fullName} />
+                        <span style={{ color:C.txtPri, fontSize:13, fontWeight:600 }}>{u.fullName}</span>
+                      </div>
+                    </td>
+                    <td style={{ padding:"11px 14px", color:C.txtSec, fontSize:12 }}>{u.email}</td>
+                    <td style={{ padding:"11px 14px", color:C.txtMut, fontSize:12 }}>
+                      {new Date(u.createdAt).toLocaleDateString()}
+                    </td>
+                    <td style={{ padding:"11px 14px" }}>
+                      <span style={{ background:`${C.accent}12`, border:`1px solid ${C.accent}44`,
+                        color:C.accent, borderRadius:20, padding:"2px 10px",
+                        fontSize:11, fontWeight:700 }}>✓ Active</span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+    </div>
+  );
+};
+
 // NAV
 // ─────────────────────────────────────────────────────────────────────────────
 const NAV: { id:Section; label:string; Icon:LucideIcon }[] = [
-  { id:"dashboard",     label:"Dashboard",     Icon:LayoutDashboard },
-  { id:"users",         label:"Users",         Icon:Users           },
-  { id:"assignments",   label:"Assignments",   Icon:Key             },
-  { id:"submissions",   label:"Submissions",   Icon:ClipboardCheck  },
-  { id:"questions",     label:"Q&A",           Icon:ClipboardList   },
-  { id:"announcements", label:"Announcements", Icon:Megaphone       },
-  { id:"analytics",     label:"Analytics",     Icon:BarChart2       },
-  { id:"settings",      label:"Settings",      Icon:Settings        },
-  { id:"auditlog",      label:"Audit Log",     Icon:Activity        },
+  { id:"dashboard",     label:"Dashboard",        Icon:LayoutDashboard },
+  { id:"users",         label:"Users",            Icon:Users           },
+  { id:"approvals",     label:"Teacher Approvals",Icon:GraduationCap   },
+  { id:"assignments",   label:"Assignments",      Icon:Key             },
+  { id:"submissions",   label:"Submissions",      Icon:ClipboardCheck  },
+  { id:"questions",     label:"Q&A",              Icon:ClipboardList   },
+  { id:"announcements", label:"Announcements",    Icon:Megaphone       },
+  { id:"analytics",     label:"Analytics",        Icon:BarChart2       },
+  { id:"settings",      label:"Settings",         Icon:Settings        },
+  { id:"auditlog",      label:"Audit Log",        Icon:Activity        },
 ];
 
 const LABELS: Record<Section,string> = {
-  dashboard:"Dashboard", users:"Users", assignments:"Assignments",
-  submissions:"Submissions", questions:"Q&A", announcements:"Announcements",
-  analytics:"Analytics", settings:"Settings", auditlog:"Audit Log",
+  dashboard:"Dashboard", users:"Users", approvals:"Teacher Approvals",
+  assignments:"Assignments", submissions:"Submissions", questions:"Q&A",
+  announcements:"Announcements", analytics:"Analytics", settings:"Settings",
+  auditlog:"Audit Log",
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1308,10 +1528,13 @@ const AdminPanel: React.FC<Props> = ({ onLogout }) => {
     setIsDark(v => { const next = !v; storeTheme(next?"dark":"light"); return next; });
   };
 
+  const pendingCount = getPendingTeachers().length;
+
   const render = () => {
     switch (section) {
       case "dashboard":     return <Dashboard />;
       case "users":         return <UserManager />;
+      case "approvals":     return <TeacherApprovals />;
       case "assignments":   return <AdminAssignments />;
       case "submissions":   return <AdminSubmissions />;
       case "questions":     return <AdminQA />;
@@ -1371,7 +1594,8 @@ const AdminPanel: React.FC<Props> = ({ onLogout }) => {
               </button>
             )}
             {NAV.map(item => {
-              const active = section === item.id;
+              const active  = section === item.id;
+              const badgeN  = item.id === "approvals" ? pendingCount : 0;
               return (
                 <button key={item.id} onClick={() => setSection(item.id)} style={{
                   width:"100%", display:"flex", alignItems:"center",
@@ -1382,9 +1606,27 @@ const AdminPanel: React.FC<Props> = ({ onLogout }) => {
                   color: active ? C.accent : C.txtSec,
                   fontWeight: active ? 700 : 500, fontSize:13, transition:"background .15s,color .15s",
                 }}>
-                  <item.Icon size={17} strokeWidth={active?2.2:1.8} />
-                  {sbOpen && <span style={{ whiteSpace:"nowrap" }}>{item.label}</span>}
-                  {active && sbOpen && (
+                  <div style={{ position:"relative", flexShrink:0 }}>
+                    <item.Icon size={17} strokeWidth={active?2.2:1.8} />
+                    {badgeN > 0 && (
+                      <span style={{
+                        position:"absolute", top:-5, right:-6,
+                        background:"#dc2626", color:"white",
+                        borderRadius:"50%", width:14, height:14,
+                        fontSize:9, fontWeight:800,
+                        display:"flex", alignItems:"center", justifyContent:"center",
+                        lineHeight:1,
+                      }}>{badgeN}</span>
+                    )}
+                  </div>
+                  {sbOpen && <span style={{ whiteSpace:"nowrap", flex:1 }}>{item.label}</span>}
+                  {sbOpen && badgeN > 0 && (
+                    <span style={{
+                      background:"#dc2626", color:"white", borderRadius:10,
+                      padding:"1px 7px", fontSize:10, fontWeight:800, flexShrink:0,
+                    }}>{badgeN}</span>
+                  )}
+                  {active && sbOpen && badgeN === 0 && (
                     <span style={{ marginLeft:"auto", width:6, height:6, borderRadius:"50%",
                       background:C.accent, flexShrink:0 }} />
                   )}
