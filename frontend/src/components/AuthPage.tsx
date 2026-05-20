@@ -129,15 +129,17 @@ const AuthPage: React.FC<Props> = ({
 }) => {
   const C = theme === "dark" ? DARK : LIGHT;
 
-  const [mode,      setMode]      = useState<Mode>(initialMode);
-  const [role,      setRole]      = useState<Role>("student");
-  const [fullName,  setFullName]  = useState("");
-  const [email,     setEmail]     = useState("");
-  const [regNumber, setRegNumber] = useState("");
-  const [password,  setPassword]  = useState("");
-  const [showPass,   setShowPass]   = useState(false);
-  const [error,      setError]      = useState<string | null>(null);
-  const [loading,    setLoading]    = useState(false);
+  const [mode,           setMode]           = useState<Mode>(initialMode);
+  const [role,           setRole]           = useState<Role>("student");
+  const [fullName,       setFullName]       = useState("");
+  const [email,          setEmail]          = useState("");
+  const [regNumber,      setRegNumber]      = useState("");
+  const [password,       setPassword]       = useState("");
+  const [showPass,       setShowPass]       = useState(false);
+  const [error,          setError]          = useState<string | null>(null);
+  const [loading,        setLoading]        = useState(false);
+  const [pendingApproval, setPendingApproval] = useState(false);
+  const [pendingName,     setPendingName]     = useState("");
 
   const clearForm = () => {
     setFullName(""); setEmail(""); setRegNumber(""); setPassword("");
@@ -154,7 +156,6 @@ const AuthPage: React.FC<Props> = ({
     setError(null);
     setLoading(true);
 
-    // Simulate network latency — swap for fetch('/api/auth/...') when backend is ready
     setTimeout(() => {
       const result =
         mode === "signup"
@@ -166,11 +167,93 @@ const AuthPage: React.FC<Props> = ({
         setLoading(false);
         return;
       }
+
+      // Teacher self-registration → pending approval screen (not logged in yet)
+      if (result.pending) {
+        setPendingName(result.user!.fullName);
+        setPendingApproval(true);
+        setLoading(false);
+        return;
+      }
+
       onAuth(result.user!);
     }, 400);
   };
 
   const passOk = password.length >= 6;
+
+  // ── Pending approval screen ────────────────────────────────────────────────
+  if (pendingApproval) {
+    return (
+      <div style={{
+        minHeight:"100vh", background:C.bg, color:C.pri,
+        fontFamily:"system-ui,-apple-system,sans-serif",
+        display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center",
+        padding:"24px",
+      }}>
+        <div style={{
+          width:"100%", maxWidth:460,
+          background:C.card, border:`1px solid ${C.border}`,
+          borderRadius:20, padding:"40px 36px", textAlign:"center",
+          boxShadow: theme==="dark" ? "0 24px 60px rgba(0,0,0,0.6)" : "0 12px 48px rgba(0,0,0,0.08)",
+        }}>
+          {/* Icon */}
+          <div style={{
+            width:72, height:72, borderRadius:"50%", margin:"0 auto 20px",
+            background:"rgba(234,179,8,0.12)", border:"2px solid rgba(234,179,8,0.4)",
+            display:"flex", alignItems:"center", justifyContent:"center", fontSize:34,
+          }}>⏳</div>
+
+          <h2 style={{ margin:"0 0 10px", fontSize:22, fontWeight:900, letterSpacing:-0.3 }}>
+            Awaiting Admin Approval
+          </h2>
+          <p style={{ color:C.sec, fontSize:14, lineHeight:1.7, margin:"0 0 24px" }}>
+            Hi <strong style={{ color:C.pri }}>{pendingName}</strong>, your teacher account
+            has been created and is waiting for the administrator to verify and approve it.
+          </p>
+
+          {/* Info box */}
+          <div style={{
+            background: theme==="dark" ? "rgba(234,179,8,0.08)" : "rgba(234,179,8,0.06)",
+            border:"1px solid rgba(234,179,8,0.3)", borderRadius:12,
+            padding:"16px 18px", marginBottom:24, textAlign:"left",
+          }}>
+            <div style={{ fontSize:12, fontWeight:700, color:"#ca8a04",
+              textTransform:"uppercase", letterSpacing:0.8, marginBottom:10 }}>
+              What happens next?
+            </div>
+            {[
+              "The admin will review your registration details.",
+              "Once approved, you can sign in with your email and password.",
+              "If rejected, you will be notified on the login screen.",
+            ].map((s, i) => (
+              <div key={i} style={{ display:"flex", gap:10, marginBottom:7,
+                fontSize:13, color:C.sec }}>
+                <span style={{ color:"#ca8a04", fontWeight:700, flexShrink:0 }}>{i+1}.</span>
+                <span>{s}</span>
+              </div>
+            ))}
+          </div>
+
+          <button onClick={onBack} style={{
+            width:"100%", padding:"13px 0", borderRadius:10, border:"none",
+            background:C.green, color:"white", fontWeight:800, fontSize:15,
+            cursor:"pointer", letterSpacing:0.3,
+          }}>
+            Back to Home
+          </button>
+          <p style={{ color:C.mut, fontSize:12, marginTop:14 }}>
+            Already approved?{" "}
+            <button onClick={() => { setPendingApproval(false); switchMode("signin"); }}
+              style={{ background:"none", border:"none", color:C.green,
+                fontWeight:700, cursor:"pointer", padding:0, fontSize:12 }}>
+              Sign in here
+            </button>
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div style={{
