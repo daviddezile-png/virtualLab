@@ -1,4 +1,4 @@
-import React, { useState, useRef, useContext, createContext, useEffect } from "react";
+import React, { useState, useContext, createContext, useEffect } from "react";
 import {
   LayoutDashboard, TestTubes, ClipboardList, Users, BarChart2,
   ClipboardCheck, Megaphone, Settings, ArrowLeft, Sun, Moon, Menu,
@@ -12,11 +12,11 @@ import {
   Assignment, PracticalId, BASE_RECIPES,
   getAllAssignments, saveAssignment, deleteAssignment, generateToken, isCodeExpired,
 } from "../utils/assignmentStore";
-import { getAllUsers, registerUser } from "../utils/userStore";
-import { getAllSubmissions, getStats, LabSubmission } from "../utils/submissionStore";
+import { getAllUsers, registerUser, deleteUserById, User as StoreUser } from "../utils/userStore";
+import { getAllSubmissions, getStats, LabSubmission, StatsResult } from "../utils/submissionStore";
 import {
   getAllQuestions, saveQuestion, deleteQuestion,
-  QAQuestion, QAPractical, getAllAnswers,
+  QAQuestion, QAPractical, getAllAnswers, QAAnswer,
 } from "../utils/qaStore";
 import {
   getAllAnnouncements, saveAnnouncement, deleteAnnouncement,
@@ -31,10 +31,6 @@ const loadSettings = () => {
 };
 const persistSettings = (s: Record<string, unknown>) =>
   localStorage.setItem(SETTINGS_KEY, JSON.stringify(s));
-
-// Helper: students who have registered in the app
-const getAllRegisteredStudents = () =>
-  getAllUsers().filter(u => u.role === "student");
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Theme tokens
@@ -336,10 +332,21 @@ const resultBadge = (r: "PASS"|"AVERAGE"|"FAIL", C: ReturnType<typeof useTheme>[
 
 const Dashboard: React.FC = () => {
   const { C } = useTheme();
-  const stats    = getStats();
-  const allSubs  = getAllSubmissions()
-    .sort((a,b) => new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime());
-  const students = getAllRegisteredStudents();
+  const [stats, setStats]       = useState<StatsResult>({
+    total: 0, passed: 0, average: 0, failed: 0, classAvg: 0, todayCount: 0, avgDur: 0,
+  });
+  const [allSubs, setAllSubs]   = useState<LabSubmission[]>([]);
+  const [students, setStudents] = useState<StoreUser[]>([]);
+
+  useEffect(() => {
+    getStats().then(setStats);
+    getAllSubmissions().then(subs =>
+      setAllSubs(subs.slice().sort((a, b) =>
+        new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime()
+      ))
+    );
+    getAllUsers().then(us => setStudents(us.filter(u => u.role === "student")));
+  }, []);
 
   const quickActions = [
     { Icon:ClipboardList, label:"Create Assignment",   color:C.accent  },
@@ -359,7 +366,7 @@ const Dashboard: React.FC = () => {
         <StatCard label="Avg Duration"        value={stats.total > 0 ? `${stats.avgDur} min` : "—"} sub="Time per practical" Icon={Clock}      accent="#7c3aed" />
       </div>
 
-      <div style={{ display:"grid", gridTemplateColumns:"1fr 300px", gap:20, alignItems:"start" }}>
+      <div className="tp-grid-dash" style={{ display:"grid", gridTemplateColumns:"1fr 300px", gap:20, alignItems:"start" }}>
         {/* Recent real submissions */}
         <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:14,
           overflow:"hidden", boxShadow:`0 1px 4px ${C.shadow}` }}>
@@ -374,6 +381,7 @@ const Dashboard: React.FC = () => {
               <div style={{ fontSize:13 }}>No submissions yet. Students will appear here after evaluating a practical.</div>
             </div>
           ) : (
+            <div className="tp-table-wrap">
             <table style={{ width:"100%", borderCollapse:"collapse" }}>
               <TableHead cols={["Student","Practical","Score","Result","Duration"]} />
               <tbody>
@@ -400,6 +408,7 @@ const Dashboard: React.FC = () => {
                 ))}
               </tbody>
             </table>
+            </div>
           )}
         </div>
 
@@ -557,19 +566,19 @@ const AssignmentsTab: React.FC = () => {
   const [targetGrams,       setTargetGrams]        = useState<string>("50");
   const [timeLimitMinutes,  setTimeLimitMinutes]   = useState<string>("45");
   const [codeExpiresAt,     setCodeExpiresAt]      = useState<string>("");    // datetime-local value
-  const [assignments,       setAssignments]        = useState<Assignment[]>(() => getAllAssignments());
+  const [assignments,       setAssignments]        = useState<Assignment[]>([]);
   const [copiedToken,       setCopiedToken]        = useState<string|null>(null);
   const [generated,         setGenerated]          = useState<Assignment|null>(null);
+  const [refresh,           setRefresh]            = useState(0);
 
-  // Reload from localStorage whenever the tab re-renders
-  useEffect(() => { setAssignments(getAllAssignments()); }, []);
+  useEffect(() => { getAllAssignments().then(setAssignments); }, [refresh]);
 
   const recipe     = BASE_RECIPES[practicalId];
   const grams      = parseFloat(targetGrams) || 0;
   const timeLimit  = parseInt(timeLimitMinutes, 10) || 0;
   const multiplier = grams > 0 ? +(grams / recipe.totalGrams).toFixed(4) : 0;
 
-  const handleGenerate = () => {
+  const handleGenerate = async () => {
     if (!taskText.trim() || grams <= 0) return;
     const assignment: Assignment = {
       token:            generateToken(practicalId),
@@ -582,13 +591,13 @@ const AssignmentsTab: React.FC = () => {
       createdBy:        "Teacher",
       uses:             0,
     };
-    saveAssignment(assignment);
-    setAssignments(getAllAssignments());
+    await saveAssignment(assignment);
     setGenerated(assignment);
     setTaskText("");
     setTargetGrams("50");
     setTimeLimitMinutes("45");
     setCodeExpiresAt("");
+    setRefresh(r => r + 1);
   };
 
   const handleCopy = (token: string) => {
@@ -597,10 +606,10 @@ const AssignmentsTab: React.FC = () => {
     setTimeout(() => setCopiedToken(null), 2000);
   };
 
-  const handleDelete = (token: string) => {
-    deleteAssignment(token);
-    setAssignments(getAllAssignments());
+  const handleDelete = async (token: string) => {
+    await deleteAssignment(token);
     if (generated?.token === token) setGenerated(null);
+    setRefresh(r => r + 1);
   };
 
   const lbl: React.CSSProperties = {
@@ -611,7 +620,7 @@ const AssignmentsTab: React.FC = () => {
   const practicalName = practicalId === "vanishing-cream" ? "Vanishing Cream" : "Cold Cream";
 
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20, alignItems: "start" }}>
+    <div className="tp-grid-2col" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20, alignItems: "start" }}>
 
       {/* ── Create assignment ── */}
       <div style={{ background: C.card, border: `1px solid ${C.border}`,
@@ -836,7 +845,7 @@ const AssignmentsTab: React.FC = () => {
                         letterSpacing: 2 }}>{a.token}</code>
                       <div style={{ color: C.txtMut, fontSize: 11, marginTop: 1 }}>
                         {a.practicalId === "vanishing-cream" ? "Vanishing Cream" : "Cold Cream"}
-                        &nbsp;· Created {new Date(a.createdAt).toLocaleDateString()}
+                        &nbsp;· Created {new Date(a.createdAt ?? "").toLocaleDateString()}
                         &nbsp;· {a.uses} use{a.uses !== 1 ? "s" : ""}
                       </div>
                     </div>
@@ -938,9 +947,16 @@ const Questions: React.FC = () => {
   const [addingNew,    setAddingNew]    = useState(false);
   const [dragging,     setDragging]     = useState<string|null>(null);
   const [refresh,      setRefresh]      = useState(0);
+  const [allQuestions, setAllQuestions] = useState<QAQuestion[]>([]);
+  const [allAnswers,   setAllAnswers]   = useState<QAAnswer[]>([]);
 
-  // Load questions from persistent store
-  const questions = getAllQuestions().filter(q =>
+  useEffect(() => {
+    getAllQuestions().then(setAllQuestions);
+    getAllAnswers().then(setAllAnswers);
+  }, [refresh]);
+
+  // Filter questions for current practical tab
+  const questions = allQuestions.filter(q =>
     q.practicalId === bankPractical || q.practicalId === "all"
   );
 
@@ -951,9 +967,9 @@ const Questions: React.FC = () => {
 
   const totalPts = questions.reduce((s,q) => s+q.points, 0);
 
-  const deleteQ = (id:string) => { deleteQuestion(id); setRefresh(r=>r+1); };
+  const deleteQ = async (id:string) => { await deleteQuestion(id); setRefresh(r=>r+1); };
 
-  const addQ = () => {
+  const addQ = async () => {
     if (!newQ.text.trim()) return;
     if (newQ.type === "mcq") {
       const validOpts = newQ.options.filter(Boolean);
@@ -971,7 +987,7 @@ const Questions: React.FC = () => {
       createdAt:     new Date().toISOString(),
       createdBy:     "Teacher",
     };
-    saveQuestion(q);
+    await saveQuestion(q);
     setRefresh(r=>r+1);
     setNewQ({ text:"", type:"mcq", points:2, options:["","","",""], correctAnswer:"", practicalId:newQ.practicalId });
     setAddingNew(false);
@@ -979,8 +995,6 @@ const Questions: React.FC = () => {
 
   const typeColor = { mcq:C.accent, short:C.green };
 
-  // Answer stats for each question
-  const allAnswers = getAllAnswers();
   const answerCount = (qid:string) => allAnswers.filter(a => a.questionId === qid).length;
   const correctCount = (qid:string) => allAnswers.filter(a => a.questionId === qid && a.isCorrect).length;
 
@@ -1051,16 +1065,17 @@ const Questions: React.FC = () => {
 
           <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
             {questions.map((q,i) => {
-              const ac = answerCount(q.id);
-              const cc = correctCount(q.id);
+              const qid = q.id ?? "";
+              const ac = answerCount(qid);
+              const cc = correctCount(qid);
               return (
-                <div key={q.id} draggable
-                  onDragStart={() => setDragging(q.id)}
+                <div key={qid} draggable
+                  onDragStart={() => setDragging(qid)}
                   onDragOver={e => e.preventDefault()}
                   onDrop={() => setDragging(null)}
                   style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:12,
                     padding:"14px 16px", display:"flex", gap:14, alignItems:"flex-start",
-                    opacity: dragging===q.id ? 0.4 : 1, boxShadow:`0 1px 3px ${C.shadow}` }}>
+                    opacity: dragging===qid ? 0.4 : 1, boxShadow:`0 1px 3px ${C.shadow}` }}>
                   <div style={{ color:C.txtMut, marginTop:2, cursor:"grab", flexShrink:0 }}>
                     <GripVertical size={16} strokeWidth={1.8} />
                   </div>
@@ -1128,7 +1143,7 @@ const Questions: React.FC = () => {
                       </div>
                     )}
                   </div>
-                  <button onClick={() => deleteQ(q.id)}
+                  <button onClick={() => deleteQ(qid)}
                     style={{ background:`${C.red}10`, border:"none", color:C.red,
                       borderRadius:6, padding:"5px 8px", cursor:"pointer",
                       display:"flex", alignItems:"center", flexShrink:0 }}>
@@ -1296,16 +1311,20 @@ const Students: React.FC = () => {
   const [addError,    setAddError]    = useState<string|null>(null);
   const [addOk,       setAddOk]       = useState(false);
 
-  const allStudents = getAllRegisteredStudents();
+  const [allStudents, setAllStudents] = useState<StoreUser[]>([]);
+
+  useEffect(() => {
+    getAllUsers().then(us => setAllStudents(us.filter(u => u.role === "student")));
+  }, [refresh]);
+
   const filtered = allStudents.filter(u =>
     u.fullName.toLowerCase().includes(search.toLowerCase()) ||
     u.email.toLowerCase().includes(search.toLowerCase()) ||
     (u.regNumber ?? "").toLowerCase().includes(search.toLowerCase())
   );
 
-  const removeStudent = (id: string) => {
-    const users = getAllUsers().filter(u => u.id !== id);
-    localStorage.setItem("vlab_users", JSON.stringify(users));
+  const removeStudent = async (clientId: string) => {
+    await deleteUserById(clientId);
     setRefresh(r => r + 1);
   };
 
@@ -1313,9 +1332,9 @@ const Students: React.FC = () => {
     setNewName(""); setNewEmail(""); setNewReg(""); setNewPass(""); setAddError(null);
   };
 
-  const handleAddStudent = () => {
+  const handleAddStudent = async () => {
     setAddError(null);
-    const result = registerUser({
+    const result = await registerUser({
       role: "student", fullName: newName, email: newEmail,
       password: newPass, regNumber: newReg,
       forceActive: true,   // teacher-created student accounts are active immediately
@@ -1437,11 +1456,12 @@ const Students: React.FC = () => {
       ) : (
         <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:14,
           overflow:"hidden", boxShadow:`0 1px 4px ${C.shadow}` }}>
+          <div className="tp-table-wrap">
           <table style={{ width:"100%", borderCollapse:"collapse" }}>
             <TableHead cols={["Student","Email","Reg Number","Joined",""]} />
             <tbody>
               {filtered.map((u, i) => (
-                <tr key={u.id} style={{ background: i%2===0 ? "transparent" : `${C.surface}88`,
+                <tr key={u.clientId} style={{ background: i%2===0 ? "transparent" : `${C.surface}88`,
                   borderBottom:`1px solid ${C.border}` }}>
                   <td style={{ padding:"12px 14px" }}>
                     <div style={{ display:"flex", alignItems:"center", gap:10 }}>
@@ -1460,14 +1480,14 @@ const Students: React.FC = () => {
                       : <span style={{ color:C.txtMut, fontSize:12 }}>—</span>}
                   </td>
                   <td style={{ padding:"12px 14px", color:C.txtMut, fontSize:12 }}>
-                    {new Date(u.createdAt).toLocaleDateString()}
+                    {new Date(u.createdAt ?? "").toLocaleDateString()}
                   </td>
                   <td style={{ padding:"12px 14px" }}>
                     <div style={{ display:"flex", gap:6 }}>
                       <span style={{ background:`${C.green}12`, border:`1px solid ${C.green}44`,
                         color:C.green, borderRadius:20, padding:"2px 10px",
                         fontSize:11, fontWeight:700 }}>Active</span>
-                      <button onClick={() => removeStudent(u.id)}
+                      <button onClick={() => removeStudent(u.clientId)}
                         style={{ background:"rgba(239,68,68,0.1)", border:"none", color:"#f87171",
                           borderRadius:6, padding:"5px 8px", cursor:"pointer",
                           display:"flex", alignItems:"center" }}>
@@ -1479,6 +1499,7 @@ const Students: React.FC = () => {
               ))}
             </tbody>
           </table>
+          </div>
           {filtered.length === 0 && (
             <div style={{ padding:32, textAlign:"center", color:C.txtMut }}>
               No students match your search.
@@ -1499,11 +1520,19 @@ const Students: React.FC = () => {
 
 const Analytics: React.FC = () => {
   const { C } = useTheme();
-  const [pFilter, setPFilter] = useState("all");
+  const [pFilter,  setPFilter]  = useState("all");
+  const [refresh,  setRefresh]  = useState(0);
+  const [allSubs,  setAllSubs]  = useState<LabSubmission[]>([]);
+  const [stats,    setStats]    = useState<StatsResult>({
+    total: 0, passed: 0, average: 0, failed: 0, classAvg: 0, todayCount: 0, avgDur: 0,
+  });
 
-  const allSubs = getAllSubmissions();
+  useEffect(() => {
+    getAllSubmissions().then(setAllSubs);
+    getStats().then(setStats);
+  }, [refresh]);
+
   const filtered = pFilter === "all" ? allSubs : allSubs.filter(s => s.practicalId === pFilter);
-  const stats    = getStats();
 
   // Per-practical averages from real data
   const vcSubs = allSubs.filter(s => s.practicalId === "vanishing-cream");
@@ -1539,7 +1568,7 @@ const Analytics: React.FC = () => {
   return (
     <div>
       <SectionHeading title="Analytics" sub="Real performance data from student lab sessions."
-        action={<Btn label="Refresh" Icon={RefreshCw} variant="ghost" small onClick={() => setPFilter(f=>f)} />} />
+        action={<Btn label="Refresh" Icon={RefreshCw} variant="ghost" small onClick={() => setRefresh(r => r + 1)} />} />
 
       <div style={{ display:"flex", gap:8, marginBottom:24 }}>
         {["all","vanishing-cream","cold-cream"].map(f => (
@@ -1568,7 +1597,7 @@ const Analytics: React.FC = () => {
         </div>
       ) : (
         <>
-          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:20, marginBottom:20 }}>
+          <div className="tp-grid-2col" style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:20, marginBottom:20 }}>
             {/* Score by practical */}
             <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:14,
               padding:20, boxShadow:`0 1px 4px ${C.shadow}` }}>
@@ -1620,7 +1649,7 @@ const Analytics: React.FC = () => {
           </div>
 
           {/* Top performers / needs attention */}
-          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:20 }}>
+          <div className="tp-grid-2col" style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:20 }}>
             {[
               { title:"Top Performers",  list:topStudents, color:C.green, Icon:Award        },
               { title:"Needs Attention", list:needsHelp,   color:C.amber, Icon:AlertCircle  },
@@ -1668,8 +1697,15 @@ const Submissions: React.FC = () => {
   const [search,          setSearch]          = useState("");
   const [refresh,         setRefresh]         = useState(0);
 
-  const allSubs = getAllSubmissions()
-    .sort((a,b) => new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime());
+  const [allSubs, setAllSubs] = useState<LabSubmission[]>([]);
+
+  useEffect(() => {
+    getAllSubmissions().then(subs =>
+      setAllSubs(subs.slice().sort((a, b) =>
+        new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime()
+      ))
+    );
+  }, [refresh]);
 
   const filtered = allSubs.filter(s =>
     (practicalFilter === "all" || s.practicalId === practicalFilter) &&
@@ -1734,6 +1770,7 @@ const Submissions: React.FC = () => {
         <>
           <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:14,
             overflow:"hidden", boxShadow:`0 1px 4px ${C.shadow}` }}>
+            <div className="tp-table-wrap">
             <table style={{ width:"100%", borderCollapse:"collapse" }}>
               <TableHead cols={["Student","Practical","Mode","Score","Result","pH","Viscosity","Duration","Submitted"]} />
               <tbody>
@@ -1777,6 +1814,7 @@ const Submissions: React.FC = () => {
                 ))}
               </tbody>
             </table>
+            </div>
             {filtered.length === 0 && (
               <div style={{ padding:32, textAlign:"center", color:C.txtMut }}>No submissions match the filters.</div>
             )}
@@ -1796,30 +1834,33 @@ const Submissions: React.FC = () => {
 
 const Announcements: React.FC = () => {
   const { C } = useTheme();
-  const [list,   setList]   = useState<StoredAnnouncement[]>(() => getAllAnnouncements());
-  const [title,  setTitle]  = useState("");
-  const [body,   setBody]   = useState("");
-  const [target, setTarget] = useState("All Students");
+  const [list,    setList]    = useState<StoredAnnouncement[]>([]);
+  const [title,   setTitle]   = useState("");
+  const [body,    setBody]    = useState("");
+  const [target,  setTarget]  = useState("All Students");
+  const [refresh, setRefresh] = useState(0);
 
-  const reload = () => setList(getAllAnnouncements());
+  useEffect(() => { getAllAnnouncements().then(setList); }, [refresh]);
 
-  const send = () => {
+  const reload = () => setRefresh(r => r + 1);
+
+  const send = async () => {
     if (!title.trim() || !body.trim()) return;
+    const students = await getAllUsers().then(us => us.filter(u => u.role === "student"));
     const a: StoredAnnouncement = {
-      id:     `ann_${Date.now()}`,
       title:  title.trim(),
       body:   body.trim(),
       target,
       sentAt: new Date().toLocaleString(),
       read:   0,
-      total:  getAllRegisteredStudents().length,
+      total:  students.length,
     };
-    saveAnnouncement(a);
-    reload();
+    await saveAnnouncement(a);
     setTitle(""); setBody("");
+    reload();
   };
 
-  const handleDelete = (id: string) => { deleteAnnouncement(id); reload(); };
+  const handleDelete = async (id: string) => { await deleteAnnouncement(id); reload(); };
 
   const lbl: React.CSSProperties = { color:C.txtMut, fontSize:11, display:"block",
     marginBottom:5, textTransform:"uppercase", letterSpacing:0.7 };
@@ -1852,7 +1893,7 @@ const Announcements: React.FC = () => {
                     borderRadius:8, padding:"4px 8px", color:C.green, fontSize:11, fontWeight:600 }}>
                     {a.total} recipients
                   </span>
-                  <button onClick={() => handleDelete(a.id)} style={{
+                  <button onClick={() => a.id && handleDelete(a.id)} style={{
                     background:`${C.red}10`, border:"none", color:C.red,
                     borderRadius:6, padding:"4px 7px", cursor:"pointer",
                     display:"flex", alignItems:"center" }}>
@@ -2055,12 +2096,28 @@ const LABELS: Record<Section,string> = {
 interface Props { onBack: () => void; }
 
 const TeacherPanel: React.FC<Props> = ({ onBack }) => {
-  const [isDark,  setIsDark]  = useState(true);
-  const [section, setSection] = useState<Section>("dashboard");
-  const [sbOpen,  setSbOpen]  = useState(true);
+  const [isDark,   setIsDark]   = useState(true);
+  const [section,  setSection]  = useState<Section>("dashboard");
+  const [sbOpen,   setSbOpen]   = useState(window.innerWidth >= 768);
+  const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
+
+  useEffect(() => {
+    const handleResize = () => {
+      const mobile = window.innerWidth < 768;
+      setIsMobile(mobile);
+      if (!mobile) setSbOpen(true);
+    };
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
 
   const C      = isDark ? DARK : LIGHT;
   const toggle = () => setIsDark(v => !v);
+
+  const navTo = (s: Section) => {
+    setSection(s);
+    if (isMobile) setSbOpen(false);
+  };
 
   const renderSection = () => {
     switch (section) {
@@ -2078,18 +2135,35 @@ const TeacherPanel: React.FC<Props> = ({ onBack }) => {
     <ThemeCtx.Provider value={{ C, isDark, toggle }}>
       <div style={{ display:"flex", height:"100vh", background:C.bg,
         fontFamily:"system-ui,-apple-system,sans-serif", overflow:"hidden",
-        transition:"background .25s ease" }}>
+        transition:"background .25s ease", position:"relative" }}>
+
+        {/* ── Mobile backdrop ── */}
+        {isMobile && sbOpen && (
+          <div onClick={() => setSbOpen(false)} style={{
+            position:"fixed", inset:0, background:"rgba(0,0,0,0.55)",
+            zIndex:198, backdropFilter:"blur(2px)",
+          }} />
+        )}
 
         {/* ── Sidebar ── */}
-        <aside style={{ width: sbOpen?240:64, minWidth: sbOpen?240:64,
-          background:C.sidebar, borderRight:`1px solid ${C.border}`,
+        <aside style={{
+          width: sbOpen ? 240 : (isMobile ? 0 : 64),
+          minWidth: sbOpen ? 240 : (isMobile ? 0 : 64),
+          background:C.sidebar, borderRight: sbOpen || !isMobile ? `1px solid ${C.border}` : "none",
           display:"flex", flexDirection:"column",
-          transition:"width .2s ease,min-width .2s ease",
+          transition:"width .25s ease,min-width .25s ease,transform .25s ease",
           overflow:"hidden", flexShrink:0,
-          boxShadow:`2px 0 8px ${C.shadow}` }}>
+          boxShadow: sbOpen ? `2px 0 12px ${C.shadow}` : "none",
+          ...(isMobile ? {
+            position:"fixed", top:0, left:0, height:"100vh",
+            zIndex:199,
+            transform: sbOpen ? "translateX(0)" : "translateX(-100%)",
+            width: 240, minWidth: 240,
+          } : {}),
+        }}>
 
           {/* Logo row */}
-          <div style={{ padding: sbOpen?"16px 18px":"16px 12px", borderBottom:`1px solid ${C.border}`,
+          <div style={{ padding:"16px 18px", borderBottom:`1px solid ${C.border}`,
             display:"flex", alignItems:"center", justifyContent:"space-between",
             minHeight:60, gap:8 }}>
             <div style={{ width:34, height:34, borderRadius:10, flexShrink:0,
@@ -2097,46 +2171,37 @@ const TeacherPanel: React.FC<Props> = ({ onBack }) => {
               display:"flex", alignItems:"center", justifyContent:"center" }}>
               <FlaskConical size={18} color="white" strokeWidth={2} />
             </div>
-            {sbOpen && (
-              <>
-                <div style={{ flex:1, overflow:"hidden" }}>
-                  <div style={{ color:C.txtPri, fontWeight:800, fontSize:13, whiteSpace:"nowrap" }}>VirtualLab</div>
-                  <div style={{ color:C.txtMut, fontSize:10, whiteSpace:"nowrap" }}>Teacher Panel</div>
-                </div>
-                <button onClick={() => setSbOpen(false)}
-                  style={{ background:"transparent", border:"none", color:C.txtMut,
-                    cursor:"pointer", padding:4, display:"flex", alignItems:"center" }}>
-                  <Menu size={16} strokeWidth={2} />
-                </button>
-              </>
-            )}
-            {!sbOpen && (
-              <button onClick={() => setSbOpen(true)} style={{ position:"absolute", left:12,
-                top:20, background:"transparent", border:"none", color:C.txtMut,
-                cursor:"pointer", display:"flex", alignItems:"center" }}>
-              </button>
-            )}
+            <div style={{ flex:1, overflow:"hidden" }}>
+              <div style={{ color:C.txtPri, fontWeight:800, fontSize:13, whiteSpace:"nowrap" }}>VirtualLab</div>
+              <div style={{ color:C.txtMut, fontSize:10, whiteSpace:"nowrap" }}>Teacher Panel</div>
+            </div>
+            <button onClick={() => setSbOpen(false)}
+              style={{ background:"transparent", border:"none", color:C.txtMut,
+                cursor:"pointer", padding:4, display:"flex", alignItems:"center", flexShrink:0 }}>
+              <Menu size={16} strokeWidth={2} />
+            </button>
           </div>
 
           {/* Nav */}
           <nav style={{ flex:1, padding:"10px 8px", overflowY:"auto" }}>
             {NAV.map(item => {
-              const active = section===item.id;
+              const active = section === item.id;
               return (
-                <button key={item.id} onClick={() => setSection(item.id)} style={{
-                  width:"100%", display:"flex", alignItems:"center",
-                  gap: sbOpen?10:0, justifyContent: sbOpen?"flex-start":"center",
-                  padding: sbOpen?"10px 12px":"11px 0",
+                <button key={item.id} onClick={() => navTo(item.id)} style={{
+                  width:"100%", display:"flex", alignItems:"center", gap:10,
+                  padding:"10px 12px",
                   borderRadius:9, border:"none", cursor:"pointer", marginBottom:3,
                   background: active ? `${C.accent}20` : "transparent",
                   color: active ? C.accent : C.txtSec,
                   fontWeight: active ? 700 : 500, fontSize:13,
                   transition:"background .15s,color .15s",
                 }}>
-                  <item.Icon size={17} strokeWidth={active?2.2:1.8} />
-                  {sbOpen && <span style={{ overflow:"hidden", whiteSpace:"nowrap" }}>{item.label}</span>}
-                  {active && sbOpen && (
-                    <span style={{ marginLeft:"auto", width:6, height:6, borderRadius:"50%",
+                  <item.Icon size={17} strokeWidth={active ? 2.2 : 1.8} />
+                  <span style={{ overflow:"hidden", whiteSpace:"nowrap", flex:1, textAlign:"left" }}>
+                    {item.label}
+                  </span>
+                  {active && (
+                    <span style={{ width:6, height:6, borderRadius:"50%",
                       background:C.accent, flexShrink:0 }} />
                   )}
                 </button>
@@ -2146,22 +2211,17 @@ const TeacherPanel: React.FC<Props> = ({ onBack }) => {
 
           {/* Logout */}
           <div style={{ padding:"10px 8px", borderTop:`1px solid ${C.border}` }}>
-            <button onClick={onBack}
-              title="Logout"
-              style={{
-                width:"100%", display:"flex", alignItems:"center",
-                gap: sbOpen?10:0, justifyContent: sbOpen?"flex-start":"center",
-                padding: sbOpen?"11px 14px":"11px 0",
-                borderRadius:9, border:`1px solid ${C.red}33`, cursor:"pointer",
-                background:`${C.red}10`,
-                color:C.red, fontSize:13, fontWeight:700,
-                transition:"background .15s",
-              }}
-              onMouseEnter={e => (e.currentTarget.style.background = `${C.red}20`)}
-              onMouseLeave={e => (e.currentTarget.style.background = `${C.red}10`)}
+            <button onClick={onBack} title="Logout" style={{
+              width:"100%", display:"flex", alignItems:"center", gap:10,
+              padding:"11px 14px",
+              borderRadius:9, border:`1px solid ${C.red}33`, cursor:"pointer",
+              background:`${C.red}10`, color:C.red, fontSize:13, fontWeight:700,
+            }}
+            onMouseEnter={e => (e.currentTarget.style.background = `${C.red}20`)}
+            onMouseLeave={e => (e.currentTarget.style.background = `${C.red}10`)}
             >
               <LogOut size={16} strokeWidth={2} />
-              {sbOpen && <span>Logout</span>}
+              <span>Logout</span>
             </button>
           </div>
         </aside>
@@ -2173,61 +2233,67 @@ const TeacherPanel: React.FC<Props> = ({ onBack }) => {
           {/* Header */}
           <header style={{ height:60, borderBottom:`1px solid ${C.border}`,
             background:C.headerBg, display:"flex", alignItems:"center",
-            justifyContent:"space-between", padding:"0 22px", flexShrink:0,
+            justifyContent:"space-between", padding:"0 16px", flexShrink:0,
             boxShadow:`0 1px 4px ${C.shadow}`, transition:"background .25s,border-color .25s" }}>
 
-            <div style={{ display:"flex", alignItems:"center", gap:10 }}>
-              {!sbOpen && (
-                <button onClick={() => setSbOpen(true)}
-                  style={{ background:"transparent", border:"none", color:C.txtSec,
-                    cursor:"pointer", display:"flex", alignItems:"center", marginRight:4 }}>
-                  <Menu size={20} strokeWidth={2} />
-                </button>
-              )}
-              <span style={{ color:C.txtMut, fontSize:12 }}>Teacher Panel</span>
-              <span style={{ color:C.txtMut, fontSize:14 }}>›</span>
+            <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+              <button onClick={() => setSbOpen(v => !v)}
+                style={{ background:"transparent", border:"none", color:C.txtSec,
+                  cursor:"pointer", display:"flex", alignItems:"center", padding:4 }}>
+                <Menu size={20} strokeWidth={2} />
+              </button>
+              <span style={{ color:C.txtMut, fontSize:12, display: isMobile ? "none" : undefined }}>
+                Teacher Panel
+              </span>
+              {!isMobile && <span style={{ color:C.txtMut, fontSize:14 }}>›</span>}
               <span style={{ color:C.txtPri, fontWeight:700, fontSize:14 }}>{LABELS[section]}</span>
             </div>
 
-            <div style={{ display:"flex", alignItems:"center", gap:10 }}>
-              {/* Live badge */}
-              <div style={{ background:`${C.green}15`, border:`1px solid ${C.green}40`,
-                borderRadius:20, padding:"3px 12px", color:C.green, fontSize:11,
-                fontWeight:700, display:"flex", alignItems:"center", gap:5 }}>
-                <Activity size={10} strokeWidth={2.5} /> Live
-              </div>
-
-              {/* ── Theme toggle ── */}
-              <button onClick={toggle}
-                title={isDark?"Switch to light mode":"Switch to dark mode"}
-                style={{ width:38, height:38, borderRadius:10, cursor:"pointer",
+            <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+              {!isMobile && (
+                <div style={{ background:`${C.green}15`, border:`1px solid ${C.green}40`,
+                  borderRadius:20, padding:"3px 12px", color:C.green, fontSize:11,
+                  fontWeight:700, display:"flex", alignItems:"center", gap:5 }}>
+                  <Activity size={10} strokeWidth={2.5} /> Live
+                </div>
+              )}
+              <button onClick={toggle} title={isDark?"Light mode":"Dark mode"}
+                style={{ width:36, height:36, borderRadius:9, cursor:"pointer",
                   background: isDark ? "#1e293b" : "#f1f5f9",
                   border:`1px solid ${C.border2}`,
                   display:"flex", alignItems:"center", justifyContent:"center",
-                  color: isDark ? "#e2e8f0" : "#0f172a",
-                  transition:"background .2s,border-color .2s,color .2s", flexShrink:0 }}>
-                {isDark
-                  ? <Sun  size={17} strokeWidth={2} />
-                  : <Moon size={17} strokeWidth={2} />}
+                  color: isDark ? "#e2e8f0" : "#0f172a", flexShrink:0 }}>
+                {isDark ? <Sun size={16} strokeWidth={2} /> : <Moon size={16} strokeWidth={2} />}
               </button>
-
-              {/* Avatar */}
               <div style={{ width:34, height:34, borderRadius:"50%", flexShrink:0,
                 background:"linear-gradient(135deg,#2563eb,#7c3aed)",
-                display:"flex", alignItems:"center", justifyContent:"center",
-                color:"white", fontWeight:800, fontSize:14, cursor:"pointer" }}>
+                display:"flex", alignItems:"center", justifyContent:"center" }}>
                 <User size={16} strokeWidth={2.5} color="white" />
               </div>
             </div>
           </header>
 
           {/* Scrollable content */}
-          <main style={{ flex:1, overflowY:"auto", padding:"28px 28px 48px",
+          <main style={{ flex:1, overflowY:"auto", padding: isMobile ? "16px 14px 48px" : "28px 28px 48px",
             background:C.bg, transition:"background .25s ease" }}>
             {renderSection()}
           </main>
         </div>
       </div>
+
+      {/* ── Responsive helpers ── */}
+      <style>{`
+        @media (max-width: 640px) {
+          .tp-table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+          .tp-grid-2col  { grid-template-columns: 1fr !important; }
+          .tp-grid-dash  { grid-template-columns: 1fr !important; }
+          .tp-hide-sm    { display: none !important; }
+          .tp-form-grid  { grid-template-columns: 1fr !important; }
+        }
+        @media (max-width: 900px) {
+          .tp-grid-dash  { grid-template-columns: 1fr !important; }
+        }
+      `}</style>
     </ThemeCtx.Provider>
   );
 };

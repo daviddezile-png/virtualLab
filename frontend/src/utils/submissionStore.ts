@@ -1,86 +1,73 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// Submission store — records every evaluated lab session
-// localStorage now; swap saveSubmission() body for POST /api/submissions later
+// Submission store — backed by MongoDB via REST API
 // ─────────────────────────────────────────────────────────────────────────────
+import { apiGet, apiPost } from "./apiClient";
 
 export type SubmissionResult = "PASS" | "AVERAGE" | "FAIL";
 
 export interface LabSubmission {
   id:           string;
-  token:        string;           // assignment token — "" for self-practice
+  token:        string;
   practicalId:  string;
   mode:         "practice" | "assignment";
-
   studentId:    string;
   studentName:  string;
   studentReg?:  string;
-
-  submittedAt:  string;           // ISO string
-  durationSec:  number;           // seconds between entering lab and evaluating
-
-  score10:      number;           // normalised score 0–10  (engine / 18 * 10)
-  scorePct:     number;           // percent  = passCount/totalSteps * 100
+  submittedAt:  string;
+  durationSec:  number;
+  score10:      number;
+  scorePct:     number;
   passCount:    number;
   totalSteps:   number;
   result:       SubmissionResult;
-
   ph:           number;
   viscosity:    number;
   stability:    string;
-
-  synced:       boolean;          // false = waiting for backend POST
+  synced:       boolean;
 }
 
-const KEY = "vlab_submissions";
+export interface StatsResult {
+  total:      number;
+  passed:     number;
+  average:    number;
+  failed:     number;
+  classAvg:   number;
+  todayCount: number;
+  avgDur:     number;
+}
 
-export const getAllSubmissions = (): LabSubmission[] => {
-  try { return JSON.parse(localStorage.getItem(KEY) ?? "[]"); }
-  catch { return []; }
+export const getAllSubmissions = async (): Promise<LabSubmission[]> => {
+  try {
+    const res = await apiGet<{ submissions: LabSubmission[] }>("/api/submissions");
+    return res.submissions;
+  } catch { return []; }
 };
 
-export const saveSubmission = (s: LabSubmission): void => {
-  const all = getAllSubmissions().filter(x => x.id !== s.id);
-  localStorage.setItem(KEY, JSON.stringify([...all, s]));
-  // TODO: POST /api/submissions with s when backend is ready
+export const saveSubmission = async (s: LabSubmission): Promise<void> => {
+  await apiPost("/api/submissions", { ...s, clientId: s.id });
 };
 
-// ── Derived helpers used by TeacherPanel ──────────────────────────────────────
-
-export const getSubmissionsByToken = (token: string) =>
-  getAllSubmissions().filter(s => s.token === token);
-
-export const getSubmissionsByStudent = (studentId: string) =>
-  getAllSubmissions().filter(s => s.studentId === studentId);
-
-/** Average score (0–100) across an array of submissions */
 export const avgScore = (subs: LabSubmission[]): number => {
   if (subs.length === 0) return 0;
   return Math.round(subs.reduce((acc, s) => acc + s.scorePct, 0) / subs.length);
 };
 
-/** Latest submission for a given student + practical */
-export const latestSubmission = (
-  studentId: string, practicalId: string,
-): LabSubmission | null => {
-  const matches = getAllSubmissions()
-    .filter(s => s.studentId === studentId && s.practicalId === practicalId)
-    .sort((a, b) => new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime());
-  return matches[0] ?? null;
-};
-
-/** Summary stats across all submissions */
-export const getStats = () => {
-  const all = getAllSubmissions();
-  const total      = all.length;
-  const passed     = all.filter(s => s.result === "PASS").length;
-  const average    = all.filter(s => s.result === "AVERAGE").length;
-  const failed     = all.filter(s => s.result === "FAIL").length;
-  const classAvg   = avgScore(all);
-  const todayCount = all.filter(s =>
-    new Date(s.submittedAt).toDateString() === new Date().toDateString()
-  ).length;
-  const avgDur     = total > 0
-    ? Math.round(all.reduce((acc, s) => acc + s.durationSec, 0) / total / 60)
-    : 0;
-  return { total, passed, average, failed, classAvg, todayCount, avgDur };
+export const getStats = async (): Promise<StatsResult> => {
+  try {
+    const all        = await getAllSubmissions();
+    const total      = all.length;
+    const passed     = all.filter(s => s.result === "PASS").length;
+    const average    = all.filter(s => s.result === "AVERAGE").length;
+    const failed     = all.filter(s => s.result === "FAIL").length;
+    const classAvg   = avgScore(all);
+    const todayCount = all.filter(s =>
+      new Date(s.submittedAt).toDateString() === new Date().toDateString()
+    ).length;
+    const avgDur = total > 0
+      ? Math.round(all.reduce((acc, s) => acc + s.durationSec, 0) / total / 60)
+      : 0;
+    return { total, passed, average, failed, classAvg, todayCount, avgDur };
+  } catch {
+    return { total: 0, passed: 0, average: 0, failed: 0, classAvg: 0, todayCount: 0, avgDur: 0 };
+  }
 };

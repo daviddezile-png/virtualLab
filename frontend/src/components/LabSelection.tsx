@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { findAssignment, incrementUses, startSession, isCodeExpired, Assignment } from "../utils/assignmentStore";
+import { findAssignment, isCodeExpired, Assignment } from "../utils/assignmentStore";
 import { getCurrentUser, logoutUser } from "../utils/userStore";
 
 interface Practical {
@@ -115,37 +115,28 @@ const LabSelection: React.FC<Props> = ({ onSelect, onTeacherPanel, onAssignment 
   const [checking,   setChecking]   = useState(false);
   const currentUser = getCurrentUser();
 
-  const handleTokenSubmit = () => {
+  const handleTokenSubmit = async () => {
     const raw = tokenInput.trim().toUpperCase();
     if (!raw) { setTokenError("Please enter a code."); return; }
     setChecking(true);
     setTokenError("");
-    // Simulate brief async lookup (swap for API call when backend is ready)
-    setTimeout(() => {
-      const found = findAssignment(raw);
+    try {
+      const found = await findAssignment(raw);
       if (!found) {
         setTokenError("Code not found. Check with your teacher and try again.");
-        setChecking(false);
         return;
       }
-      // Check if the teacher-set code expiry has passed
       if (isCodeExpired(found)) {
         const expDate = new Date(found.codeExpiresAt!).toLocaleString();
         setTokenError(`This assignment code expired on ${expDate}. Ask your teacher for a new one.`);
-        setChecking(false);
         return;
       }
-      incrementUses(found.token);
-      startSession({
-        token:       found.token,
-        practicalId: found.practicalId,
-        startedAt:   new Date().toISOString(),
-        mode:        "assignment",
-        synced:      false, // TODO: POST to /api/sessions when backend is ready
-      });
-      setChecking(false);
       onAssignment?.(found);
-    }, 500);
+    } catch (err: unknown) {
+      setTokenError((err as Error).message ?? "Failed to validate code. Please try again.");
+    } finally {
+      setChecking(false);
+    }
   };
 
   return (
