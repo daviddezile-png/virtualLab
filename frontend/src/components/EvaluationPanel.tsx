@@ -360,7 +360,7 @@ const EvaluationPanel: React.FC<Props> = ({
 
   if (!isOpen) return null;
 
-  const handleEvaluate = () => {
+  const handleEvaluate = async () => {
     const viscGauge = apparatus.find(a => a.type === "viscositygauge");
     const phMeter   = apparatus.find(a => a.type === "phmeter");
     const liveVisc  = Math.round(viscGauge?.data?.viscosityReading ?? 0);
@@ -386,18 +386,20 @@ const EvaluationPanel: React.FC<Props> = ({
           const u   = getCurrentUser();
           const now = Date.now();
           try {
-            saveSubmission({
+            const u   = getCurrentUser();
+            const uid = (u as {clientId?:string}|null)?.clientId ?? u?.id ?? "anonymous";
+            await saveSubmission({
               id: `sub_${now}_${Math.random().toString(36).slice(2,7)}`,
               token: assignment?.token ?? "", practicalId,
               mode: assignment ? "assignment" : "practice",
-              studentId: u?.id ?? "anonymous", studentName: u?.fullName ?? "Anonymous",
-              studentReg: u?.regNumber,
+              studentId: uid, studentName: u?.fullName ?? "Anonymous",
+              studentReg: u?.regNumber ?? undefined,
               submittedAt: new Date(now).toISOString(),
               durationSec: sessionStartAt ? Math.round((now - sessionStartAt) / 1000) : 0,
               score10: Math.round((r.score / 18) * 100) / 10,
               scorePct: sp, passCount: pc, totalSteps: ts, result: dr,
               ph: r.predicted_pH, viscosity: r.predicted_viscosity,
-              stability: r.stability ?? "unknown", synced: false,
+              stability: r.stability ?? "unknown", synced: true,
             });
             logEvaluationSubmitted(practicalId, sp, dr);
           } catch (saveErr) {
@@ -420,21 +422,22 @@ const EvaluationPanel: React.FC<Props> = ({
           const dr: "PASS"|"AVERAGE"|"FAIL" =
             pc === ts ? "PASS" : pc + wc >= ts || pc >= 10 ? "AVERAGE" : "FAIL";
           const sp  = Math.round((pc / ts) * 100);
-          const u   = getCurrentUser();
           const now = Date.now();
           try {
-            saveSubmission({
+            const u   = getCurrentUser();
+            const uid = (u as {clientId?:string}|null)?.clientId ?? u?.id ?? "anonymous";
+            await saveSubmission({
               id: `sub_${now}_${Math.random().toString(36).slice(2,7)}`,
               token: assignment?.token ?? "", practicalId,
               mode: assignment ? "assignment" : "practice",
-              studentId: u?.id ?? "anonymous", studentName: u?.fullName ?? "Anonymous",
-              studentReg: u?.regNumber,
+              studentId: uid, studentName: u?.fullName ?? "Anonymous",
+              studentReg: u?.regNumber ?? undefined,
               submittedAt: new Date(now).toISOString(),
               durationSec: sessionStartAt ? Math.round((now - sessionStartAt) / 1000) : 0,
               score10: Math.round((r.score / 18) * 100) / 10,
               scorePct: sp, passCount: pc, totalSteps: ts, result: dr,
               ph: r.predicted_pH, viscosity: r.predicted_viscosity,
-              stability: r.stability ?? "unknown", synced: false,
+              stability: r.stability ?? "unknown", synced: true,
             });
             logEvaluationSubmitted(practicalId, sp, dr);
           } catch (saveErr) {

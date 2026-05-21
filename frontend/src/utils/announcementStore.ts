@@ -1,28 +1,29 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// Announcement store — persisted to localStorage
+// Announcement store — backed by MongoDB via REST API
 // ─────────────────────────────────────────────────────────────────────────────
+import { apiGet, apiPost, apiDelete } from "./apiClient";
 
 export interface Announcement {
-  id:      string;
-  title:   string;
-  body:    string;
-  target:  string;
-  sentAt:  string;
-  read:    number;
-  total:   number;
+  id?:      string;   // MongoDB _id
+  title:    string;
+  body:     string;
+  target:   string;
+  sentAt?:  string;
+  read?:    number;
+  total?:   number;
 }
 
-const KEY = "vlab_announcements";
-
-export const getAllAnnouncements = (): Announcement[] => {
-  try { return JSON.parse(localStorage.getItem(KEY) ?? "[]"); }
-  catch { return []; }
+export const getAllAnnouncements = async (): Promise<Announcement[]> => {
+  try {
+    const res = await apiGet<{ announcements: Announcement[] }>("/api/announcements");
+    return res.announcements;
+  } catch { return []; }
 };
 
-export const saveAnnouncement = (a: Announcement): void => {
-  const all = getAllAnnouncements().filter(x => x.id !== a.id);
-  localStorage.setItem(KEY, JSON.stringify([a, ...all])); // newest first
+export const saveAnnouncement = async (a: Announcement): Promise<void> => {
+  await apiPost("/api/announcements", a);
 };
 
-export const deleteAnnouncement = (id: string): void =>
-  localStorage.setItem(KEY, JSON.stringify(getAllAnnouncements().filter(a => a.id !== id)));
+export const deleteAnnouncement = async (id: string): Promise<void> => {
+  await apiDelete(`/api/announcements/${id}`);
+};

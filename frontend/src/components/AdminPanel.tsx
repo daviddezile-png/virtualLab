@@ -1,16 +1,17 @@
 import React, { useState, useEffect, useContext, createContext } from "react";
 import {
-  LayoutDashboard, Users, BookOpen, ClipboardList, ClipboardCheck,
+  LayoutDashboard, Users, ClipboardList, ClipboardCheck,
   Megaphone, BarChart2, Settings, LogOut, Sun, Moon, Menu, Search,
   Trash2, Shield, Activity, TrendingUp, CheckCircle, AlertCircle,
-  GraduationCap, User as UserIcon, FlaskConical, Key, Bell, Eye,
+  GraduationCap, User as UserIcon, Key,
   RefreshCw, Download, Lock, Unlock, Clock, Award, Database,
-  FileText, AlertTriangle, ChevronRight, LucideIcon,
+  AlertTriangle, ChevronRight, LucideIcon,
 } from "lucide-react";
 import {
-  getAllUsers, User, logoutUser, createAdminUser, registerUser,
+  getAllUsers, User, createAdminUser, registerUser,
   getPendingTeachers, approveTeacher, rejectTeacher,
-  ThemeMode, getStoredTheme, storeTheme,
+  deleteUserById, toggleSuspend as toggleSuspendUser,
+  getStoredTheme, storeTheme,
 } from "../utils/userStore";
 import { getAllSubmissions, getStats } from "../utils/submissionStore";
 import { getAllAssignments, isCodeExpired, deleteAssignment } from "../utils/assignmentStore";
@@ -154,15 +155,22 @@ const RoleBadge: React.FC<{ role:string }> = ({ role }) => {
 // ─────────────────────────────────────────────────────────────────────────────
 const Dashboard: React.FC = () => {
   const { C } = useTheme();
-  const users   = getAllUsers();
-  const subs    = getAllSubmissions();
-  const assigns = getAllAssignments();
-  const stats   = getStats();
+  const [users,   setUsers]   = useState<User[]>([]);
+  const [subs,    setSubs]    = useState<any[]>([]);
+  const [assigns, setAssigns] = useState<any[]>([]);
+  const [stats,   setStats]   = useState<any>({ total:0, todayCount:0, classAvg:0, passed:0, average:0, failed:0, avgDur:0 });
+
+  useEffect(() => {
+    getAllUsers().then(setUsers);
+    getAllSubmissions().then(setSubs);
+    getAllAssignments().then(setAssigns);
+    getStats().then(setStats);
+  }, []);
 
   const admins   = users.filter(u => u.role === "admin").length;
   const teachers = users.filter(u => u.role === "teacher").length;
   const students = users.filter(u => u.role === "student").length;
-  const recentSubs = subs.sort((a,b) => new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime()).slice(0,6);
+  const recentSubs = [...subs].sort((a,b) => new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime()).slice(0,6);
 
   return (
     <div>
@@ -175,7 +183,7 @@ const Dashboard: React.FC = () => {
         <StatCard label="Assignments"     value={assigns.length} sub={`${assigns.filter(isCodeExpired).length} expired`} Icon={Key} color="#7c3aed" />
       </div>
 
-      <div style={{ display:"grid", gridTemplateColumns:"1fr 320px", gap:20 }}>
+      <div className="ap-grid-dash" style={{ display:"grid", gridTemplateColumns:"1fr 320px", gap:20 }}>
         {/* Recent submissions */}
         <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:14,
           overflow:"hidden", boxShadow:`0 1px 4px ${C.shadow}` }}>
@@ -189,7 +197,7 @@ const Dashboard: React.FC = () => {
               No submissions yet.
             </div>
           ) : (
-            <table style={{ width:"100%", borderCollapse:"collapse" }}>
+            <div className="ap-table-wrap"><table style={{ width:"100%", borderCollapse:"collapse" }}>
               <TableHead cols={["Student","Practical","Score","Result"]} />
               <tbody>
                 {recentSubs.map((s,i) => (
@@ -219,7 +227,7 @@ const Dashboard: React.FC = () => {
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </table></div>
           )}
         </div>
 
@@ -294,12 +302,10 @@ const UserManager: React.FC = () => {
   const [newReg,       setNewReg]       = useState("");
   const [addError,     setAddError]     = useState<string|null>(null);
   const [addOk,        setAddOk]        = useState(false);
-  const [suspended, setSuspended] = useState<Set<string>>(() => {
-    try { return new Set(JSON.parse(localStorage.getItem("vlab_suspended") ?? "[]")); }
-    catch { return new Set(); }
-  });
 
-  const allUsers = getAllUsers();
+  const [allUsers, setAllUsers] = useState<User[]>([]);
+  useEffect(() => { getAllUsers().then(setAllUsers); }, [refresh]);
+
   const filtered = allUsers.filter(u =>
     (roleFilter === "all" || u.role === roleFilter) &&
     (u.fullName.toLowerCase().includes(search.toLowerCase()) ||
@@ -307,18 +313,16 @@ const UserManager: React.FC = () => {
      (u.regNumber ?? "").toLowerCase().includes(search.toLowerCase()))
   );
 
-  const toggleSuspend = (id: string) => {
-    const next = new Set(suspended);
-    next.has(id) ? next.delete(id) : next.add(id);
-    setSuspended(next);
-    localStorage.setItem("vlab_suspended", JSON.stringify([...next]));
+  const handleToggleSuspend = async (clientId: string) => {
+    await toggleSuspendUser(clientId);
+    setRefresh(r => r + 1);
   };
 
-  const deleteUser = (id: string) => {
-    const u = getAllUsers().find(x => x.id === id);
+  const deleteUser = async (clientId: string) => {
+    const u = allUsers.find(x => x.clientId === clientId);
     if (u?.seeded) return;
-    localStorage.setItem("vlab_users", JSON.stringify(getAllUsers().filter(x => x.id !== id)));
-    setRefresh(r => r+1);
+    await deleteUserById(clientId);
+    setRefresh(r => r + 1);
   };
 
   const resetForm = () => {
@@ -326,13 +330,13 @@ const UserManager: React.FC = () => {
     setAddError(null);
   };
 
-  const handleAddUser = () => {
+  const handleAddUser = async () => {
     setAddError(null);
     let result;
     if (newRole === "admin") {
-      result = createAdminUser(newName, newEmail, newPass);
+      result = await createAdminUser(newName, newEmail, newPass);
     } else {
-      result = registerUser({ role: newRole, fullName: newName, email: newEmail,
+      result = await registerUser({ role: newRole, fullName: newName, email: newEmail,
         password: newPass, regNumber: newRole === "student" ? newReg : undefined,
         forceActive: true });   // admin-created accounts are active immediately
     }
@@ -468,13 +472,13 @@ const UserManager: React.FC = () => {
 
       <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:14,
         overflow:"hidden", boxShadow:`0 1px 4px ${C.shadow}` }}>
-        <table style={{ width:"100%", borderCollapse:"collapse" }}>
+        <div className="ap-table-wrap"><table style={{ width:"100%", borderCollapse:"collapse" }}>
           <TableHead cols={["User","Email","Role","Reg No.","Joined","Status",""]} />
           <tbody>
             {filtered.map((u,i) => (
-              <tr key={u.id} style={{ background:i%2===0?"transparent":`${C.surface}88`,
+              <tr key={u.clientId} style={{ background:i%2===0?"transparent":`${C.surface}88`,
                 borderBottom:`1px solid ${C.border}`,
-                opacity: suspended.has(u.id) ? 0.5 : 1 }}>
+                opacity: u.suspended ? 0.5 : 1 }}>
                 <td style={{ padding:"11px 14px" }}>
                   <div style={{ display:"flex", alignItems:"center", gap:10 }}>
                     <Avatar name={u.fullName} />
@@ -497,24 +501,24 @@ const UserManager: React.FC = () => {
                     : <span style={{ color:C.txtMut }}>—</span>}
                 </td>
                 <td style={{ padding:"11px 14px", color:C.txtMut, fontSize:12 }}>
-                  {new Date(u.createdAt).toLocaleDateString()}
+                  {new Date(u.createdAt ?? "").toLocaleDateString()}
                 </td>
                 <td style={{ padding:"11px 14px" }}>
                   <span style={{
-                    background: suspended.has(u.id) ? `${C.red}12` : `${C.accent}12`,
-                    color: suspended.has(u.id) ? C.red : C.accent,
-                    border: `1px solid ${suspended.has(u.id) ? `${C.red}44` : `${C.accent}44`}`,
+                    background: u.suspended ? `${C.red}12` : `${C.accent}12`,
+                    color: u.suspended ? C.red : C.accent,
+                    border: `1px solid ${u.suspended ? `${C.red}44` : `${C.accent}44`}`,
                     borderRadius:20, padding:"2px 10px", fontSize:11, fontWeight:700,
-                  }}>{suspended.has(u.id) ? "Suspended" : "Active"}</span>
+                  }}>{u.suspended ? "Suspended" : "Active"}</span>
                 </td>
                 <td style={{ padding:"11px 14px" }}>
                   <div style={{ display:"flex", gap:6 }}>
-                    <button onClick={() => toggleSuspend(u.id)} title={suspended.has(u.id)?"Unsuspend":"Suspend"}
+                    <button onClick={() => handleToggleSuspend(u.clientId)} title={u.suspended?"Unsuspend":"Suspend"}
                       style={{ background:"transparent", border:`1px solid ${C.border}`,
-                        color: suspended.has(u.id) ? C.accent : C.amber,
+                        color: u.suspended ? C.accent : C.amber,
                         borderRadius:6, padding:"5px 8px", cursor:"pointer",
                         display:"flex", alignItems:"center" }}>
-                      {suspended.has(u.id) ? <Unlock size={13}/> : <Lock size={13}/>}
+                      {u.suspended ? <Unlock size={13}/> : <Lock size={13}/>}
                     </button>
                     {u.seeded ? (
                       <span title="Seeded admin — cannot be deleted"
@@ -524,7 +528,7 @@ const UserManager: React.FC = () => {
                         <Shield size={13} strokeWidth={2} />
                       </span>
                     ) : (
-                      <button onClick={() => deleteUser(u.id)} title="Delete user"
+                      <button onClick={() => deleteUser(u.clientId)} title="Delete user"
                         style={{ background:`${C.red}10`, border:"none", color:C.red,
                           borderRadius:6, padding:"5px 8px", cursor:"pointer",
                           display:"flex", alignItems:"center" }}>
@@ -536,7 +540,7 @@ const UserManager: React.FC = () => {
               </tr>
             ))}
           </tbody>
-        </table>
+        </table></div>
         {filtered.length === 0 && (
           <div style={{ padding:36, textAlign:"center", color:C.txtMut }}>No users found.</div>
         )}
@@ -555,21 +559,28 @@ const AdminAssignments: React.FC = () => {
   const { C } = useTheme();
   const [search, setSearch] = useState("");
   const [refresh, setRefresh] = useState(0);
+  const [allAssignments, setAllAssignments] = useState<any[]>([]);
 
-  const all = getAllAssignments()
-    .sort((a,b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  useEffect(() => {
+    getAllAssignments().then(data =>
+      setAllAssignments([...data].sort((a,b) => new Date(b.createdAt ?? 0).getTime() - new Date(a.createdAt ?? 0).getTime()))
+    );
+  }, [refresh]);
 
-  const filtered = all.filter(a =>
+  const filtered = allAssignments.filter(a =>
     a.title.toLowerCase().includes(search.toLowerCase()) ||
     a.token.toLowerCase().includes(search.toLowerCase()) ||
     a.practicalId.toLowerCase().includes(search.toLowerCase())
   );
 
-  const handleDelete = (token: string) => { deleteAssignment(token); setRefresh(r=>r+1); };
+  const handleDelete = async (token: string) => {
+    await deleteAssignment(token);
+    setRefresh(r => r + 1);
+  };
 
   return (
     <div>
-      <SectionHeading title="All Assignments" sub={`${all.length} total assignments across all teachers.`}
+      <SectionHeading title="All Assignments" sub={`${allAssignments.length} total assignments across all teachers.`}
         action={<Btn label="Refresh" Icon={RefreshCw} variant="ghost" small onClick={() => setRefresh(r=>r+1)} />} />
 
       <div style={{ position:"relative", marginBottom:18 }}>
@@ -583,7 +594,7 @@ const AdminAssignments: React.FC = () => {
             fontSize:13, boxSizing:"border-box", outline:"none" }} />
       </div>
 
-      {all.length === 0 ? (
+      {allAssignments.length === 0 ? (
         <div style={{ background:C.card, border:`2px dashed ${C.border2}`, borderRadius:14,
           padding:"40px 20px", textAlign:"center", color:C.txtMut }}>
           <Key size={30} style={{ marginBottom:10, opacity:0.3 }} />
@@ -592,7 +603,7 @@ const AdminAssignments: React.FC = () => {
       ) : (
         <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:14,
           overflow:"hidden", boxShadow:`0 1px 4px ${C.shadow}` }}>
-          <table style={{ width:"100%", borderCollapse:"collapse" }}>
+          <div className="ap-table-wrap"><table style={{ width:"100%", borderCollapse:"collapse" }}>
             <TableHead cols={["Code","Practical","Target","Time Limit","Expires","Uses","Status",""]} />
             <tbody>
               {filtered.map((a,i) => {
@@ -644,7 +655,7 @@ const AdminAssignments: React.FC = () => {
                 );
               })}
             </tbody>
-          </table>
+          </table></div>
           {filtered.length === 0 && (
             <div style={{ padding:32, textAlign:"center", color:C.txtMut }}>No assignments match.</div>
           )}
@@ -662,9 +673,13 @@ const AdminSubmissions: React.FC = () => {
   const [search, setSearch] = useState("");
   const [result, setResult] = useState("all");
   const [prac,   setPrac]   = useState("all");
+  const [all,    setAll]    = useState<any[]>([]);
 
-  const all = getAllSubmissions()
-    .sort((a,b) => new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime());
+  useEffect(() => {
+    getAllSubmissions().then(data =>
+      setAll([...data].sort((a,b) => new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime()))
+    );
+  }, []);
 
   const filtered = all.filter(s =>
     (result === "all" || s.result === result) &&
@@ -716,7 +731,7 @@ const AdminSubmissions: React.FC = () => {
         <>
           <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:14,
             overflow:"hidden", boxShadow:`0 1px 4px ${C.shadow}` }}>
-            <table style={{ width:"100%", borderCollapse:"collapse" }}>
+            <div className="ap-table-wrap"><table style={{ width:"100%", borderCollapse:"collapse" }}>
               <TableHead cols={["Student","Practical","Mode","Score","Result","pH","Viscosity","Duration","Date"]} />
               <tbody>
                 {filtered.map((s,i) => (
@@ -766,7 +781,7 @@ const AdminSubmissions: React.FC = () => {
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </table></div>
             {filtered.length === 0 && (
               <div style={{ padding:32, textAlign:"center", color:C.txtMut }}>No submissions match.</div>
             )}
@@ -785,11 +800,19 @@ const AdminSubmissions: React.FC = () => {
 // ─────────────────────────────────────────────────────────────────────────────
 const AdminQA: React.FC = () => {
   const { C } = useTheme();
-  const [refresh, setRefresh] = useState(0);
-  const questions = getAllQuestions();
-  const answers   = getAllAnswers();
+  const [refresh,   setRefresh]   = useState(0);
+  const [questions, setQuestions] = useState<any[]>([]);
+  const [answers,   setAnswers]   = useState<any[]>([]);
 
-  const deleteQ = (id: string) => { deleteQuestion(id); setRefresh(r=>r+1); };
+  useEffect(() => {
+    getAllQuestions().then(setQuestions);
+    getAllAnswers().then(setAnswers);
+  }, [refresh]);
+
+  const deleteQ = async (id: string) => {
+    await deleteQuestion(id);
+    setRefresh(r => r + 1);
+  };
 
   return (
     <div>
@@ -832,7 +855,7 @@ const AdminQA: React.FC = () => {
                     <div style={{ color:C.txtPri, fontSize:14, lineHeight:1.6 }}>{q.text}</div>
                     {q.type === "mcq" && q.options.length > 0 && (
                       <div style={{ display:"flex", flexWrap:"wrap", gap:6, marginTop:8 }}>
-                        {q.options.map((opt, oi) => (
+                        {q.options.map((opt: string, oi: number) => (
                           <span key={oi} style={{
                             background: opt === q.correctAnswer ? `${C.accent}18` : C.surface,
                             border: `1px solid ${opt === q.correctAnswer ? `${C.accent}44` : C.border}`,
@@ -878,17 +901,21 @@ const AdminQA: React.FC = () => {
 // ─────────────────────────────────────────────────────────────────────────────
 const AdminAnnouncements: React.FC = () => {
   const { C } = useTheme();
-  const [list,    setList]   = useState(getAllAnnouncements());
+  const [list,    setList]   = useState<any[]>([]);
   const [refresh, setRefresh]= useState(0);
 
-  const reload = () => setList(getAllAnnouncements());
-  const handleDelete = (id:string) => { deleteAnnouncement(id); reload(); };
+  useEffect(() => { getAllAnnouncements().then(setList); }, [refresh]);
+
+  const handleDelete = async (id: string) => {
+    await deleteAnnouncement(id);
+    setRefresh(r => r + 1);
+  };
 
   return (
     <div>
       <SectionHeading title="All Announcements"
         sub="View and moderate all announcements from all teachers."
-        action={<Btn label="Refresh" Icon={RefreshCw} variant="ghost" small onClick={reload} />} />
+        action={<Btn label="Refresh" Icon={RefreshCw} variant="ghost" small onClick={() => setRefresh(r=>r+1)} />} />
 
       {list.length === 0 ? (
         <div style={{ background:C.card, border:`2px dashed ${C.border2}`, borderRadius:14,
@@ -929,8 +956,13 @@ const AdminAnnouncements: React.FC = () => {
 // ─────────────────────────────────────────────────────────────────────────────
 const AdminAnalytics: React.FC = () => {
   const { C } = useTheme();
-  const subs  = getAllSubmissions();
-  const stats = getStats();
+  const [subs,  setSubs]  = useState<any[]>([]);
+  const [stats, setStats] = useState<any>({ total:0, todayCount:0, classAvg:0, passed:0, average:0, failed:0, avgDur:0 });
+
+  useEffect(() => {
+    getAllSubmissions().then(setSubs);
+    getStats().then(setStats);
+  }, []);
 
   const vcSubs = subs.filter(s => s.practicalId === "vanishing-cream");
   const ccSubs = subs.filter(s => s.practicalId === "cold-cream");
@@ -948,10 +980,10 @@ const AdminAnalytics: React.FC = () => {
 
   const topStudents = (() => {
     const map = new Map<string,{name:string;scores:number[]}>();
-    subs.forEach(s => {
-      const cur = map.get(s.studentId) ?? {name:s.studentName,scores:[]};
+    subs.forEach((s: any) => {
+      let cur = map.get(s.studentId);
+      if (!cur) { cur = {name:s.studentName, scores:[]}; map.set(s.studentId, cur); }
       cur.scores.push(s.scorePct);
-      map.set(s.studentId, cur);
     });
     return Array.from(map.values())
       .map(v => ({ name:v.name, avg:Math.round(v.scores.reduce((a,b)=>a+b,0)/v.scores.length) }))
@@ -978,7 +1010,7 @@ const AdminAnalytics: React.FC = () => {
           <div>Analytics will appear once students start evaluating practicals.</div>
         </div>
       ) : (
-        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:20 }}>
+        <div className="ap-grid-2col" style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:20 }}>
           {/* Score by practical */}
           <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:14,
             padding:20, boxShadow:`0 1px 4px ${C.shadow}` }}>
@@ -1061,6 +1093,9 @@ const AdminSettings: React.FC = () => {
   const [openReg,     setOpenReg]     = useState(true);
   const [maxStudents, setMaxStudents] = useState("500");
   const [saved,       setSaved]       = useState(false);
+  const [totalUsers,  setTotalUsers]  = useState(0);
+
+  useEffect(() => { getAllUsers().then(us => setTotalUsers(us.length)); }, []);
 
   const Toggle: React.FC<{v:boolean;set:(x:boolean)=>void}> = ({v,set}) => (
     <div onClick={()=>set(!v)} style={{ width:44, height:24, borderRadius:12, cursor:"pointer",
@@ -1092,6 +1127,36 @@ const AdminSettings: React.FC = () => {
       {children}
     </div>
   );
+
+  const handleExportJSON = async () => {
+    const [users, submissions, assignments, questions, announcements, auditLog] = await Promise.all([
+      getAllUsers(),
+      getAllSubmissions(),
+      getAllAssignments(),
+      getAllQuestions(),
+      getAllAnnouncements(),
+      getAuditLog(),
+    ]);
+    const data = {
+      users: users.map(u => ({ ...u, passwordHash:"[hidden]" })),
+      submissions,
+      assignments,
+      questions,
+      announcements,
+      auditLog,
+      exportedAt: new Date().toISOString(),
+    };
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type:"application/json" });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement("a");
+    a.href = url; a.download = `vlab-export-${Date.now()}.json`; a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleClearAuditLog = async () => {
+    await clearAuditLog();
+    alert("Audit log cleared.");
+  };
 
   return (
     <div style={{ maxWidth:700 }}>
@@ -1125,13 +1190,13 @@ const AdminSettings: React.FC = () => {
               color:C.txtPri, borderRadius:7, padding:"6px 10px", fontSize:13, textAlign:"center" }} />
         </Row>
         <Row label="Total Registered" sub="Current user count">
-          <span style={{ color:C.accent, fontWeight:700, fontSize:14 }}>{getAllUsers().length}</span>
+          <span style={{ color:C.accent, fontWeight:700, fontSize:14 }}>{totalUsers}</span>
         </Row>
       </Block>
 
       <Block TitleIcon={Database} title="Data Management">
         <Row label="Clear Audit Log" sub="Permanently delete all activity log entries">
-          <button onClick={() => { clearAuditLog(); alert("Audit log cleared."); }}
+          <button onClick={handleClearAuditLog}
             style={{ background:`${C.red}10`, border:`1px solid ${C.red}44`,
               color:C.red, borderRadius:8, padding:"7px 14px", cursor:"pointer",
               fontSize:12, fontWeight:600, display:"flex", alignItems:"center", gap:6 }}>
@@ -1139,23 +1204,7 @@ const AdminSettings: React.FC = () => {
           </button>
         </Row>
         <Row label="Export Full Data" sub="Download all platform data as JSON">
-          <button
-            onClick={() => {
-              const data = {
-                users:         getAllUsers().map(u => ({ ...u, passwordHash:"[hidden]" })),
-                submissions:   getAllSubmissions(),
-                assignments:   getAllAssignments(),
-                questions:     getAllQuestions(),
-                announcements: getAllAnnouncements(),
-                auditLog:      getAuditLog(),
-                exportedAt:    new Date().toISOString(),
-              };
-              const blob = new Blob([JSON.stringify(data, null, 2)], { type:"application/json" });
-              const url  = URL.createObjectURL(blob);
-              const a    = document.createElement("a");
-              a.href = url; a.download = `vlab-export-${Date.now()}.json`; a.click();
-              URL.revokeObjectURL(url);
-            }}
+          <button onClick={handleExportJSON}
             style={{ background:C.accentBg, border:`1px solid ${C.accent}44`,
               color:C.accent, borderRadius:8, padding:"7px 14px", cursor:"pointer",
               fontSize:12, fontWeight:600, display:"flex", alignItems:"center", gap:6 }}>
@@ -1182,10 +1231,12 @@ const AdminSettings: React.FC = () => {
 // ─────────────────────────────────────────────────────────────────────────────
 const AuditLog: React.FC = () => {
   const { C } = useTheme();
-  const [search, setSearch] = useState("");
+  const [search,  setSearch]  = useState("");
   const [refresh, setRefresh] = useState(0);
+  const [log,     setLog]     = useState<any[]>([]);
 
-  const log = getAuditLog();
+  useEffect(() => { getAuditLog().then(setLog); }, [refresh]);
+
   const filtered = log.filter(e =>
     e.detail.toLowerCase().includes(search.toLowerCase()) ||
     e.actorName.toLowerCase().includes(search.toLowerCase()) ||
@@ -1210,6 +1261,11 @@ const AuditLog: React.FC = () => {
     return `${d.toLocaleDateString()} ${d.toLocaleTimeString([], { hour:"2-digit", minute:"2-digit" })}`;
   };
 
+  const handleClearLog = async () => {
+    await clearAuditLog();
+    setRefresh(r => r + 1);
+  };
+
   return (
     <div>
       <SectionHeading title="Audit Log"
@@ -1217,7 +1273,7 @@ const AuditLog: React.FC = () => {
         action={
           <div style={{ display:"flex", gap:8 }}>
             <Btn label="Refresh" Icon={RefreshCw} variant="ghost" small onClick={() => setRefresh(r=>r+1)} />
-            <Btn label="Clear Log" Icon={Trash2} variant="danger" small onClick={() => { clearAuditLog(); setRefresh(r=>r+1); }} />
+            <Btn label="Clear Log" Icon={Trash2} variant="danger" small onClick={handleClearLog} />
           </div>
         } />
 
@@ -1241,7 +1297,7 @@ const AuditLog: React.FC = () => {
       ) : (
         <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:14,
           overflow:"hidden", boxShadow:`0 1px 4px ${C.shadow}` }}>
-          <table style={{ width:"100%", borderCollapse:"collapse" }}>
+          <div className="ap-table-wrap"><table style={{ width:"100%", borderCollapse:"collapse" }}>
             <TableHead cols={["Time","Action","Actor","Role","Detail"]} />
             <tbody>
               {filtered.map((e, i) => (
@@ -1264,7 +1320,7 @@ const AuditLog: React.FC = () => {
                 </tr>
               ))}
             </tbody>
-          </table>
+          </table></div>
           {filtered.length === 0 && (
             <div style={{ padding:32, textAlign:"center", color:C.txtMut }}>No log entries match.</div>
           )}
@@ -1283,23 +1339,26 @@ const AuditLog: React.FC = () => {
 // ─────────────────────────────────────────────────────────────────────────────
 const TeacherApprovals: React.FC = () => {
   const { C } = useTheme();
-  const [refresh, setRefresh] = useState(0);
-  const pending  = getPendingTeachers();
+  const [refresh,     setRefresh]     = useState(0);
+  const [allTeachers, setAllTeachers] = useState<User[]>([]);
 
-  const handleApprove = (id: string) => {
-    approveTeacher(id);
+  useEffect(() => {
+    getAllUsers().then(us => setAllTeachers(us.filter(u => u.role === "teacher")));
+  }, [refresh]);
+
+  const pending  = allTeachers.filter(u => u.status === "pending");
+  const rejected = allTeachers.filter(u => u.status === "rejected");
+  const approved = allTeachers.filter(u => (u.status ?? "active") === "active");
+
+  const handleApprove = async (clientId: string) => {
+    await approveTeacher(clientId);
     setRefresh(r => r + 1);
   };
 
-  const handleReject = (id: string) => {
-    rejectTeacher(id);
+  const handleReject = async (clientId: string) => {
+    await rejectTeacher(clientId);
     setRefresh(r => r + 1);
   };
-
-  // also show recently rejected so admin can reverse
-  const allTeachers = getAllUsers().filter(u => u.role === "teacher");
-  const rejected    = allTeachers.filter(u => u.status === "rejected");
-  const approved    = allTeachers.filter(u => (u.status ?? "active") === "active");
 
   return (
     <div>
@@ -1347,7 +1406,7 @@ const TeacherApprovals: React.FC = () => {
       ) : (
         <div style={{ display:"flex", flexDirection:"column", gap:12, marginBottom:28 }}>
           {pending.map(u => (
-            <div key={u.id} style={{
+            <div key={u.clientId} style={{
               background:C.card, border:`1px solid rgba(234,179,8,0.4)`,
               borderRadius:12, padding:"16px 18px",
               display:"flex", alignItems:"center", gap:14, flexWrap:"wrap",
@@ -1368,7 +1427,7 @@ const TeacherApprovals: React.FC = () => {
                 <div style={{ color:C.txtPri, fontWeight:700, fontSize:14 }}>{u.fullName}</div>
                 <div style={{ color:C.txtMut, fontSize:12, marginTop:2 }}>{u.email}</div>
                 <div style={{ color:C.txtMut, fontSize:11, marginTop:2 }}>
-                  Registered: {new Date(u.createdAt).toLocaleString()}
+                  Registered: {new Date(u.createdAt ?? "").toLocaleString()}
                 </div>
               </div>
 
@@ -1383,7 +1442,7 @@ const TeacherApprovals: React.FC = () => {
 
               {/* Actions */}
               <div style={{ display:"flex", gap:8, flexShrink:0 }}>
-                <button onClick={() => handleApprove(u.id)} style={{
+                <button onClick={() => handleApprove(u.clientId)} style={{
                   display:"flex", alignItems:"center", gap:6,
                   background:`${C.accent}18`, border:`1px solid ${C.accent}66`,
                   color:C.accent, borderRadius:8, padding:"8px 16px",
@@ -1391,7 +1450,7 @@ const TeacherApprovals: React.FC = () => {
                 }}>
                   <CheckCircle size={14} strokeWidth={2.5} /> Approve
                 </button>
-                <button onClick={() => handleReject(u.id)} style={{
+                <button onClick={() => handleReject(u.clientId)} style={{
                   display:"flex", alignItems:"center", gap:6,
                   background:`${C.red}10`, border:`1px solid ${C.red}66`,
                   color:C.red, borderRadius:8, padding:"8px 16px",
@@ -1414,7 +1473,7 @@ const TeacherApprovals: React.FC = () => {
           </div>
           <div style={{ display:"flex", flexDirection:"column", gap:10, marginBottom:28 }}>
             {rejected.map(u => (
-              <div key={u.id} style={{
+              <div key={u.clientId} style={{
                 background:C.card, border:`1px solid ${C.red}44`,
                 borderRadius:12, padding:"14px 18px",
                 display:"flex", alignItems:"center", gap:12, flexWrap:"wrap",
@@ -1436,7 +1495,7 @@ const TeacherApprovals: React.FC = () => {
                   color:C.red, fontSize:11, fontWeight:700 }}>
                   ✗ Rejected
                 </div>
-                <button onClick={() => handleApprove(u.id)} style={{
+                <button onClick={() => handleApprove(u.clientId)} style={{
                   display:"flex", alignItems:"center", gap:5,
                   background:`${C.accent}10`, border:`1px solid ${C.accent}55`,
                   color:C.accent, borderRadius:8, padding:"6px 14px",
@@ -1459,11 +1518,11 @@ const TeacherApprovals: React.FC = () => {
           </div>
           <div style={{ background:C.card, border:`1px solid ${C.border}`,
             borderRadius:14, overflow:"hidden" }}>
-            <table style={{ width:"100%", borderCollapse:"collapse" }}>
+            <div className="ap-table-wrap"><table style={{ width:"100%", borderCollapse:"collapse" }}>
               <TableHead cols={["Teacher","Email","Joined","Status"]} />
               <tbody>
                 {approved.map((u, i) => (
-                  <tr key={u.id} style={{ background:i%2===0?"transparent":`${C.surface}88`,
+                  <tr key={u.clientId} style={{ background:i%2===0?"transparent":`${C.surface}88`,
                     borderBottom:`1px solid ${C.border}` }}>
                     <td style={{ padding:"11px 14px" }}>
                       <div style={{ display:"flex", alignItems:"center", gap:10 }}>
@@ -1473,7 +1532,7 @@ const TeacherApprovals: React.FC = () => {
                     </td>
                     <td style={{ padding:"11px 14px", color:C.txtSec, fontSize:12 }}>{u.email}</td>
                     <td style={{ padding:"11px 14px", color:C.txtMut, fontSize:12 }}>
-                      {new Date(u.createdAt).toLocaleDateString()}
+                      {new Date(u.createdAt ?? "").toLocaleDateString()}
                     </td>
                     <td style={{ padding:"11px 14px" }}>
                       <span style={{ background:`${C.accent}12`, border:`1px solid ${C.accent}44`,
@@ -1483,7 +1542,7 @@ const TeacherApprovals: React.FC = () => {
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </table></div>
           </div>
         </>
       )}
@@ -1519,16 +1578,35 @@ const LABELS: Record<Section,string> = {
 interface Props { onLogout: () => void; }
 
 const AdminPanel: React.FC<Props> = ({ onLogout }) => {
-  const [isDark,   setIsDark]   = useState(getStoredTheme() === "dark");
-  const [section,  setSection]  = useState<Section>("dashboard");
-  const [sbOpen,   setSbOpen]   = useState(true);
+  const [isDark,       setIsDark]       = useState(getStoredTheme() === "dark");
+  const [section,      setSection]      = useState<Section>("dashboard");
+  const [sbOpen,       setSbOpen]       = useState(window.innerWidth >= 768);
+  const [isMobile,     setIsMobile]     = useState(window.innerWidth < 768);
+  const [pendingCount, setPendingCount] = useState(0);
+
+  useEffect(() => {
+    const handleResize = () => {
+      const mobile = window.innerWidth < 768;
+      setIsMobile(mobile);
+      if (!mobile) setSbOpen(true);
+    };
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
+
+  useEffect(() => {
+    getPendingTeachers().then(list => setPendingCount(list.length));
+  }, [section]);
 
   const C      = isDark ? DARK : LIGHT;
   const toggle = () => {
     setIsDark(v => { const next = !v; storeTheme(next?"dark":"light"); return next; });
   };
 
-  const pendingCount = getPendingTeachers().length;
+  const navTo = (s: Section) => {
+    setSection(s);
+    if (isMobile) setSbOpen(false);
+  };
 
   const render = () => {
     switch (section) {
@@ -1546,61 +1624,62 @@ const AdminPanel: React.FC<Props> = ({ onLogout }) => {
   };
 
   return (
-    <ThemeCtx.Provider value={{ C, isDark, toggle }}>
+    <ThemeCtx.Provider value={{ C: C as C, isDark, toggle }}>
       <div style={{ display:"flex", height:"100vh", background:C.bg,
         fontFamily:"system-ui,-apple-system,sans-serif", overflow:"hidden",
-        transition:"background .25s", color:C.txtPri }}>
+        transition:"background .25s", color:C.txtPri, position:"relative" }}>
+
+        {/* ── Mobile backdrop ── */}
+        {isMobile && sbOpen && (
+          <div onClick={() => setSbOpen(false)} style={{
+            position:"fixed", inset:0, background:"rgba(0,0,0,0.55)",
+            zIndex:198, backdropFilter:"blur(2px)",
+          }} />
+        )}
 
         {/* ── Sidebar ── */}
         <aside style={{
-          width: sbOpen ? 240 : 64, minWidth: sbOpen ? 240 : 64,
           background: C.sidebar, borderRight:`1px solid ${C.border}`,
           display:"flex", flexDirection:"column", overflow:"hidden",
-          transition:"width .2s,min-width .2s", flexShrink:0,
           boxShadow:`2px 0 8px ${C.shadow}`,
+          ...(isMobile ? {
+            position:"fixed", top:0, left:0, height:"100vh", zIndex:199,
+            width:240, minWidth:240,
+            transform: sbOpen ? "translateX(0)" : "translateX(-100%)",
+            transition:"transform .25s ease",
+          } : {
+            width: sbOpen ? 240 : 64, minWidth: sbOpen ? 240 : 64,
+            transition:"width .2s,min-width .2s", flexShrink:0,
+          }),
         }}>
           {/* Logo */}
-          <div style={{ padding: sbOpen?"16px 18px":"16px 12px", borderBottom:`1px solid ${C.border}`,
+          <div style={{ padding:"16px 18px", borderBottom:`1px solid ${C.border}`,
             display:"flex", alignItems:"center", justifyContent:"space-between", minHeight:60, gap:8 }}>
             <div style={{ width:34, height:34, borderRadius:10, flexShrink:0,
               background:C.accent, display:"flex", alignItems:"center", justifyContent:"center" }}>
               <Shield size={18} color="white" strokeWidth={2.4} />
             </div>
-            {sbOpen && (
-              <>
-                <div style={{ flex:1, overflow:"hidden" }}>
-                  <div style={{ color:C.txtPri, fontWeight:800, fontSize:13, whiteSpace:"nowrap" }}>VirtualLab</div>
-                  <div style={{ color:C.txtMut, fontSize:10, whiteSpace:"nowrap", fontWeight:600,
-                    textTransform:"uppercase", letterSpacing:0.8 }}>Super Admin</div>
-                </div>
-                <button onClick={() => setSbOpen(false)} style={{
-                  background:"transparent", border:"none", color:C.txtMut,
-                  cursor:"pointer", padding:4, display:"flex", alignItems:"center" }}>
-                  <Menu size={16} strokeWidth={2} />
-                </button>
-              </>
-            )}
+            <div style={{ flex:1, overflow:"hidden" }}>
+              <div style={{ color:C.txtPri, fontWeight:800, fontSize:13, whiteSpace:"nowrap" }}>VirtualLab</div>
+              <div style={{ color:C.txtMut, fontSize:10, whiteSpace:"nowrap", fontWeight:600,
+                textTransform:"uppercase", letterSpacing:0.8 }}>Super Admin</div>
+            </div>
+            <button onClick={() => setSbOpen(false)} style={{
+              background:"transparent", border:"none", color:C.txtMut,
+              cursor:"pointer", padding:4, display:"flex", alignItems:"center", flexShrink:0 }}>
+              <Menu size={16} strokeWidth={2} />
+            </button>
           </div>
 
           {/* Nav */}
           <nav style={{ flex:1, padding:"10px 8px", overflowY:"auto" }}>
-            {!sbOpen && (
-              <button onClick={() => setSbOpen(true)} style={{
-                width:"100%", display:"flex", justifyContent:"center",
-                padding:"10px 0", borderRadius:9, border:"none",
-                background:"transparent", color:C.txtMut, cursor:"pointer", marginBottom:4,
-              }}>
-                <Menu size={17} strokeWidth={2} />
-              </button>
-            )}
             {NAV.map(item => {
               const active  = section === item.id;
               const badgeN  = item.id === "approvals" ? pendingCount : 0;
               return (
-                <button key={item.id} onClick={() => setSection(item.id)} style={{
-                  width:"100%", display:"flex", alignItems:"center",
-                  gap: sbOpen?10:0, justifyContent: sbOpen?"flex-start":"center",
-                  padding: sbOpen?"10px 12px":"11px 0",
+                <button key={item.id} onClick={() => navTo(item.id)} style={{
+                  width:"100%", display:"flex", alignItems:"center", gap:10,
+                  padding:"10px 12px",
                   borderRadius:9, border:"none", cursor:"pointer", marginBottom:3,
                   background: active ? `${C.accent}18` : "transparent",
                   color: active ? C.accent : C.txtSec,
@@ -1619,15 +1698,15 @@ const AdminPanel: React.FC<Props> = ({ onLogout }) => {
                       }}>{badgeN}</span>
                     )}
                   </div>
-                  {sbOpen && <span style={{ whiteSpace:"nowrap", flex:1 }}>{item.label}</span>}
-                  {sbOpen && badgeN > 0 && (
+                  <span style={{ whiteSpace:"nowrap", flex:1, textAlign:"left" }}>{item.label}</span>
+                  {badgeN > 0 && (
                     <span style={{
                       background:"#dc2626", color:"white", borderRadius:10,
                       padding:"1px 7px", fontSize:10, fontWeight:800, flexShrink:0,
                     }}>{badgeN}</span>
                   )}
-                  {active && sbOpen && badgeN === 0 && (
-                    <span style={{ marginLeft:"auto", width:6, height:6, borderRadius:"50%",
+                  {active && badgeN === 0 && (
+                    <span style={{ width:6, height:6, borderRadius:"50%",
                       background:C.accent, flexShrink:0 }} />
                   )}
                 </button>
@@ -1637,18 +1716,16 @@ const AdminPanel: React.FC<Props> = ({ onLogout }) => {
 
           {/* Logout */}
           <div style={{ padding:"10px 8px", borderTop:`1px solid ${C.border}` }}>
-            <button onClick={onLogout} title="Logout"
-              style={{
-                width:"100%", display:"flex", alignItems:"center",
-                gap: sbOpen?10:0, justifyContent: sbOpen?"flex-start":"center",
-                padding: sbOpen?"11px 14px":"11px 0",
-                borderRadius:9, border:`1px solid ${C.red}33`,
-                background:`${C.red}10`, color:C.red, fontSize:13, fontWeight:700, cursor:"pointer",
-              }}
-              onMouseEnter={e => (e.currentTarget.style.background=`${C.red}20`)}
-              onMouseLeave={e => (e.currentTarget.style.background=`${C.red}10`)}>
+            <button onClick={onLogout} title="Logout" style={{
+              width:"100%", display:"flex", alignItems:"center", gap:10,
+              padding:"11px 14px",
+              borderRadius:9, border:`1px solid ${C.red}33`,
+              background:`${C.red}10`, color:C.red, fontSize:13, fontWeight:700, cursor:"pointer",
+            }}
+            onMouseEnter={e => (e.currentTarget.style.background=`${C.red}20`)}
+            onMouseLeave={e => (e.currentTarget.style.background=`${C.red}10`)}>
               <LogOut size={16} strokeWidth={2} />
-              {sbOpen && <span>Logout</span>}
+              <span>Logout</span>
             </button>
           </div>
         </aside>
@@ -1659,58 +1736,67 @@ const AdminPanel: React.FC<Props> = ({ onLogout }) => {
           <header style={{
             height:60, borderBottom:`1px solid ${C.border}`,
             background:C.headerBg, display:"flex", alignItems:"center",
-            justifyContent:"space-between", padding:"0 22px", flexShrink:0,
+            justifyContent:"space-between", padding:"0 16px", flexShrink:0,
             boxShadow:`0 1px 4px ${C.shadow}`,
           }}>
-            <div style={{ display:"flex", alignItems:"center", gap:10 }}>
-              {!sbOpen && (
-                <button onClick={() => setSbOpen(true)} style={{
-                  background:"transparent", border:"none", color:C.txtSec,
-                  cursor:"pointer", display:"flex", alignItems:"center", marginRight:4 }}>
-                  <Menu size={20} strokeWidth={2} />
-                </button>
-              )}
-              <span style={{ color:C.txtMut, fontSize:12 }}>Super Admin</span>
-              <ChevronRight size={14} color={C.txtMut} />
+            <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+              <button onClick={() => setSbOpen(v => !v)} style={{
+                background:"transparent", border:"none", color:C.txtSec,
+                cursor:"pointer", display:"flex", alignItems:"center", padding:4 }}>
+                <Menu size={20} strokeWidth={2} />
+              </button>
+              {!isMobile && <span style={{ color:C.txtMut, fontSize:12 }}>Super Admin</span>}
+              {!isMobile && <ChevronRight size={14} color={C.txtMut} />}
               <span style={{ color:C.txtPri, fontWeight:700, fontSize:14 }}>{LABELS[section]}</span>
             </div>
 
-            <div style={{ display:"flex", alignItems:"center", gap:10 }}>
-              {/* Admin badge */}
-              <div style={{ background:`${C.accent}15`, border:`1px solid ${C.accent}44`,
-                borderRadius:20, padding:"3px 12px", color:C.accent,
-                fontSize:11, fontWeight:700, display:"flex", alignItems:"center", gap:5 }}>
-                <Shield size={11} strokeWidth={2.5} /> Super Admin
-              </div>
-
-              {/* Theme toggle */}
+            <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+              {!isMobile && (
+                <div style={{ background:`${C.accent}15`, border:`1px solid ${C.accent}44`,
+                  borderRadius:20, padding:"3px 12px", color:C.accent,
+                  fontSize:11, fontWeight:700, display:"flex", alignItems:"center", gap:5 }}>
+                  <Shield size={11} strokeWidth={2.5} /> Super Admin
+                </div>
+              )}
               <button onClick={toggle} aria-label="Toggle theme" style={{
-                width:38, height:38, borderRadius:10, cursor:"pointer",
+                width:36, height:36, borderRadius:9, cursor:"pointer",
                 background: isDark ? "#1e1e1e" : "#f1f5f9",
                 border:`1px solid ${C.border2}`,
                 display:"flex", alignItems:"center", justifyContent:"center",
                 color: isDark ? "#f5f5f5" : "#0a0a0a",
-                transition:"background .2s",
               }}>
-                {isDark ? <Sun size={17} strokeWidth={2} /> : <Moon size={17} strokeWidth={2} />}
+                {isDark ? <Sun size={16} strokeWidth={2} /> : <Moon size={16} strokeWidth={2} />}
               </button>
-
-              {/* Avatar */}
               <div style={{ width:34, height:34, borderRadius:"50%",
                 background:C.accent, display:"flex", alignItems:"center",
-                justifyContent:"center", color:"white", fontWeight:800, fontSize:14 }}>
+                justifyContent:"center", flexShrink:0 }}>
                 <Shield size={16} strokeWidth={2.5} color="white" />
               </div>
             </div>
           </header>
 
           {/* Content */}
-          <main style={{ flex:1, overflowY:"auto", padding:"28px 28px 48px",
+          <main style={{ flex:1, overflowY:"auto",
+            padding: isMobile ? "16px 14px 48px" : "28px 28px 48px",
             background:C.bg, transition:"background .25s" }}>
             {render()}
           </main>
         </div>
       </div>
+
+      {/* ── Responsive helpers ── */}
+      <style>{`
+        @media (max-width: 640px) {
+          .ap-table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+          .ap-grid-2col  { grid-template-columns: 1fr !important; }
+          .ap-grid-dash  { grid-template-columns: 1fr !important; }
+          .ap-hide-sm    { display: none !important; }
+          .ap-form-grid  { grid-template-columns: 1fr !important; }
+        }
+        @media (max-width: 900px) {
+          .ap-grid-dash  { grid-template-columns: 1fr !important; }
+        }
+      `}</style>
     </ThemeCtx.Provider>
   );
 };

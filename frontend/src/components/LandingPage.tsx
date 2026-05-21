@@ -116,7 +116,7 @@ const LandingPage: React.FC<Props> = ({ onSignIn, onGetStarted, theme, onToggleT
                 {theme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
               </button>
 
-              <button onClick={onSignIn} style={{
+              <button onClick={onSignIn} className="lp-signin-btn" style={{
                 background: "transparent", border: "none", color: C.pri,
                 padding: "8px 14px", fontSize: 13, fontWeight: 600, cursor: "pointer",
                 borderRadius: 8,
@@ -179,7 +179,7 @@ const LandingPage: React.FC<Props> = ({ onSignIn, onGetStarted, theme, onToggleT
             apparatus, step-by-step protocols, and instant feedback — just like a real pharmacy lab.
           </p>
 
-          <div style={{ display: "flex", gap: 10, justifyContent: "center", flexWrap: "wrap" }}>
+          <div className="lp-hero-btns" style={{ display: "flex", gap: 10, justifyContent: "center", flexWrap: "wrap" }}>
             <button onClick={onGetStarted} style={{
               background: C.green, color: "white", border: "none",
               padding: "14px 28px", fontSize: 15, fontWeight: 700, cursor: "pointer",
@@ -201,7 +201,7 @@ const LandingPage: React.FC<Props> = ({ onSignIn, onGetStarted, theme, onToggleT
           </div>
 
           {/* Trust line */}
-          <div style={{ display: "flex", gap: 24, justifyContent: "center",
+          <div className="lp-trust-row" style={{ display: "flex", gap: 24, justifyContent: "center",
             marginTop: 40, flexWrap: "wrap" }}>
             {[
               "No installation required",
@@ -454,7 +454,7 @@ const LandingPage: React.FC<Props> = ({ onSignIn, onGetStarted, theme, onToggleT
           ═══════════════════════════════════════════════════════════════════ */}
       <section style={{ padding: "70px 0" }}>
         <Container>
-          <div style={{
+          <div className="lp-stats-grid" style={{
             display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px,1fr))",
             gap: 18, textAlign: "center",
           }}>
@@ -508,7 +508,7 @@ const LandingPage: React.FC<Props> = ({ onSignIn, onGetStarted, theme, onToggleT
                 No downloads, no setup — just sign up and start practicing.
               </p>
 
-              <div style={{ display: "flex", gap: 10, justifyContent: "center", flexWrap: "wrap" }}>
+              <div className="lp-cta-btns" style={{ display: "flex", gap: 10, justifyContent: "center", flexWrap: "wrap" }}>
                 <button onClick={onGetStarted} style={{
                   background: C.green, color: "white", border: "none",
                   padding: "14px 30px", fontSize: 15, fontWeight: 700, cursor: "pointer",
@@ -535,7 +535,7 @@ const LandingPage: React.FC<Props> = ({ onSignIn, onGetStarted, theme, onToggleT
           ═══════════════════════════════════════════════════════════════════ */}
       <footer style={{ borderTop: `1px solid ${C.border}`, padding: "32px 0" }}>
         <Container>
-          <div style={{ display: "flex", justifyContent: "space-between",
+          <div className="lp-footer-row" style={{ display: "flex", justifyContent: "space-between",
             alignItems: "center", flexWrap: "wrap", gap: 12 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
               <div style={{
@@ -557,9 +557,19 @@ const LandingPage: React.FC<Props> = ({ onSignIn, onGetStarted, theme, onToggleT
       {/* Inline responsive helpers */}
       <style>{`
         @media (max-width: 760px) {
-          .lp-nav-links { display: none !important; }
-          .lp-about-grid { grid-template-columns: 1fr !important; gap: 36px !important; }
-          .lp-howit-grid { grid-template-columns: 1fr !important; }
+          .lp-nav-links   { display: none !important; }
+          .lp-about-grid  { grid-template-columns: 1fr !important; gap: 32px !important; }
+          .lp-howit-grid  { grid-template-columns: 1fr !important; gap: 16px !important; }
+          .lp-hero-btns   { flex-direction: column !important; align-items: stretch !important; }
+          .lp-hero-btns button { justify-content: center !important; }
+          .lp-cta-btns    { flex-direction: column !important; align-items: stretch !important; }
+          .lp-cta-btns button { justify-content: center !important; }
+          .lp-trust-row   { gap: 12px !important; justify-content: flex-start !important; }
+          .lp-footer-row  { flex-direction: column !important; align-items: flex-start !important; gap: 8px !important; }
+          .lp-signin-btn  { display: none !important; }
+        }
+        @media (max-width: 480px) {
+          .lp-stats-grid  { grid-template-columns: 1fr 1fr !important; }
         }
       `}</style>
     </div>

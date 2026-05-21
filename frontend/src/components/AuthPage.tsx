@@ -151,33 +151,33 @@ const AuthPage: React.FC<Props> = ({
     clearForm();
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
     setLoading(true);
 
-    setTimeout(() => {
-      const result =
-        mode === "signup"
-          ? registerUser({ role, fullName, email, password, regNumber })
-          : loginUser(email, password);
+    try {
+      const result = mode === "signup"
+        ? await registerUser({ role, fullName, email, password, regNumber })
+        : await loginUser(email, password);
 
       if (!result.ok) {
         setError(result.error ?? "Something went wrong. Please try again.");
-        setLoading(false);
         return;
       }
 
-      // Teacher self-registration → pending approval screen (not logged in yet)
       if (result.pending) {
         setPendingName(result.user!.fullName);
         setPendingApproval(true);
-        setLoading(false);
         return;
       }
 
       onAuth(result.user!);
-    }, 400);
+    } catch (err: unknown) {
+      setError((err as Error).message ?? "Something went wrong. Please try again.");
+    } finally {
+      setLoading(false);
+    }
   };
 
   const passOk = password.length >= 6;

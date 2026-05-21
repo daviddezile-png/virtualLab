@@ -1,108 +1,104 @@
-const express = require('express');
-const mongoose = require('mongoose');
-const cors = require('cors');
-const helmet = require('helmet');
-const morgan = require('morgan');
-const rateLimit = require('express-rate-limit');
 require('dotenv').config();
 
-// Import routes
-const authRoutes = require('./routes/auth');
-const loggingRoutes = require('./routes/logging');
-const reportsRoutes = require('./routes/reports');
+const express   = require('express');
+const cors      = require('cors');
+const helmet    = require('helmet');
+const morgan    = require('morgan');
+const rateLimit = require('express-rate-limit');
 
-// Import middleware
+const connectDB = require('./config/db');
+
+// ── Routes ────────────────────────────────────────────────────────────────────
+const authRoutes          = require('./routes/auth');
+const usersRoutes         = require('./routes/users');
+const assignmentsRoutes   = require('./routes/assignments');
+const submissionsRoutes   = require('./routes/submissions');
+const qaRoutes            = require('./routes/qa');
+const announcementsRoutes = require('./routes/announcements');
+const auditRoutes         = require('./routes/audit');
+
+// ── Middleware ────────────────────────────────────────────────────────────────
 const errorHandler = require('./middleware/errorHandler');
-const requestLogger = require('./middleware/requestLogger');
 
-const app = express();
-const PORT = process.env.PORT || 3001;
+const app  = express();
+const PORT = process.env.PORT || 3543;
 
-// Security middleware
+// ── Security ──────────────────────────────────────────────────────────────────
 app.use(helmet());
 
-// CORS configuration
 app.use(cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:3000',
-  credentials: true
+  origin:      process.env.FRONTEND_URL || 'http://localhost:3002',
+  credentials: true,
 }));
 
-// Rate limiting
-const limiter = rateLimit({
-  windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000, // 15 minutes
-  max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || 100, // limit each IP to 100 requests per windowMs
-  message: 'Too many requests from this IP, please try again later.'
-});
-app.use('/api/', limiter);
+app.use(rateLimit({
+  windowMs: 15 * 60 * 1000,   // 15 minutes
+  max:      200,
+  message:  'Too many requests — please try again later.',
+}));
 
-// Body parsing middleware
+// ── Body parsing ──────────────────────────────────────────────────────────────
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// Logging middleware
-app.use(morgan('combined'));
-app.use(requestLogger);
+// ── Request logging (development only) ───────────────────────────────────────
+if (process.env.NODE_ENV !== 'production') {
+  app.use(morgan('dev'));
+}
 
-// Health check endpoint
+// ── Health check ──────────────────────────────────────────────────────────────
 app.get('/health', (req, res) => {
-  res.status(200).json({
-    status: 'OK',
-    timestamp: new Date().toISOString(),
-    uptime: process.uptime(),
-    environment: process.env.NODE_ENV || 'development'
+  const { readyState } = require('mongoose').connection;
+  const dbStatus = ['disconnected', 'connected', 'connecting', 'disconnecting'][readyState];
+  res.json({
+    status:      'OK',
+    database:    dbStatus,
+    environment: process.env.NODE_ENV || 'development',
+    uptime:      Math.round(process.uptime()),
+    timestamp:   new Date().toISOString(),
   });
 });
 
-// API routes
-app.use('/api/auth', authRoutes);
-app.use('/api/log', loggingRoutes);
-app.use('/api/reports', reportsRoutes);
+// ── API routes ────────────────────────────────────────────────────────────────
+app.use('/api/auth',          authRoutes);
+app.use('/api/users',         usersRoutes);
+app.use('/api/assignments',   assignmentsRoutes);
+app.use('/api/submissions',   submissionsRoutes);
+app.use('/api/qa',            qaRoutes);
+app.use('/api/announcements', announcementsRoutes);
+app.use('/api/audit',         auditRoutes);
 
-// 404 handler
+// ── 404 ───────────────────────────────────────────────────────────────────────
 app.use('*', (req, res) => {
   res.status(404).json({
-    error: 'Route not found',
+    error:   'Route not found',
     message: `Cannot ${req.method} ${req.originalUrl}`,
-    timestamp: new Date().toISOString()
   });
 });
 
-// Global error handler
+// ── Global error handler ──────────────────────────────────────────────────────
 app.use(errorHandler);
 
-// Database connection
-mongoose.connect(process.env.MONGODB_URI , {
-  useNewUrlParser: true,
-  useUnifiedTopology: true,
-})
-.then(() => {
-  console.log('✅ Connected to MongoDB');
-})
-.catch((error) => {
-  console.error('❌ MongoDB connection error:', error);
-  process.exit(1);
-});
+// ── Connect to MongoDB then start server ──────────────────────────────────────
+connectDB().then(() => {
+  const server = app.listen(PORT, () => {
+    console.log(`\n🚀 Server running on http://localhost:${PORT}`);
+    console.log(`📋 Health:  http://localhost:${PORT}/health`);
+    console.log(`🔗 API:     http://localhost:${PORT}/api\n`);
+  });
 
-// Graceful shutdown
-process.on('SIGTERM', async () => {
-  console.log('SIGTERM received, shutting down gracefully');
-  await mongoose.connection.close();
-  console.log('MongoDB connection closed');
-  process.exit(0);
-});
+  // ── Graceful shutdown ──────────────────────────────────────────────────────
+  const shutdown = async (signal) => {
+    console.log(`\n${signal} received — shutting down gracefully`);
+    server.close(async () => {
+      await require('mongoose').connection.close();
+      console.log('MongoDB connection closed');
+      process.exit(0);
+    });
+  };
 
-process.on('SIGINT', async () => {
-  console.log('SIGINT received, shutting down gracefully');
-  await mongoose.connection.close();
-  console.log('MongoDB connection closed');
-  process.exit(0);
-});
-
-// Start server
-const server = app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
-  console.log(`📊 Health check: http://localhost:${PORT}/health`);
-  console.log(`🔗 API base: http://localhost:${PORT}/api`);
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
+  process.on('SIGINT',  () => shutdown('SIGINT'));
 });
 
 module.exports = app;

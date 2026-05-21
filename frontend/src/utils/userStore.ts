@@ -1,201 +1,148 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// User store — localStorage now, ready for backend swap later
+// User store — now backed by MongoDB via REST API
+// JWT token stored in localStorage (vlab_token)
+// Current user object cached in localStorage (vlab_current_user) for routing
 // ─────────────────────────────────────────────────────────────────────────────
-import { logUserRegistered, logUserLogin } from "./auditStore";
+import { apiGet, apiPost, apiPatch, apiDelete } from "./apiClient";
 
 export type Role       = "admin" | "teacher" | "student";
 export type UserStatus = "active" | "pending" | "rejected";
 
 export interface User {
-  id:           string;
+  id?:          string;      // MongoDB _id
+  clientId:     string;      // e.g. "u1716000000-abc12"
   role:         Role;
   fullName:     string;
   email:        string;
-  regNumber?:   string;      // students only
-  passwordHash: string;
-  createdAt:    string;
-  seeded?:      boolean;     // true for the default admin — cannot be deleted
-  status?:      UserStatus;  // undefined treated as "active" for backward compat
+  regNumber?:   string | null;
+  status?:      UserStatus;
+  suspended?:   boolean;
+  seeded?:      boolean;
+  createdAt?:   string;
+  lastLogin?:   string;
 }
 
-const USERS_KEY   = "vlab_users";
+export interface AuthResult {
+  ok:       boolean;
+  error?:   string;
+  user?:    User;
+  pending?: boolean;
+}
+
+export interface RegisterInput {
+  role:         "teacher" | "student";
+  fullName:     string;
+  email:        string;
+  password:     string;
+  regNumber?:   string;
+  forceActive?: boolean;
+}
+
+// ── Theme (stays in localStorage — user preference only) ─────────────────────
+export type ThemeMode = "light" | "dark";
+const THEME_KEY = "vlab_theme";
+
+export const getStoredTheme = (): ThemeMode => {
+  const v = localStorage.getItem(THEME_KEY);
+  return v === "dark" ? "dark" : "light";
+};
+export const storeTheme = (mode: ThemeMode): void =>
+  localStorage.setItem(THEME_KEY, mode);
+
+// ── Session cache (localStorage) ─────────────────────────────────────────────
+const TOKEN_KEY   = "vlab_token";
 const SESSION_KEY = "vlab_current_user";
-const THEME_KEY   = "vlab_theme";
-
-// Tiny deterministic hash — replace with bcrypt when backend is wired up
-const hash = (s: string): string => {
-  let h = 0;
-  for (let i = 0; i < s.length; i++) {
-    h = ((h << 5) - h) + s.charCodeAt(i);
-    h |= 0;
-  }
-  return `h${Math.abs(h).toString(36)}`;
-};
-
-// ── Read ──────────────────────────────────────────────────────────────────────
-export const getAllUsers = (): User[] => {
-  try { return JSON.parse(localStorage.getItem(USERS_KEY) ?? "[]"); }
-  catch { return []; }
-};
-
-export const findUserByEmail = (email: string): User | null =>
-  getAllUsers().find(u => u.email.toLowerCase() === email.toLowerCase().trim()) ?? null;
 
 export const getCurrentUser = (): User | null => {
   try { return JSON.parse(localStorage.getItem(SESSION_KEY) ?? "null"); }
   catch { return null; }
 };
 
-// ── Write ─────────────────────────────────────────────────────────────────────
-const persistUsers = (users: User[]) =>
-  localStorage.setItem(USERS_KEY, JSON.stringify(users));
-
-const persistSession = (user: User | null) => {
-  if (user) localStorage.setItem(SESSION_KEY, JSON.stringify(user));
-  else      localStorage.removeItem(SESSION_KEY);
+const saveSession = (user: User, token: string) => {
+  localStorage.setItem(TOKEN_KEY,   token);
+  localStorage.setItem(SESSION_KEY, JSON.stringify(user));
 };
 
-// ── Seeded default admin ──────────────────────────────────────────────────────
-// Called once on app startup. Creates the primary admin if they don't exist yet.
-// Credentials are hardcoded here — change them in the admin settings later.
-const SEED_ADMIN: { fullName:string; email:string; password:string } = {
-  fullName: "Baraka Mahuvi",
-  email:    "barakamahuvi99@gmail.com",
-  password: "Shazam@255",
+export const logoutUser = (): void => {
+  localStorage.removeItem(TOKEN_KEY);
+  localStorage.removeItem(SESSION_KEY);
 };
 
-export const seedDefaultAdmin = (): void => {
-  const existing = getAllUsers().find(u => u.role === "admin");
-  if (existing) return;   // admin already exists — skip
+// Called once at app startup — no-op now (admin seeded via backend script)
+export const seedDefaultAdmin = (): void => { /* handled by backend */ };
 
-  const seededAdmin: User = {
-    id:           "admin-seed-001",
-    role:         "admin",
-    fullName:     SEED_ADMIN.fullName,
-    email:        SEED_ADMIN.email,
-    passwordHash: hash(SEED_ADMIN.password),
-    createdAt:    new Date().toISOString(),
-    seeded:       true,
-  };
-
-  persistUsers([seededAdmin, ...getAllUsers()]);
+// ── Auth ──────────────────────────────────────────────────────────────────────
+export const registerUser = async (input: RegisterInput): Promise<AuthResult> => {
+  try {
+    const res = await apiPost<{ token?: string; user?: User; pending?: boolean; message?: string; error?: string }>(
+      "/api/auth/register", input
+    );
+    if (res.pending) return { ok: true, user: res.user, pending: true };
+    if (res.token && res.user) {
+      saveSession(res.user, res.token);
+      return { ok: true, user: res.user };
+    }
+    return { ok: false, error: res.error ?? "Registration failed" };
+  } catch (err: unknown) {
+    return { ok: false, error: (err as Error).message };
+  }
 };
 
-// ── Auth API (teacher + student only — admins are seeded or created internally)
-// pending: true means the teacher registered but is awaiting admin approval (not logged in)
-export interface AuthResult { ok: boolean; error?: string; user?: User; pending?: boolean; }
-
-export interface RegisterInput {
-  role:         "teacher" | "student";   // admins cannot self-register
-  fullName:     string;
-  email:        string;
-  password:     string;
-  regNumber?:   string;
-  forceActive?: boolean;  // set true when admin/teacher creates account on behalf of user
-}
-
-export const registerUser = (input: RegisterInput): AuthResult => {
-  const fullName = input.fullName.trim();
-  const email    = input.email.trim().toLowerCase();
-  if (!fullName) return { ok: false, error: "Full name is required" };
-  if (!email)    return { ok: false, error: "Email is required" };
-  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email))
-    return { ok: false, error: "Please enter a valid email" };
-  if (input.password.length < 6)
-    return { ok: false, error: "Password must be at least 6 characters" };
-  if (input.role === "student" && !input.regNumber?.trim())
-    return { ok: false, error: "Registration number is required" };
-  if (findUserByEmail(email))
-    return { ok: false, error: "An account with this email already exists" };
-
-  // Teachers who self-register go into "pending" until admin approves.
-  // forceActive bypasses this (used when admin/teacher creates an account for someone).
-  const status: UserStatus =
-    input.role === "teacher" && !input.forceActive ? "pending" : "active";
-
-  const newUser: User = {
-    id:           `u${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-    role:         input.role,
-    fullName,
-    email,
-    regNumber:    input.role === "student" ? input.regNumber!.trim() : undefined,
-    passwordHash: hash(input.password),
-    createdAt:    new Date().toISOString(),
-    status,
-  };
-
-  persistUsers([...getAllUsers(), newUser]);
-  // Pending teachers are NOT logged in — they must wait for admin approval
-  if (status === "active") persistSession(newUser);
-  logUserRegistered(newUser.id, newUser.fullName, newUser.role);
-  return { ok: true, user: newUser, pending: status === "pending" };
+export const loginUser = async (email: string, password: string): Promise<AuthResult> => {
+  try {
+    const res = await apiPost<{ token?: string; user?: User; error?: string }>(
+      "/api/auth/login", { email, password }
+    );
+    if (res.token && res.user) {
+      saveSession(res.user, res.token);
+      return { ok: true, user: res.user };
+    }
+    return { ok: false, error: res.error ?? "Login failed" };
+  } catch (err: unknown) {
+    return { ok: false, error: (err as Error).message };
+  }
 };
 
-export const loginUser = (email: string, password: string): AuthResult => {
-  const user = findUserByEmail(email);
-  if (!user)                                return { ok: false, error: "No account found with that email" };
-  if (user.passwordHash !== hash(password)) return { ok: false, error: "Incorrect password" };
-  const status = user.status ?? "active";
-  if (status === "pending")
-    return { ok: false, error: "Your account is awaiting admin approval. You will be notified when access is granted." };
-  if (status === "rejected")
-    return { ok: false, error: "Your account registration has been rejected. Please contact your administrator." };
-  persistSession(user);
-  logUserLogin(user.id, user.fullName, user.role);
-  return { ok: true, user };
+// ── User management (admin) ───────────────────────────────────────────────────
+export const getAllUsers = async (): Promise<User[]> => {
+  try {
+    const res = await apiGet<{ users: User[] }>("/api/users");
+    return res.users;
+  } catch { return []; }
 };
 
-// ── Teacher approval (admin-only) ─────────────────────────────────────────────
-export const getPendingTeachers = (): User[] =>
-  getAllUsers().filter(u => u.role === "teacher" && (u.status ?? "active") === "pending");
-
-export const approveTeacher = (id: string): void => {
-  persistUsers(getAllUsers().map(u =>
-    u.id === id ? { ...u, status: "active" as UserStatus } : u
-  ));
+export const getPendingTeachers = async (): Promise<User[]> => {
+  try {
+    const res = await apiGet<{ users: User[] }>("/api/users/pending-teachers");
+    return res.users;
+  } catch { return []; }
 };
 
-export const rejectTeacher = (id: string): void => {
-  persistUsers(getAllUsers().map(u =>
-    u.id === id ? { ...u, status: "rejected" as UserStatus } : u
-  ));
+export const createAdminUser = async (
+  fullName: string, email: string, password: string
+): Promise<AuthResult> => {
+  try {
+    const res = await apiPost<{ user?: User; error?: string }>(
+      "/api/users", { role: "admin", fullName, email, password, forceActive: true }
+    );
+    return res.user ? { ok: true, user: res.user } : { ok: false, error: res.error };
+  } catch (err: unknown) {
+    return { ok: false, error: (err as Error).message };
+  }
 };
 
-// ── Admin-only: create another admin account (called from inside AdminPanel) ──
-export const createAdminUser = (
-  fullName: string, email: string, password: string,
-): AuthResult => {
-  const clean = email.trim().toLowerCase();
-  if (!fullName.trim())        return { ok: false, error: "Full name is required" };
-  if (!clean)                  return { ok: false, error: "Email is required" };
-  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(clean))
-                               return { ok: false, error: "Invalid email address" };
-  if (password.length < 6)     return { ok: false, error: "Password must be at least 6 characters" };
-  if (findUserByEmail(clean))  return { ok: false, error: "An account with this email already exists" };
-
-  const newAdmin: User = {
-    id:           `admin-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-    role:         "admin",
-    fullName:     fullName.trim(),
-    email:        clean,
-    passwordHash: hash(password),
-    createdAt:    new Date().toISOString(),
-  };
-
-  persistUsers([...getAllUsers(), newAdmin]);
-  logUserRegistered(newAdmin.id, newAdmin.fullName, "admin");
-  return { ok: true, user: newAdmin };
+export const approveTeacher = async (clientId: string): Promise<void> => {
+  await apiPatch(`/api/users/${clientId}/approve`);
 };
 
-export const logoutUser = (): void => persistSession(null);
-
-// ── Theme persistence ─────────────────────────────────────────────────────────
-export type ThemeMode = "light" | "dark";
-
-export const getStoredTheme = (): ThemeMode => {
-  const v = localStorage.getItem(THEME_KEY);
-  return v === "dark" ? "dark" : "light";
+export const rejectTeacher = async (clientId: string): Promise<void> => {
+  await apiPatch(`/api/users/${clientId}/reject`);
 };
 
-export const storeTheme = (mode: ThemeMode): void =>
-  localStorage.setItem(THEME_KEY, mode);
+export const deleteUserById = async (clientId: string): Promise<void> => {
+  await apiDelete(`/api/users/${clientId}`);
+};
+
+export const toggleSuspend = async (clientId: string): Promise<void> => {
+  await apiPatch(`/api/users/${clientId}/suspend`);
+};

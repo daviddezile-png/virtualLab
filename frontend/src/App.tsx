@@ -12,15 +12,13 @@ import AuthPage from "./components/AuthPage";
 import StudentQAPanel from "./components/StudentQAPanel";
 import { Assignment, getOrSetTimerStart } from "./utils/assignmentStore";
 import { logLabStarted, logCodeEntered } from "./utils/auditStore";
-import { getAllSubmissions, LabSubmission } from "./utils/submissionStore";
+import { getAllSubmissions } from "./utils/submissionStore";
+import type { LabSubmission } from "./utils/submissionStore";
 import { getQuestionsForPractical } from "./utils/qaStore";
 import {
-  User, getCurrentUser, logoutUser, seedDefaultAdmin,
+  User, getCurrentUser, logoutUser,
   ThemeMode, getStoredTheme, storeTheme,
 } from "./utils/userStore";
-
-// Ensure the seeded admin account exists before any render
-seedDefaultAdmin();
 import "./App.css";
 
 type AppState = "landing" | "auth" | "selection" | "pre-lab" | "lab" | "teacher" | "admin";
@@ -61,16 +59,21 @@ function App() {
   const [showQAPanel,       setShowQAPanel]       = useState(false);
   const currentStep = SimulationStep.SELECTION;
 
-  // Latest submission for this session (for linking Q&A answers)
-  const getLatestSubmission = (): LabSubmission | null => {
-    if (!user) return null;
-    const subs = getAllSubmissions()
-      .filter(s => s.studentId === user.id && s.practicalId === selectedPractical)
-      .sort((a, b) => new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime());
-    return subs[0] ?? null;
-  };
+  const [latestSubmission,  setLatestSubmission]  = useState<LabSubmission | null>(null);
+  const [hasQAQuestions,    setHasQAQuestions]    = useState(false);
 
-  const hasQAQuestions = getQuestionsForPractical(selectedPractical).length > 0;
+  // Reload latest submission and Q&A availability whenever practical or appState changes
+  useEffect(() => {
+    if (appState !== "lab" || !user) return;
+    const uid = (user as User & { clientId?: string }).clientId ?? user.id ?? "";
+    getAllSubmissions().then(subs => {
+      const match = subs
+        .filter(s => s.studentId === uid && s.practicalId === selectedPractical)
+        .sort((a, b) => new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime());
+      setLatestSubmission(match[0] ?? null);
+    });
+    getQuestionsForPractical(selectedPractical).then(qs => setHasQAQuestions(qs.length > 0));
+  }, [appState, selectedPractical, user]);
 
   useEffect(() => {
     const sync = () => setUser(getCurrentUser());
@@ -287,7 +290,7 @@ function App() {
         <StudentQAPanel
           practicalId={selectedPractical}
           currentUser={user}
-          submission={getLatestSubmission()}
+          submission={latestSubmission}
           onClose={() => setShowQAPanel(false)}
         />
       )}
