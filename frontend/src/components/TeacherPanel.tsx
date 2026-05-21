@@ -12,7 +12,7 @@ import {
   Assignment, PracticalId, BASE_RECIPES,
   getAllAssignments, saveAssignment, deleteAssignment, generateToken, isCodeExpired,
 } from "../utils/assignmentStore";
-import { getAllUsers, registerUser, deleteUserById, User as StoreUser } from "../utils/userStore";
+import { getStudents, getUserCounts, registerUser, User as StoreUser } from "../utils/userStore";
 import { getAllSubmissions, getStats, LabSubmission, StatsResult } from "../utils/submissionStore";
 import {
   getAllQuestions, saveQuestion, deleteQuestion,
@@ -345,7 +345,7 @@ const Dashboard: React.FC = () => {
         new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime()
       ))
     );
-    getAllUsers().then(us => setStudents(us.filter(u => u.role === "student")));
+    getStudents().then(users => setStudents(users.filter(u => u.role === "student")));
   }, []);
 
   const quickActions = [
@@ -1314,7 +1314,8 @@ const Students: React.FC = () => {
   const [allStudents, setAllStudents] = useState<StoreUser[]>([]);
 
   useEffect(() => {
-    getAllUsers().then(us => setAllStudents(us.filter(u => u.role === "student")));
+    // role guard: even if the API ever misbehaved, never show non-students here
+    getStudents().then(users => setAllStudents(users.filter(u => u.role === "student")));
   }, [refresh]);
 
   const filtered = allStudents.filter(u =>
@@ -1322,11 +1323,6 @@ const Students: React.FC = () => {
     u.email.toLowerCase().includes(search.toLowerCase()) ||
     (u.regNumber ?? "").toLowerCase().includes(search.toLowerCase())
   );
-
-  const removeStudent = async (clientId: string) => {
-    await deleteUserById(clientId);
-    setRefresh(r => r + 1);
-  };
 
   const resetForm = () => {
     setNewName(""); setNewEmail(""); setNewReg(""); setNewPass(""); setAddError(null);
@@ -1483,17 +1479,9 @@ const Students: React.FC = () => {
                     {new Date(u.createdAt ?? "").toLocaleDateString()}
                   </td>
                   <td style={{ padding:"12px 14px" }}>
-                    <div style={{ display:"flex", gap:6 }}>
-                      <span style={{ background:`${C.green}12`, border:`1px solid ${C.green}44`,
-                        color:C.green, borderRadius:20, padding:"2px 10px",
-                        fontSize:11, fontWeight:700 }}>Active</span>
-                      <button onClick={() => removeStudent(u.clientId)}
-                        style={{ background:"rgba(239,68,68,0.1)", border:"none", color:"#f87171",
-                          borderRadius:6, padding:"5px 8px", cursor:"pointer",
-                          display:"flex", alignItems:"center" }}>
-                        <Trash2 size={13} strokeWidth={2} />
-                      </button>
-                    </div>
+                    <span style={{ background:`${C.green}12`, border:`1px solid ${C.green}44`,
+                      color:C.green, borderRadius:20, padding:"2px 10px",
+                      fontSize:11, fontWeight:700 }}>Active</span>
                   </td>
                 </tr>
               ))}
@@ -1846,7 +1834,7 @@ const Announcements: React.FC = () => {
 
   const send = async () => {
     if (!title.trim() || !body.trim()) return;
-    const students = await getAllUsers().then(us => us.filter(u => u.role === "student"));
+    const students = await getStudents();
     const a: StoredAnnouncement = {
       title:  title.trim(),
       body:   body.trim(),

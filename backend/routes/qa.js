@@ -66,8 +66,8 @@ router.get('/answers', requireRole('teacher', 'admin'), async (req, res) => {
   }
 });
 
-// ── POST /api/qa/answers ── student submits answers ───────────────────────────
-router.post('/answers', [
+// ── POST /api/qa/answers ── only students can submit answers ─────────────────
+router.post('/answers', requireRole('student'), [
   body('answers').isArray({ min: 1 }),
   body('practicalId').isIn(['vanishing-cream', 'cold-cream']),
 ], async (req, res) => {

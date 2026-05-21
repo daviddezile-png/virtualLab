@@ -43,7 +43,7 @@ router.post('/register', [
       passwordHash, status,
     });
 
-    // Pending teachers are NOT given a token — they must wait for approval
+    // Pending teachers wait for approval — no token issued
     if (status === 'pending') {
       return res.status(201).json({
         pending: true,
@@ -52,6 +52,13 @@ router.post('/register', [
       });
     }
 
+    // forceActive means an admin/teacher created this account on behalf of someone else.
+    // Return the user but NO token so the caller's session is never overwritten.
+    if (forceActive) {
+      return res.status(201).json({ created: true, user: user.toPublicJSON() });
+    }
+
+    // Normal self-registration — issue a token so the user is logged in immediately
     return res.status(201).json({
       token: signToken(user),
       user:  user.toPublicJSON(),

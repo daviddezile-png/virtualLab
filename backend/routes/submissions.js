@@ -7,15 +7,23 @@ const router = express.Router();
 router.use(authenticate);
 
 // ── GET /api/submissions ──────────────────────────────────────────────────────
-// Students see only their own; teachers & admins see all
+// Students → own submissions only
+// Teachers → all student submissions (never teachers/admins)
+// Admins   → everything, with optional studentId filter
 router.get('/', async (req, res) => {
   try {
     const { practicalId, result, mode, studentId } = req.query;
     const query = {};
 
     if (req.user.role === 'student') {
+      // Students can only see their own
       query.studentId = req.user.id;
+    } else if (req.user.role === 'teacher') {
+      // Teachers see all student submissions — never teacher/admin submissions
+      query.submitterRole = { $ne: 'teacher' };   // defence-in-depth
+      if (studentId) query.studentId = studentId; // optional filter by specific student
     } else if (studentId) {
+      // Admin with optional filter
       query.studentId = studentId;
     }
 
@@ -30,7 +38,7 @@ router.get('/', async (req, res) => {
   }
 });
 
-// ── GET /api/submissions/stats ─── summary statistics ─────────────────────────
+// ── GET /api/submissions/stats ─────────────────────────────────────────────────
 router.get('/stats', requireRole('teacher', 'admin'), async (req, res) => {
   try {
     const stats = await Submission.getStats();
@@ -40,8 +48,8 @@ router.get('/stats', requireRole('teacher', 'admin'), async (req, res) => {
   }
 });
 
-// ── POST /api/submissions ─── save an evaluation result ──────────────────────
-router.post('/', [
+// ── POST /api/submissions ── only students can submit lab evaluations ──────────
+router.post('/', requireRole('student'), [
   body('practicalId').isIn(['vanishing-cream', 'cold-cream']),
   body('mode').isIn(['assignment', 'practice']),
   body('result').isIn(['PASS', 'AVERAGE', 'FAIL']),
@@ -54,7 +62,7 @@ router.post('/', [
   try {
     const { clientId } = req.body;
 
-    // Idempotent: if the same clientId already exists, return it
+    // Idempotent: same clientId already saved → return it
     if (clientId) {
       const existing = await Submission.findOne({ clientId });
       if (existing) return res.status(200).json({ submission: existing });
@@ -62,9 +70,10 @@ router.post('/', [
 
     const submission = await Submission.create({
       ...req.body,
-      studentId:   req.user.id,
-      studentName: req.body.studentName || '',
-      synced:      true,
+      studentId:     req.user.id,           // always from JWT — never trust body
+      studentName:   req.body.studentName || '',
+      submitterRole: req.user.role,         // stored so teacher queries can filter
+      synced:        true,
     });
 
     res.status(201).json({ submission });

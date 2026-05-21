@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { SimulationStep } from "./simulation/model/types";
 import InteractiveLabCanvas from "./components/InteractiveLabCanvas";
 import LabSelection from "./components/LabSelection";
@@ -20,6 +20,17 @@ import {
   ThemeMode, getStoredTheme, storeTheme,
 } from "./utils/userStore";
 import "./App.css";
+
+// ── One-time migration: remove old localStorage keys from the localStorage era ─
+const OLD_KEYS = [
+  "vlab_users", "vlab_submissions", "vlab_assignments",
+  "vlab_qa_questions", "vlab_qa_answers", "vlab_announcements",
+  "vlab_audit_log", "vlab_suspended", "vlab_sessions",
+];
+if (!localStorage.getItem("vlab_migrated_v2")) {
+  OLD_KEYS.forEach(k => localStorage.removeItem(k));
+  localStorage.setItem("vlab_migrated_v2", "1");
+}
 
 type AppState = "landing" | "auth" | "selection" | "pre-lab" | "lab" | "teacher" | "admin";
 
@@ -65,7 +76,7 @@ function App() {
   // Reload latest submission and Q&A availability whenever practical or appState changes
   useEffect(() => {
     if (appState !== "lab" || !user) return;
-    const uid = (user as User & { clientId?: string }).clientId ?? user.id ?? "";
+    const uid = (user as User).clientId ?? "";
     getAllSubmissions().then(subs => {
       const match = subs
         .filter(s => s.studentId === uid && s.practicalId === selectedPractical)
