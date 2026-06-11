@@ -1,6 +1,7 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { findAssignment, isCodeExpired, Assignment } from "../utils/assignmentStore";
 import { getCurrentUser, logoutUser } from "../utils/userStore";
+import { isInviteCode, redeemClassInvite, getMyTeacher } from "../utils/classInviteStore";
 
 interface Practical {
   id: string;
@@ -43,18 +44,12 @@ const PRACTICALS: Practical[] = [
     accentColor: "#3b82f6",
     icon: (
       <svg width="80" height="80" viewBox="0 0 80 80">
-        {/* Jar body */}
         <rect x="14" y="34" width="52" height="38" rx="7" fill="rgba(200,220,255,0.10)" stroke="#3b82f6" strokeWidth="1.8"/>
-        {/* Lid */}
         <rect x="12" y="28" width="56" height="10" rx="4" fill="#1d4ed8" stroke="#3b82f6" strokeWidth="1.4"/>
-        {/* Cream fill */}
         <rect x="15" y="42" width="50" height="29" rx="5" fill="rgba(245,240,232,0.88)"/>
-        {/* Shine */}
         <rect x="18" y="44" width="42" height="6" rx="3" fill="rgba(255,255,255,0.55)"/>
-        {/* Label */}
         <rect x="20" y="54" width="40" height="13" rx="3" fill="white"/>
         <text x="40" y="63" textAnchor="middle" fontSize="5.5" fontWeight="bold" fill="#1d4ed8">VANISHING CREAM</text>
-        {/* Steam */}
         <path d="M30 24 Q32 19 34 24 Q36 19 38 24" fill="none" stroke="rgba(147,197,253,0.55)" strokeWidth="1.4" strokeLinecap="round"/>
       </svg>
     ),
@@ -88,7 +83,6 @@ const PRACTICALS: Practical[] = [
         <rect x="18" y="44" width="42" height="5" rx="2" fill="rgba(255,255,255,0.38)"/>
         <rect x="20" y="54" width="40" height="13" rx="3" fill="white"/>
         <text x="40" y="63" textAnchor="middle" fontSize="5.5" fontWeight="bold" fill="#6d28d9">COLD CREAM</text>
-        {/* Coming soon lock */}
         <circle cx="62" cy="18" r="13" fill="rgba(15,23,42,0.88)" stroke="#8b5cf6" strokeWidth="1.4"/>
         <text x="62" y="23" textAnchor="middle" fontSize="14">🔒</text>
       </svg>
@@ -108,22 +102,114 @@ interface Props {
   onAssignment?:  (assignment: Assignment) => void;
 }
 
+// ── Invite success overlay ────────────────────────────────────────────────────
+const InviteSuccess: React.FC<{ teacherName: string; onDismiss: () => void }> = ({ teacherName, onDismiss }) => (
+  <div style={{
+    position:"fixed", inset:0, background:"rgba(0,0,0,0.78)",
+    zIndex:200, display:"flex", alignItems:"center", justifyContent:"center", padding:20,
+  }}>
+    <div style={{
+      background:"#0a1628", border:"1px solid #1e3a5f", borderRadius:20,
+      padding:"48px 40px", maxWidth:420, width:"100%", textAlign:"center",
+      boxShadow:"0 24px 80px rgba(0,0,0,0.7)",
+    }}>
+      {/* Green circle with tick */}
+      <div style={{
+        width:88, height:88, borderRadius:"50%", margin:"0 auto 24px",
+        background:"rgba(34,197,94,0.12)", border:"3px solid #22c55e",
+        display:"flex", alignItems:"center", justifyContent:"center",
+      }}>
+        <svg width="44" height="44" viewBox="0 0 44 44" fill="none">
+          <path d="M10 22 L18 30 L34 14" stroke="#22c55e" strokeWidth="3.5"
+            strokeLinecap="round" strokeLinejoin="round"/>
+        </svg>
+      </div>
+
+      <div style={{ color:"#22c55e", fontSize:22, fontWeight:900, marginBottom:10, letterSpacing:-0.3 }}>
+        Class Joined Successfully!
+      </div>
+      <div style={{ color:"#94a3b8", fontSize:15, lineHeight:1.7, marginBottom:28 }}>
+        You are now enrolled in{" "}
+        <strong style={{ color:"#e2e8f0" }}>{teacherName}'s</strong> class.
+        <br />
+        You can now use your teacher's assignment codes to access practicals.
+      </div>
+
+      <div style={{ background:"#0d1b2e", border:"1px solid #1e3a5f", borderRadius:12,
+        padding:"12px 16px", marginBottom:28, display:"flex", alignItems:"center", gap:10 }}>
+        <span style={{ fontSize:20 }}>🎓</span>
+        <div style={{ textAlign:"left" }}>
+          <div style={{ color:"#94a3b8", fontSize:11, textTransform:"uppercase",
+            letterSpacing:0.8, fontWeight:700, marginBottom:2 }}>Your Teacher</div>
+          <div style={{ color:"#e2e8f0", fontWeight:800, fontSize:15 }}>{teacherName}</div>
+        </div>
+      </div>
+
+      <button onClick={onDismiss} style={{
+        width:"100%", padding:"13px 0", borderRadius:11, border:"none",
+        background:"linear-gradient(135deg,#16a34a,#15803d)",
+        color:"white", fontWeight:800, fontSize:15, cursor:"pointer",
+        boxShadow:"0 4px 18px rgba(22,163,74,0.4)",
+      }}>
+        Continue to Lab →
+      </button>
+    </div>
+  </div>
+);
+
 const LabSelection: React.FC<Props> = ({ onSelect, onTeacherPanel, onAssignment }) => {
-  const [hovered,    setHovered]    = useState<string | null>(null);
-  const [tokenInput, setTokenInput] = useState("");
-  const [tokenError, setTokenError] = useState("");
-  const [checking,   setChecking]   = useState(false);
+  const [hovered,         setHovered]         = useState<string | null>(null);
+  const [tokenInput,      setTokenInput]       = useState("");
+  const [tokenError,      setTokenError]       = useState("");
+  const [checking,        setChecking]         = useState(false);
+  const [inviteSuccess,   setInviteSuccess]    = useState<{ teacherName: string } | null>(null);
+  const [assignedTeacher, setAssignedTeacher]  = useState<string | null>(null);
+
   const currentUser = getCurrentUser();
+
+  // Load the student's current assigned teacher on mount
+  useEffect(() => {
+    if (currentUser?.role === "student") {
+      getMyTeacher().then(r => setAssignedTeacher(r.assignedTeacherName ?? null));
+    }
+  }, []);
 
   const handleTokenSubmit = async () => {
     const raw = tokenInput.trim().toUpperCase();
     if (!raw) { setTokenError("Please enter a code."); return; }
     setChecking(true);
     setTokenError("");
+
     try {
+      // ── Class invitation code (CLS-XXXXXX) ───────────────────────────────
+      if (isInviteCode(raw)) {
+        const result = await redeemClassInvite(raw);
+        if (result.alreadyAssigned) {
+          setTokenError(`You are already in ${result.teacherName}'s class.`);
+          return;
+        }
+        if (result.success) {
+          setAssignedTeacher(result.teacherName);
+          setTokenInput("");
+          setInviteSuccess({ teacherName: result.teacherName });
+          return;
+        }
+        setTokenError("Invalid invitation code. Ask your teacher for the correct code.");
+        return;
+      }
+
+      // ── Assignment code (VC-XXXXXX / CC-XXXXXX) ──────────────────────────
+      // Guard: student must have a teacher before using assignment codes
+      if (!assignedTeacher) {
+        setTokenError(
+          "You must join a class first. Ask your teacher for a class invitation code (CLS-XXXXXX) and enter it here."
+        );
+        return;
+      }
+
       const found = await findAssignment(raw);
       if (!found) {
-        setTokenError("Code not found. Check with your teacher and try again.");
+        setTokenError("Assignment code not found. Check with your teacher and try again.");
         return;
       }
       if (isCodeExpired(found)) {
@@ -142,6 +228,14 @@ const LabSelection: React.FC<Props> = ({ onSelect, onTeacherPanel, onAssignment 
   return (
     <div style={{ minHeight:"100vh", background:"#060d18",
       display:"flex", flexDirection:"column", fontFamily:"system-ui,sans-serif" }}>
+
+      {/* Invite success overlay */}
+      {inviteSuccess && (
+        <InviteSuccess
+          teacherName={inviteSuccess.teacherName}
+          onDismiss={() => setInviteSuccess(null)}
+        />
+      )}
 
       {/* ── Header ── */}
       <header style={{ background:"rgba(8,15,30,0.98)", borderBottom:"1px solid #1e293b",
@@ -168,6 +262,7 @@ const LabSelection: React.FC<Props> = ({ onSelect, onTeacherPanel, onAssignment 
               </div>
               <div style={{ color:"#475569", fontSize:10, textTransform:"capitalize" }}>
                 {currentUser.role}{currentUser.regNumber ? ` · ${currentUser.regNumber}` : ""}
+                {assignedTeacher ? ` · 🎓 ${assignedTeacher}` : ""}
               </div>
             </div>
           )}
@@ -195,24 +290,48 @@ const LabSelection: React.FC<Props> = ({ onSelect, onTeacherPanel, onAssignment 
         </div>
       </header>
 
-      {/* ── Assignment Code Entry ── */}
+      {/* ── Code Entry ── */}
       <div style={{ background:"#080f1e", borderBottom:"1px solid #1e3a5f",
         padding:"20px clamp(16px,3vw,40px)" }}>
         <div style={{ maxWidth:700, margin:"0 auto" }}>
+
+          {/* Teacher badge (if assigned) */}
+          {assignedTeacher && (
+            <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:12,
+              background:"rgba(34,197,94,0.08)", border:"1px solid #22c55e33",
+              borderRadius:9, padding:"8px 14px", width:"fit-content" }}>
+              <div style={{ width:20, height:20, borderRadius:"50%",
+                background:"rgba(34,197,94,0.2)", border:"1.5px solid #22c55e",
+                display:"flex", alignItems:"center", justifyContent:"center" }}>
+                <svg width="11" height="11" viewBox="0 0 11 11" fill="none">
+                  <path d="M2 5.5 L4.5 8 L9 3" stroke="#22c55e" strokeWidth="1.8"
+                    strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+              </div>
+              <span style={{ color:"#22c55e", fontSize:12, fontWeight:700 }}>
+                Enrolled in <strong>{assignedTeacher}</strong>'s class
+              </span>
+            </div>
+          )}
+
           <div style={{ color:"#60a5fa", fontSize:11, fontWeight:700, letterSpacing:1.2,
             textTransform:"uppercase", marginBottom:10, display:"flex", alignItems:"center", gap:6 }}>
             <span style={{ display:"inline-block", width:8, height:8, borderRadius:"50%",
-              background:"#22c55e", boxShadow:"0 0 6px #22c55e" }} />
-            Have an Assignment Code from your Teacher?
+              background: assignedTeacher ? "#22c55e" : "#f59e0b",
+              boxShadow: `0 0 6px ${assignedTeacher ? "#22c55e" : "#f59e0b"}` }} />
+            {assignedTeacher
+              ? "Enter your Assignment Code or Class Invitation Code"
+              : "Enter a Class Invitation Code to join your teacher's class"}
           </div>
+
           <div style={{ display:"flex", gap:10, alignItems:"flex-start", flexWrap:"wrap" }}>
             <div style={{ flex:1, minWidth:220 }}>
               <input
                 value={tokenInput}
                 onChange={e => { setTokenInput(e.target.value.toUpperCase()); setTokenError(""); }}
                 onKeyDown={e => e.key === "Enter" && handleTokenSubmit()}
-                placeholder="e.g.  VC-ABC123"
-                maxLength={9}
+                placeholder={assignedTeacher ? "VC-XXXXXX  or  CLS-XXXXXX" : "CLS-XXXXXX  (class invite code)"}
+                maxLength={10}
                 style={{
                   width:"100%", background:"#0a1628",
                   border:`1.5px solid ${tokenError ? "#ef4444" : tokenInput ? "#2563eb" : "#1e3a5f"}`,
@@ -234,11 +353,14 @@ const LabSelection: React.FC<Props> = ({ onSelect, onTeacherPanel, onAssignment 
                 color:"white", border:"none", borderRadius:10, cursor: checking ? "not-allowed" : "pointer",
                 fontWeight:700, fontSize:14, flexShrink:0, transition:"background .15s",
               }}>
-              {checking ? "Checking…" : "Enter Lab →"}
+              {checking ? "Checking…" : "Enter →"}
             </button>
           </div>
-          <div style={{ color:"#334155", fontSize:11, marginTop:8 }}>
-            Your teacher will share a code like <code style={{ color:"#475569" }}>VC-XXXXXX</code> or <code style={{ color:"#475569" }}>CC-XXXXXX</code> for your assignment.
+
+          <div style={{ color:"#334155", fontSize:11, marginTop:8, lineHeight:1.6 }}>
+            {assignedTeacher
+              ? <>Assignment codes look like <code style={{ color:"#475569" }}>VC-XXXXXX</code> · Invitation codes look like <code style={{ color:"#475569" }}>CLS-XXXXXX</code></>
+              : <>Ask your teacher for a class invitation code (starts with <code style={{ color:"#475569" }}>CLS-</code>) to join their class before accessing assignments.</>}
           </div>
         </div>
       </div>
@@ -247,7 +369,6 @@ const LabSelection: React.FC<Props> = ({ onSelect, onTeacherPanel, onAssignment 
       <div style={{ background:"linear-gradient(180deg,#0d1b2e 0%,#060d18 60%)",
         padding:"clamp(32px,5vw,56px) clamp(16px,3vw,40px) clamp(28px,4vw,44px)", textAlign:"center", borderBottom:"1px solid #1e293b",
         position:"relative", overflow:"hidden" }}>
-        {/* Decorative circles */}
         <div style={{ position:"absolute", top:-60, left:"10%", width:300, height:300,
           borderRadius:"50%", background:"rgba(59,130,246,0.04)", pointerEvents:"none" }} />
         <div style={{ position:"absolute", bottom:-80, right:"8%", width:350, height:350,
@@ -301,19 +422,15 @@ const LabSelection: React.FC<Props> = ({ onSelect, onTeacherPanel, onAssignment 
                 opacity: !p.available ? 0.72 : 1,
               }}>
 
-              {/* ── Top strip ── */}
               <div style={{ padding:"clamp(16px,2vw,24px) clamp(16px,2vw,26px) 18px",
                 borderBottom:`1px solid ${p.accentColor}20`,
                 display:"flex", gap:18, alignItems:"flex-start" }}>
-
-                {/* Icon */}
                 <div style={{ flexShrink:0, width:86, height:86,
                   background:"rgba(255,255,255,0.04)", borderRadius:16,
                   display:"flex", alignItems:"center", justifyContent:"center",
                   border:"1px solid rgba(255,255,255,0.06)" }}>
                   {p.icon}
                 </div>
-
                 <div style={{ flex:1 }}>
                   <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:7 }}>
                     <span style={{ color:"white", fontWeight:900, fontSize:"clamp(16px,1.6vw,20px)" }}>{p.title}</span>
@@ -345,14 +462,12 @@ const LabSelection: React.FC<Props> = ({ onSelect, onTeacherPanel, onAssignment 
                 </div>
               </div>
 
-              {/* ── Description ── */}
               <div style={{ padding:"16px 26px 12px" }}>
                 <p style={{ color:"#94a3b8", fontSize:13, lineHeight:1.75, margin:0 }}>
                   {p.description}
                 </p>
               </div>
 
-              {/* ── Reagent swatches ── */}
               <div style={{ padding:"0 26px 14px" }}>
                 <div style={{ color:"#475569", fontSize:10, fontWeight:700,
                   letterSpacing:1, textTransform:"uppercase", marginBottom:8 }}>Chemicals</div>
@@ -369,7 +484,6 @@ const LabSelection: React.FC<Props> = ({ onSelect, onTeacherPanel, onAssignment 
                 </div>
               </div>
 
-              {/* ── Learnings ── */}
               <div style={{ padding:"0 26px 16px" }}>
                 <div style={{ color:"#475569", fontSize:10, fontWeight:700,
                   letterSpacing:1, textTransform:"uppercase", marginBottom:8 }}>What you will learn</div>
@@ -382,14 +496,12 @@ const LabSelection: React.FC<Props> = ({ onSelect, onTeacherPanel, onAssignment 
                 </div>
               </div>
 
-              {/* ── Outcome ── */}
               <div style={{ margin:"0 26px 18px", background:"rgba(255,255,255,0.03)",
                 border:`1px solid ${p.accentColor}22`, borderRadius:10, padding:"9px 13px" }}>
                 <span style={{ color:"#475569", fontSize:10, fontWeight:700 }}>Expected outcome: </span>
                 <span style={{ color:"#94a3b8", fontSize:11 }}>{p.outcome}</span>
               </div>
 
-              {/* ── CTA ── */}
               <div style={{ padding:"0 26px 24px" }}>
                 <button
                   onClick={() => p.available && onSelect(p.id)}
@@ -413,7 +525,6 @@ const LabSelection: React.FC<Props> = ({ onSelect, onTeacherPanel, onAssignment 
         })}
       </div>
 
-      {/* ── Footer ── */}
       <footer style={{ borderTop:"1px solid #1e293b", padding:"14px clamp(16px,3vw,40px)",
         display:"flex", justifyContent:"center" }}>
         <span style={{ color:"#1e293b", fontSize:12 }}>

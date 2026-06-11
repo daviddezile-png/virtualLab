@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { SimulationStep } from "./simulation/model/types";
 import InteractiveLabCanvas from "./components/InteractiveLabCanvas";
 import LabSelection from "./components/LabSelection";
@@ -10,7 +10,9 @@ import CountdownTimer from "./components/CountdownTimer";
 import LandingPage from "./components/LandingPage";
 import AuthPage from "./components/AuthPage";
 import StudentQAPanel from "./components/StudentQAPanel";
-import { Assignment, getOrSetTimerStart } from "./utils/assignmentStore";
+import SessionWarning from "./components/SessionWarning";
+import { useSessionTimeout } from "./hooks/useSessionTimeout";
+import { Assignment } from "./utils/assignmentStore";
 import { logLabStarted, logCodeEntered } from "./utils/auditStore";
 import { getAllSubmissions } from "./utils/submissionStore";
 import type { LabSubmission } from "./utils/submissionStore";
@@ -20,6 +22,17 @@ import {
   ThemeMode, getStoredTheme, storeTheme,
 } from "./utils/userStore";
 import "./App.css";
+
+// ── One-time migration: remove old localStorage keys from the localStorage era ─
+const OLD_KEYS = [
+  "vlab_users", "vlab_submissions", "vlab_assignments",
+  "vlab_qa_questions", "vlab_qa_answers", "vlab_announcements",
+  "vlab_audit_log", "vlab_suspended", "vlab_sessions",
+];
+if (!localStorage.getItem("vlab_migrated_v2")) {
+  OLD_KEYS.forEach(k => localStorage.removeItem(k));
+  localStorage.setItem("vlab_migrated_v2", "1");
+}
 
 type AppState = "landing" | "auth" | "selection" | "pre-lab" | "lab" | "teacher" | "admin";
 
@@ -65,7 +78,7 @@ function App() {
   // Reload latest submission and Q&A availability whenever practical or appState changes
   useEffect(() => {
     if (appState !== "lab" || !user) return;
-    const uid = (user as User & { clientId?: string }).clientId ?? user.id ?? "";
+    const uid = (user as User).clientId ?? "";
     getAllSubmissions().then(subs => {
       const match = subs
         .filter(s => s.studentId === uid && s.practicalId === selectedPractical)
@@ -99,6 +112,12 @@ function App() {
     setAppState("landing");
   };
 
+  // Session timeout — only active when a user is logged in
+  const isLoggedIn = appState !== "landing" && appState !== "auth";
+  const { showWarning, remaining, stayLoggedIn } = useSessionTimeout(
+    isLoggedIn ? handleLogout : () => {}
+  );
+
   const handleAuth = (u: User) => {
     setUser(u);
     if (u.role === "admin")   setAppState("admin");
@@ -111,25 +130,39 @@ function App() {
     setSelectedPractical(assignment.practicalId);
     setLabExpired(false);
     logCodeEntered(assignment.token, assignment.practicalId);
+
+    // Timer starts the moment the student redeems the code — not when they click
+    // "Start Lab". The server provides the authoritative startedAt timestamp so
+    // it persists across devices and page refreshes.
+    if (assignment.timeLimitMinutes > 0) {
+      const t = assignment.startedAt ?? Date.now();
+      setSessionStartAt(t);
+      // Cache in localStorage so the pre-lab page and lab canvas can read it
+      // without an extra API call.
+      try { localStorage.setItem(`vlab_timer_${assignment.token}`, String(t)); } catch { /* ignore */ }
+      // Already expired before even reaching the pre-lab? Lock immediately.
+      if (Date.now() - t >= assignment.timeLimitMinutes * 60 * 1000) {
+        setLabExpired(true);
+      }
+    }
+
     setAppState("pre-lab");
   };
 
   // Called when student clicks "Start Lab" from the pre-lab notebook
   const handleLabStart = () => {
-    // Log the lab session start
     logLabStarted(selectedPractical, activeAssignment ? "assignment" : "practice");
 
-    if (activeAssignment) {
-      const t = getOrSetTimerStart(activeAssignment.token);
+    // sessionStartAt was already set at code entry — just re-check expiry in case
+    // the student spent a long time in the pre-lab notebook.
+    if (activeAssignment && activeAssignment.timeLimitMinutes > 0) {
+      const t = sessionStartAt ?? activeAssignment.startedAt ?? Date.now();
       setSessionStartAt(t);
-      // Already expired? Lock immediately (e.g. page refresh after deadline)
-      if (
-        activeAssignment.timeLimitMinutes > 0 &&
-        Date.now() - t >= activeAssignment.timeLimitMinutes * 60 * 1000
-      ) {
+      if (Date.now() - t >= activeAssignment.timeLimitMinutes * 60 * 1000) {
         setLabExpired(true);
       }
     }
+
     setAppState("lab");
   };
 
@@ -163,11 +196,21 @@ function App() {
   }
 
   if (appState === "admin") {
-    return <AdminPanel onLogout={handleLogout} />;
+    return (
+      <>
+        <AdminPanel onLogout={handleLogout} />
+        {showWarning && <SessionWarning remaining={remaining} onStay={stayLoggedIn} onLogout={handleLogout} />}
+      </>
+    );
   }
 
   if (appState === "teacher") {
-    return <TeacherPanel onBack={handleLogout} />;
+    return (
+      <>
+        <TeacherPanel onBack={handleLogout} />
+        {showWarning && <SessionWarning remaining={remaining} onStay={stayLoggedIn} onLogout={handleLogout} />}
+      </>
+    );
   }
 
   if (appState === "selection") {
@@ -185,16 +228,43 @@ function App() {
   }
 
   if (appState === "pre-lab") {
+    const hasTimer = activeAssignment && (activeAssignment.timeLimitMinutes ?? 0) > 0 && sessionStartAt !== null;
     return (
-      <PreLabNotebook
-        practicalId={selectedPractical}
-        onStart={handleLabStart}
-        onBack={() => {
-          setAppState("selection");
-          setActiveAssignment(null);
-          setLabExpired(false);
-        }}
-      />
+      <div style={{ position: "relative" }}>
+        {/* Floating timer banner — only shown when assignment has a time limit */}
+        {hasTimer && !labExpired && (
+          <div style={{
+            position: "fixed", top: 12, right: 16, zIndex: 999,
+            display: "flex", alignItems: "center", gap: 8,
+          }}>
+            <CountdownTimer
+              timeLimitMinutes={activeAssignment!.timeLimitMinutes}
+              sessionStartAt={sessionStartAt!}
+              onExpire={() => { setLabExpired(true); handleLabStart(); }}
+            />
+          </div>
+        )}
+        {labExpired && hasTimer && (
+          <div style={{
+            position: "fixed", top: 12, right: 16, zIndex: 999,
+            background: "rgba(239,68,68,0.15)", border: "1px solid #ef444466",
+            borderRadius: 10, padding: "5px 14px", color: "#f87171",
+            fontSize: 12, fontWeight: 700,
+          }}>
+            ⏰ Time expired
+          </div>
+        )}
+        <PreLabNotebook
+          practicalId={selectedPractical}
+          onStart={handleLabStart}
+          onBack={() => {
+            setAppState("selection");
+            setActiveAssignment(null);
+            setSessionStartAt(null);
+            setLabExpired(false);
+          }}
+        />
+      </div>
     );
   }
 
@@ -294,6 +364,8 @@ function App() {
           onClose={() => setShowQAPanel(false)}
         />
       )}
+
+      {showWarning && <SessionWarning remaining={remaining} onStay={stayLoggedIn} onLogout={handleLogout} />}
 
       <div className="lab-canvas-wrap" style={{ overflowX:"auto", overflowY:"hidden", flex:1 }}>
         <div style={{ minWidth:1200, height:"100%" }}>

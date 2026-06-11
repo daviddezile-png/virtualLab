@@ -29,6 +29,56 @@ router.get('/', requireRole('admin'), async (req, res) => {
   }
 });
 
+// ── GET /api/users/students ── teacher + admin can list students ──────────────
+router.get('/students', requireRole('teacher', 'admin'), async (req, res) => {
+  try {
+    const { search } = req.query;
+    const query = { role: 'student', status: 'active', suspended: { $ne: true } };
+
+    // Teachers only see students who joined their class via invitation code
+    if (req.user.role === 'teacher') {
+      query.assignedTeacherId = req.user.id;
+    }
+
+    if (search) {
+      query.$or = [
+        { fullName:  { $regex: search, $options: 'i' } },
+        { email:     { $regex: search, $options: 'i' } },
+        { regNumber: { $regex: search, $options: 'i' } },
+      ];
+    }
+
+    const users = await User.find(query)
+      .sort({ createdAt: -1 })
+      .select('clientId role fullName email regNumber status createdAt lastLogin assignedTeacherId assignedTeacherName');
+    res.json({ users });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch students' });
+  }
+});
+
+// ── GET /api/users/counts ── dashboard stats (teacher + admin) ────────────────
+router.get('/counts', requireRole('teacher', 'admin'), async (req, res) => {
+  try {
+    const isAdmin = req.user.role === 'admin';
+    const students = await User.countDocuments({ role: 'student', status: 'active' });
+
+    if (isAdmin) {
+      // Admins get the full breakdown
+      const [teachers, admins] = await Promise.all([
+        User.countDocuments({ role: 'teacher', status: 'active' }),
+        User.countDocuments({ role: 'admin' }),
+      ]);
+      return res.json({ students, teachers, admins, total: students + teachers + admins });
+    }
+
+    // Teachers only see student count — no visibility into peer/admin accounts
+    res.json({ students, teachers: 0, admins: 0, total: students });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch counts' });
+  }
+});
+
 // ── GET /api/users/pending-teachers ── admin only ─────────────────────────────
 router.get('/pending-teachers', requireRole('admin'), async (req, res) => {
   try {

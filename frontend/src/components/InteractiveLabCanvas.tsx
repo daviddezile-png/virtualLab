@@ -83,12 +83,6 @@ const drawBeaker = (
     ctx.fill();
 
     ctx.restore();
-
-    // Gram label above the solid pile
-    ctx.fillStyle = "#92400e";
-    ctx.font = `bold 7px Arial`;
-    ctx.textAlign = "center";
-    ctx.fillText(`${solidStearicGrams.toFixed(1)}g`, x + w / 2, chunkY - 3);
   }
 
   // 1. Draw Liquid First (so glass is on top)
@@ -271,23 +265,6 @@ const drawBeaker = (
     }
 
     ctx.restore();
-
-    // Label above the beaker
-    ctx.textAlign = "center";
-    if (emulsificationProgress >= 100) {
-      // Cream badge
-      ctx.fillStyle = "rgba(120, 60, 5, 0.95)";
-      ctx.beginPath();
-      ctx.roundRect(x + w / 2 - 38, liqY2 - 20, 76, 16, 4);
-      ctx.fill();
-      ctx.fillStyle = "#fef3c7";
-      ctx.font = "bold 7px Arial";
-      ctx.fillText("✓ VANISHING CREAM", x + w / 2, liqY2 - 9);
-    } else if (emulsificationProgress > 20) {
-      ctx.fillStyle = `rgba(120, 80, 20, ${tE * 0.9})`;
-      ctx.font = "bold 7px Arial";
-      ctx.fillText(`EMULSIFYING ${Math.round(emulsificationProgress)}%`, x + w / 2, liqY2 - 5);
-    }
   }
 
   // 3. Glass Body
@@ -310,47 +287,26 @@ const drawBeaker = (
   ctx.fill();
 
   // 3. Markings & Numbers
-  ctx.fillStyle = "rgba(255, 255, 255, 0.9)";
-  ctx.font = "8px Arial";
+  // Layout: tick line starts from the left glass wall, number follows at the line end.
+  ctx.strokeStyle = "rgba(255,255,255,0.75)";
+  ctx.lineWidth = 1;
+  ctx.font = "bold 8px Arial";
+  ctx.textAlign = "left";
   const step = 50;
   for (let i = 0; i <= maxVol / step; i++) {
     const markY = y + h - bottomPadding - i * (usableHeight / (maxVol / step));
+    const vol   = i * step;
+
+    // Tick: uniform length from left inner glass wall inward
+    const tickLen = 12;
     ctx.beginPath();
     ctx.moveTo(x + 2, markY);
-    ctx.lineTo(x + 10, markY);
+    ctx.lineTo(x + 2 + tickLen, markY);
     ctx.stroke();
-    ctx.fillText(`${i * step}`, x + 12, markY + 3);
-  }
 
-  // 4. Live temperature badge — shown whenever liquid is above ambient
-  if (liquidTemperature > 26 && currentVol > 0) {
-    const tempStr = `${Math.round(liquidTemperature)}°C`;
-    const isHot   = liquidTemperature >= 60;
-    const isVHot  = liquidTemperature >= 90;
-    const badgeColor  = isVHot  ? "rgba(220,38,38,0.92)"
-                      : isHot   ? "rgba(234,88,12,0.92)"
-                      :           "rgba(202,138,4,0.92)";
-    const badgeY = y - 22;
-    const badgeW = 40;
-    const badgeH = 16;
-    const badgeX = x + w / 2 - badgeW / 2;
-
-    // Badge background
-    ctx.fillStyle = badgeColor;
-    ctx.beginPath();
-    ctx.roundRect(badgeX, badgeY, badgeW, badgeH, 4);
-    ctx.fill();
-
-    // Temperature text
-    ctx.fillStyle = "white";
-    ctx.font = "bold 9px monospace";
-    ctx.textAlign = "center";
-    ctx.fillText(tempStr, x + w / 2, badgeY + 11);
-
-    // "HOLDING" label when temperature is stable (not actively heating/cooling)
-    ctx.fillStyle = "rgba(255,255,255,0.60)";
-    ctx.font = "6px Arial";
-    ctx.fillText("ACTUAL", x + w / 2, badgeY - 2);
+    // Number: right after the tick end
+    ctx.fillStyle = "rgba(255,255,255,0.92)";
+    ctx.fillText(`${vol}`, x + 2 + tickLen + 2, markY + 3);
   }
 
   ctx.restore();
@@ -426,33 +382,36 @@ const drawCylinder = (
   ctx.strokeRect(x, y, w, h);
 
   // 4. Dynamic Markings and Numbers
-  ctx.fillStyle = "rgba(255, 255, 255, 0.9)";
-  ctx.strokeStyle = "rgba(255, 255, 255, 0.6)";
+  // Layout: tick line from left wall, number follows immediately after the line end.
+  ctx.strokeStyle = "rgba(255,255,255,0.70)";
   ctx.lineWidth = 1;
   ctx.font = "7px Arial";
   ctx.textAlign = "left";
 
-  // For 100mL, use 10mL steps
   const step = 10;
   const numberOfMarks = maxVol / step;
 
   for (let i = 0; i <= numberOfMarks; i++) {
     const markVol = i * step;
-    const markY = y + h - bottomPadding - i * (usableHeight / numberOfMarks);
+    const markY   = y + h - bottomPadding - i * (usableHeight / numberOfMarks);
 
+    // Tick: uniform length for all marks
+    const isLabelled = markVol % 20 === 0;
+    const tickLen = w * 0.26;
     ctx.beginPath();
-    const lineLength = w * 0.3;
-    ctx.moveTo(x, markY);
-    ctx.lineTo(x + lineLength, markY);
+    ctx.moveTo(x + 2, markY);
+    ctx.lineTo(x + 2 + tickLen, markY);
     ctx.stroke();
 
-    if (markVol % 20 === 0) {
-      // Label every 20mL
-      ctx.fillText(`${markVol}`, x + lineLength + 2, markY + 2);
+    // Number: right after tick end, only at labelled marks
+    if (isLabelled) {
+      ctx.fillStyle = "rgba(255,255,255,0.92)";
+      ctx.fillText(`${markVol}`, x + 2 + tickLen + 2, markY + 2);
     }
   }
 
   // 5. Label "mL"
+  ctx.fillStyle = "rgba(255,255,255,0.60)";
   ctx.font = "bold 6px Arial";
   ctx.fillText("mL", x + 5, y + 12);
 
@@ -676,15 +635,6 @@ const drawSpatula = (
       ctx.ellipse(bx, by, 2.2, 1.2, i * 0.5, 0, Math.PI * 2);
       ctx.fill();
     }
-    // Gram count badge
-    ctx.fillStyle = "rgba(20,10,5,0.55)";
-    ctx.beginPath();
-    ctx.roundRect(cx - 8, bladeY - 10, 16, 9, 3);
-    ctx.fill();
-    ctx.fillStyle = "#fcd34d";
-    ctx.font = `bold 6px Arial`;
-    ctx.textAlign = "center";
-    ctx.fillText(`${load}g`, cx, bladeY - 3);
   }
 
   ctx.restore();   // end blade transform
@@ -2244,7 +2194,7 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
     const available   = source.data?.currentVolume ?? 0;
     const targetSpace = (target.data?.maxVolume ?? 0) - (target.data?.currentVolume ?? 0);
     const max = Math.min(available, targetSpace);
-    setSelectedPourAmount(Math.round(max * 10) / 10);
+    setSelectedPourAmount(max); // exact value — rounding causes residue on 100% pours
   }, [showPourModal]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Ice bucket cooling — slowly drops beaker temperature when placed inside the bucket
@@ -3181,7 +3131,8 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
                   {/* Quick preset buttons */}
                   <div style={{ display:"flex", gap:8, marginBottom:20 }}>
                     {[25, 50, 75, 100].map(p => {
-                      const val = Math.max(1, Math.round(maxPour * p / 100));
+                      // 100% uses exact available volume so nothing is left behind
+                      const val = p === 100 ? maxPour : Math.max(1, Math.round(maxPour * p / 100));
                       const active = Math.round(currentAmount) === val;
                       return (
                         <button key={p}
@@ -3333,10 +3284,15 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
                                 const rem = v * keepFrac;
                                 if (rem > 0.001) reducedComp[k] = rem;
                               }
+                              // If virtually all liquid was poured, snap to exactly empty.
+                              // Floating-point residue from 60 animation steps can leave
+                              // a tiny non-zero currentVolume that shows as "available" liquid.
+                              const finalVol = keepFrac < 0.01 ? 0 : a.data?.currentVolume;
                               return {
                                 ...a,
                                 data: {
                                   ...a.data,
+                                  currentVolume:    finalVol,
                                   isPouring:        false,
                                   pouringTargetId:  null,
                                   pouringProgress:  0,
@@ -3383,105 +3339,148 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
           const hp = apparatus.find((a) => a.type === "hotplate");
           if (!hp) return null;
           const currentTemp = Math.round(hp.data?.temperature ?? 25);
-          const targetTemp = hp.data?.targetTemperature ?? 200;
-          const isOn = hp.data?.isOn ?? false;
+          const targetTemp  = hp.data?.targetTemperature ?? 200;
+          const isOn        = hp.data?.isOn ?? false;
+          const pct = ((targetTemp - 25) / (500 - 25)) * 100;
+
           return (
-            <div
-              style={{
-                position: "fixed",
-                left: 0,
-                top: 0,
-                width: "100vw",
-                height: "100vh",
-                background: "rgba(0,0,0,0.35)",
-                zIndex: 100,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-              }}
-            >
-              <div
-                style={{
-                  background: "white",
-                  borderRadius: 14,
-                  padding: 32,
-                  minWidth: 340,
-                  boxShadow: "0 8px 40px #0003",
-                }}
-              >
-                <h2 className="font-bold text-lg mb-1">Hot Plate Control</h2>
-                <div className="mb-3 flex items-center gap-3">
-                  <span
-                    style={{
-                      display: "inline-block",
-                      width: 12,
-                      height: 12,
-                      borderRadius: "50%",
-                      background: isOn ? "#22c55e" : "#9ca3af",
-                      boxShadow: isOn ? "0 0 6px #22c55e" : "none",
-                    }}
-                  />
-                  <span className="font-mono text-sm">
-                    {isOn ? "HEATING" : "OFF"} — {currentTemp}°C
-                  </span>
-                </div>
-                <div className="mb-5">
-                  <label className="block text-sm font-semibold mb-1">
-                    Target Temperature: <span className="font-mono">{targetTemp}°C</span>
-                  </label>
-                  <input
-                    type="range"
-                    min={25}
-                    max={500}
-                    step={5}
-                    defaultValue={targetTemp}
-                    style={{ width: "100%" }}
-                    onChange={(e) => {
-                      const val = parseInt(e.target.value, 10);
-                      setApparatus((prev) =>
-                        prev.map((a) =>
-                          a.type === "hotplate"
-                            ? { ...a, data: { ...a.data, targetTemperature: val } }
-                            : a,
-                        ),
-                      );
-                    }}
-                  />
-                  <div className="flex justify-between text-xs text-gray-400 mt-1">
-                    <span>25°C</span>
-                    <span>500°C</span>
+            <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.65)",
+              zIndex:100, display:"flex", alignItems:"center", justifyContent:"center" }}>
+              <div style={{ background:"#0f172a", borderRadius:20,
+                width:"min(440px,95vw)", boxShadow:"0 24px 80px rgba(0,0,0,0.8)",
+                border:"1px solid #1e293b", overflow:"hidden" }}>
+
+                {/* Header */}
+                <div style={{ background:"linear-gradient(135deg,#0d1b2e,#162032)",
+                  padding:"20px 24px 16px", borderBottom:"1px solid #1e293b" }}>
+                  <div style={{ display:"flex", alignItems:"center", gap:12 }}>
+                    <div style={{ width:42, height:42, borderRadius:12, flexShrink:0,
+                      background: isOn
+                        ? "linear-gradient(135deg,#ea580c,#dc2626)"
+                        : "linear-gradient(135deg,#374151,#1f2937)",
+                      border:"2px solid rgba(255,255,255,0.15)",
+                      display:"flex", alignItems:"center", justifyContent:"center",
+                      fontSize:22 }}>🔥</div>
+                    <div>
+                      <div style={{ color:"white", fontWeight:800, fontSize:17 }}>Hot Plate Control</div>
+                      <div style={{ display:"flex", alignItems:"center", gap:6, marginTop:4 }}>
+                        <span style={{ width:8, height:8, borderRadius:"50%", flexShrink:0,
+                          background: isOn ? "#22c55e" : "#6b7280",
+                          boxShadow: isOn ? "0 0 6px #22c55e" : "none" }} />
+                        <span style={{ color:"#64748b", fontSize:12, fontFamily:"monospace" }}>
+                          {isOn ? "HEATING" : "OFF"} — {currentTemp}°C actual
+                        </span>
+                      </div>
+                    </div>
                   </div>
                 </div>
-                <div className="flex gap-3">
-                  <button
-                    className={`px-5 py-2 rounded font-semibold text-white ${isOn ? "bg-red-500 hover:bg-red-600" : "bg-orange-500 hover:bg-orange-600"}`}
-                    onClick={() => {
-                      pushHistory(); // ← snapshot before hotplate toggle
-                      setApparatus((prev) =>
-                        prev.map((a) =>
+
+                {/* Body */}
+                <div style={{ padding:"22px 24px" }}>
+
+                  {/* Big temperature display */}
+                  <div style={{ textAlign:"center", marginBottom:20 }}>
+                    <div style={{ fontSize:48, fontWeight:900, fontFamily:"monospace", lineHeight:1,
+                      background: isOn
+                        ? "linear-gradient(135deg,#f97316,#ef4444)"
+                        : "linear-gradient(135deg,#60a5fa,#a78bfa)",
+                      WebkitBackgroundClip:"text", WebkitTextFillColor:"transparent" }}>
+                      {targetTemp}°C
+                    </div>
+                    <div style={{ color:"#475569", fontSize:14, fontWeight:600, marginTop:2 }}>
+                      target temperature
+                    </div>
+                  </div>
+
+                  {/* Slider */}
+                  <div style={{ position:"relative", marginBottom:8 }}>
+                    <div style={{ height:8, borderRadius:4, background:"#1e293b",
+                      position:"relative", overflow:"hidden" }}>
+                      <div style={{ height:"100%", borderRadius:4, width:`${pct}%`,
+                        background: isOn
+                          ? "linear-gradient(90deg,#f97316,#ef4444)"
+                          : "linear-gradient(90deg,#3b82f6,#7c3aed)" }} />
+                    </div>
+                    <input type="range" min={25} max={500} step={5} value={targetTemp}
+                      style={{ position:"absolute", top:0, left:0, width:"100%", height:"100%",
+                        opacity:0, cursor:"pointer", margin:0, padding:0 }}
+                      onChange={e => {
+                        const val = parseInt(e.target.value, 10);
+                        setApparatus(prev => prev.map(a =>
                           a.type === "hotplate"
-                            ? {
-                                ...a,
-                                data: {
-                                  ...a.data,
-                                  isOn: !isOn,
-                                  temperature: isOn ? 25 : (a.data?.temperature ?? 25),
-                                },
-                              }
-                            : a,
-                        ),
+                            ? { ...a, data: { ...a.data, targetTemperature: val } }
+                            : a
+                        ));
+                      }} />
+                    <div style={{ position:"absolute", top:"50%", transform:"translate(-50%,-50%)",
+                      left:`calc(${pct}% - ${pct * 0.16}px)`,
+                      width:20, height:20, borderRadius:"50%",
+                      background: isOn
+                        ? "linear-gradient(135deg,#f97316,#ef4444)"
+                        : "linear-gradient(135deg,#3b82f6,#7c3aed)",
+                      border:"3px solid #0f172a",
+                      boxShadow: isOn ? "0 0 0 2px #f97316" : "0 0 0 2px #3b82f6",
+                      pointerEvents:"none" }} />
+                  </div>
+                  <div style={{ display:"flex", justifyContent:"space-between",
+                    fontSize:11, color:"#334155", marginBottom:18 }}>
+                    <span>25°C (ambient)</span>
+                    <span>500°C (max)</span>
+                  </div>
+
+                  {/* Preset buttons */}
+                  <div style={{ display:"flex", gap:8, marginBottom:20 }}>
+                    {[60, 75, 100, 200].map(t => {
+                      const active = targetTemp === t;
+                      return (
+                        <button key={t}
+                          onClick={() => setApparatus(prev => prev.map(a =>
+                            a.type === "hotplate" ? { ...a, data: { ...a.data, targetTemperature: t } } : a
+                          ))}
+                          style={{ flex:1, padding:"8px 0", borderRadius:8, border:"none",
+                            cursor:"pointer", fontSize:12, fontWeight:700,
+                            background: active
+                              ? (isOn ? "linear-gradient(135deg,#ea580c,#dc2626)" : "linear-gradient(135deg,#1d4ed8,#7c3aed)")
+                              : "#1e293b",
+                            color: active ? "white" : "#475569" }}>
+                          {t}°C
+                        </button>
                       );
-                      setShowHotPlateModal(false);
-                    }}
-                  >
-                    {isOn ? "Turn OFF" : "Turn ON"}
-                  </button>
-                  <button
-                    className="px-5 py-2 bg-gray-200 text-gray-700 rounded hover:bg-gray-300"
-                    onClick={() => setShowHotPlateModal(false)}
-                  >
-                    Close
-                  </button>
+                    })}
+                  </div>
+
+                  {/* Action buttons */}
+                  <div style={{ display:"flex", gap:10 }}>
+                    <button
+                      onClick={() => {
+                        pushHistory();
+                        setApparatus(prev => prev.map(a =>
+                          a.type === "hotplate"
+                            ? { ...a, data: { ...a.data, isOn: !isOn,
+                                temperature: isOn ? 25 : (a.data?.temperature ?? 25) } }
+                            : a
+                        ));
+                        setShowHotPlateModal(false);
+                      }}
+                      style={{ flex:1, padding:"13px 0", borderRadius:11, border:"none",
+                        fontWeight:800, fontSize:14, cursor:"pointer",
+                        background: isOn
+                          ? "linear-gradient(135deg,#dc2626,#991b1b)"
+                          : "linear-gradient(135deg,#ea580c,#dc2626)",
+                        color:"white",
+                        boxShadow: isOn
+                          ? "0 4px 18px rgba(220,38,38,0.45)"
+                          : "0 4px 18px rgba(234,88,12,0.45)" }}>
+                      {isOn ? "⏹ Turn OFF" : "▶ Turn ON"}
+                    </button>
+                    <button
+                      onClick={() => setShowHotPlateModal(false)}
+                      style={{ padding:"13px 20px", borderRadius:11, border:"1px solid #334155",
+                        fontWeight:700, fontSize:14, cursor:"pointer",
+                        background:"transparent", color:"#64748b" }}>
+                      Close
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -3677,12 +3676,12 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
           return { x: tgt.x + (tgt.width - item.width) / 2, y: tgt.y + tgt.height * surfaceFrac - item.height };
         };
         // dockInto: places probe instruments INSIDE the beaker.
-        // Instrument is horizontally centred; its bottom sits at beaker bottom - 4px.
-        // Avoid collisions: if another instrument is already centred in this beaker,
-        // offset slightly so they don't stack exactly.
+        // The rod/probe tip floats in the liquid — well above the base (15% padding zone)
+        // and below the typical liquid surface so it's visibly submerged.
+        // 72% of beaker height from top = ~13% above the usable floor (85%).
         const dockInto = (tgt: typeof mainBeaker, slotOffset = 0) => {
           if (!tgt) return null;
-          const beakerInnerBot = tgt.y + tgt.height - 4;
+          const beakerInnerBot = tgt.y + tgt.height * 0.72;
           const iy = beakerInnerBot - item.height;
           // Horizontal: centre ± slot offset to avoid exact overlap
           const ix = tgt.x + (tgt.width - item.width) / 2 + slotOffset;

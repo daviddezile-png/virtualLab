@@ -2,7 +2,9 @@
 // API client — thin fetch wrapper that attaches the JWT from localStorage
 // ─────────────────────────────────────────────────────────────────────────────
 
-const BASE = (import.meta.env.VITE_API_URL as string) ?? "http://localhost:3543";
+// In dev the Vite proxy forwards /api → http://localhost:3543 automatically.
+// In production set VITE_API_URL to your server's full origin (e.g. https://api.example.com).
+const BASE = (import.meta.env.VITE_API_URL as string | undefined) ?? "";
 
 const getToken = (): string => localStorage.getItem("vlab_token") ?? "";
 

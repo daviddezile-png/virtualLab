@@ -55,6 +55,15 @@ const userSchema = new mongoose.Schema(
       type:    Date,
       default: null,
     },
+    // Students only — the teacher they joined via invitation code
+    assignedTeacherId: {
+      type:    String,
+      default: null,
+    },
+    assignedTeacherName: {
+      type:    String,
+      default: null,
+    },
   },
   { timestamps: true }
 );

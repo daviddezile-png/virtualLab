@@ -331,34 +331,77 @@ const EvaluationPanel: React.FC<Props> = ({
   sessionStartAt = null,
 }) => {
   const isColdCream = practicalId === "cold-cream";
-  const submittedRef = useRef(false); // prevents saving more than once per open
+  // Only blocks a SECOND save attempt after the first one SUCCEEDS.
+  const submittedRef = useRef(false);
 
-  const [form,      setForm]      = useState<FormulationInput>(() => readLabState(apparatus));
-  const [ccForm,    setCcForm]    = useState<ColdCreamInput>(() => readColdCreamLabState(apparatus));
-  const [result,    setResult]    = useState<EvaluationResult | null>(null);
-  const [ccResult,  setCcResult]  = useState<ColdCreamResult | null>(null);
-  // Instrument readings captured at evaluation time (shown for reference only)
-  const [gaugeVisc, setGaugeVisc] = useState<number>(0);
-  const [meterPH,   setMeterPH]   = useState<number>(0);
+  const [form,       setForm]      = useState<FormulationInput>(() => readLabState(apparatus));
+  const [ccForm,     setCcForm]    = useState<ColdCreamInput>(() => readColdCreamLabState(apparatus));
+  const [result,     setResult]    = useState<EvaluationResult | null>(null);
+  const [ccResult,   setCcResult]  = useState<ColdCreamResult | null>(null);
+  const [gaugeVisc,  setGaugeVisc] = useState<number>(0);
+  const [meterPH,    setMeterPH]   = useState<number>(0);
+  const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [saveError,  setSaveError]  = useState<string>("");
 
   // Re-sync from live lab state each time panel opens
   useEffect(() => {
     if (isOpen) {
-      if (isColdCream) {
-        setCcForm(readColdCreamLabState(apparatus));
-        setCcResult(null);
-      } else {
-        setForm(readLabState(apparatus));
-        setResult(null);
-      }
+      if (isColdCream) { setCcForm(readColdCreamLabState(apparatus)); setCcResult(null); }
+      else             { setForm(readLabState(apparatus));             setResult(null);   }
+      submittedRef.current = false;
+      setSaveStatus("idle");
+      setSaveError("");
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen]);
 
-  // Reset save-guard when the panel is re-opened (new session)
-  useEffect(() => { if (isOpen) submittedRef.current = false; }, [isOpen]);
-
   if (!isOpen) return null;
+
+  // ── Shared submission helper ───────────────────────────────────────────────
+  const persistSubmission = async (
+    rawScore: number, predictedPH: number, predictedVisc: number,
+    stabilityStr: string, pc: number, wc: number, ts: number,
+    liveVisc: number, livePH: number,
+  ) => {
+    if (submittedRef.current) return; // already successfully saved this session
+
+    const dr: "PASS" | "AVERAGE" | "FAIL" =
+      pc === ts ? "PASS" : pc + wc >= ts || pc >= 10 ? "AVERAGE" : "FAIL";
+    const sp  = Math.round((pc / ts) * 100);
+    const now = Date.now();
+    const u   = getCurrentUser();
+    const uid = u?.clientId ?? u?.id ?? "anonymous";
+
+    setSaveStatus("saving");
+    try {
+      await saveSubmission({
+        id:          `sub_${now}_${Math.random().toString(36).slice(2, 7)}`,
+        token:       assignment?.token ?? "",
+        practicalId,
+        mode:        assignment ? "assignment" : "practice",
+        studentId:   uid,
+        studentName: u?.fullName ?? "Anonymous",
+        studentReg:  u?.regNumber ?? undefined,
+        submittedAt: new Date(now).toISOString(),
+        durationSec: sessionStartAt ? Math.round((now - sessionStartAt) / 1000) : 0,
+        score10:     Math.min(10, Math.max(0, Math.round((rawScore / 18) * 100) / 10)),
+        scorePct:    sp,
+        passCount:   pc,
+        totalSteps:  ts,
+        result:      dr,
+        ph:          predictedPH,
+        viscosity:   predictedVisc,
+        stability:   stabilityStr || "unknown",
+        synced:      true,
+      });
+      submittedRef.current = true; // only lock after a confirmed save
+      setSaveStatus("saved");
+      logEvaluationSubmitted(practicalId, sp, dr);
+    } catch (err: unknown) {
+      setSaveStatus("error");
+      setSaveError((err as Error).message ?? "Failed to submit. Please try again.");
+    }
+  };
 
   const handleEvaluate = async () => {
     const viscGauge = apparatus.find(a => a.type === "viscositygauge");
@@ -372,78 +415,23 @@ const EvaluationPanel: React.FC<Props> = ({
       const ccLive = readColdCreamLabState(apparatus);
       setCcForm(ccLive);
       try {
-        const r = evaluateColdCream(ccLive);
+        const r  = evaluateColdCream(ccLive);
         setCcResult(r);
-        if (!submittedRef.current) {
-          submittedRef.current = true;
-          const cl  = buildColdCreamChecklist(r, ccLive, liveVisc, livePH);
-          const pc  = cl.filter(i => i.status === "pass").length;
-          const wc  = cl.filter(i => i.status === "warn").length;
-          const ts  = 13;
-          const dr: "PASS"|"AVERAGE"|"FAIL" =
-            pc === ts ? "PASS" : pc + wc >= ts || pc >= 10 ? "AVERAGE" : "FAIL";
-          const sp  = Math.round((pc / ts) * 100);
-          const u   = getCurrentUser();
-          const now = Date.now();
-          try {
-            const u   = getCurrentUser();
-            const uid = (u as {clientId?:string}|null)?.clientId ?? u?.id ?? "anonymous";
-            await saveSubmission({
-              id: `sub_${now}_${Math.random().toString(36).slice(2,7)}`,
-              token: assignment?.token ?? "", practicalId,
-              mode: assignment ? "assignment" : "practice",
-              studentId: uid, studentName: u?.fullName ?? "Anonymous",
-              studentReg: u?.regNumber ?? undefined,
-              submittedAt: new Date(now).toISOString(),
-              durationSec: sessionStartAt ? Math.round((now - sessionStartAt) / 1000) : 0,
-              score10: Math.round((r.score / 18) * 100) / 10,
-              scorePct: sp, passCount: pc, totalSteps: ts, result: dr,
-              ph: r.predicted_pH, viscosity: r.predicted_viscosity,
-              stability: r.stability ?? "unknown", synced: true,
-            });
-            logEvaluationSubmitted(practicalId, sp, dr);
-          } catch (saveErr) {
-            console.error("[EvaluationPanel] save failed:", saveErr);
-          }
-        }
-      } catch { /* no ingredients */ }
+        const cl = buildColdCreamChecklist(r, ccLive, liveVisc, livePH);
+        const pc = cl.filter(i => i.status === "pass").length;
+        const wc = cl.filter(i => i.status === "warn").length;
+        await persistSubmission(r.score, r.predicted_pH, r.predicted_viscosity, r.stability, pc, wc, 13, liveVisc, livePH);
+      } catch { /* no ingredients added yet */ }
     } else {
       const live = readLabState(apparatus);
       setForm(live);
       try {
-        const r = evaluateFormulation(live);
+        const r  = evaluateFormulation(live);
         setResult(r);
-        if (!submittedRef.current) {
-          submittedRef.current = true;
-          const cl  = buildChecklist(r, live, liveVisc, livePH);
-          const pc  = cl.filter(i => i.status === "pass").length;
-          const wc  = cl.filter(i => i.status === "warn").length;
-          const ts  = 14;
-          const dr: "PASS"|"AVERAGE"|"FAIL" =
-            pc === ts ? "PASS" : pc + wc >= ts || pc >= 10 ? "AVERAGE" : "FAIL";
-          const sp  = Math.round((pc / ts) * 100);
-          const now = Date.now();
-          try {
-            const u   = getCurrentUser();
-            const uid = (u as {clientId?:string}|null)?.clientId ?? u?.id ?? "anonymous";
-            await saveSubmission({
-              id: `sub_${now}_${Math.random().toString(36).slice(2,7)}`,
-              token: assignment?.token ?? "", practicalId,
-              mode: assignment ? "assignment" : "practice",
-              studentId: uid, studentName: u?.fullName ?? "Anonymous",
-              studentReg: u?.regNumber ?? undefined,
-              submittedAt: new Date(now).toISOString(),
-              durationSec: sessionStartAt ? Math.round((now - sessionStartAt) / 1000) : 0,
-              score10: Math.round((r.score / 18) * 100) / 10,
-              scorePct: sp, passCount: pc, totalSteps: ts, result: dr,
-              ph: r.predicted_pH, viscosity: r.predicted_viscosity,
-              stability: r.stability ?? "unknown", synced: true,
-            });
-            logEvaluationSubmitted(practicalId, sp, dr);
-          } catch (saveErr) {
-            console.error("[EvaluationPanel] save failed:", saveErr);
-          }
-        }
+        const cl = buildChecklist(r, live, liveVisc, livePH);
+        const pc = cl.filter(i => i.status === "pass").length;
+        const wc = cl.filter(i => i.status === "warn").length;
+        await persistSubmission(r.score, r.predicted_pH, r.predicted_viscosity, r.stability, pc, wc, 14, liveVisc, livePH);
       } catch { /* no ingredients yet */ }
     }
   };
@@ -696,6 +684,39 @@ const EvaluationPanel: React.FC<Props> = ({
                     {checklist.map(item => <CheckRow key={item.label} {...item} />)}
                   </div>
                 </div>
+
+                {/* ── Submission status banner ── */}
+                {saveStatus === "saving" && (
+                  <div style={{ background:"#0d1b2e", border:"1px solid #1e3a5f",
+                    borderRadius:10, padding:"10px 14px", marginBottom:10,
+                    display:"flex", alignItems:"center", gap:8, color:"#60a5fa", fontSize:13 }}>
+                    <span style={{ animation:"spin 1s linear infinite", display:"inline-block" }}>⟳</span>
+                    Submitting your result to the teacher…
+                  </div>
+                )}
+                {saveStatus === "saved" && (
+                  <div style={{ background:"#052e16", border:"1px solid #166534",
+                    borderRadius:10, padding:"10px 14px", marginBottom:10,
+                    display:"flex", alignItems:"center", gap:8, color:"#4ade80", fontSize:13, fontWeight:600 }}>
+                    <span>✓</span> Result submitted successfully to your teacher.
+                  </div>
+                )}
+                {saveStatus === "error" && (
+                  <div style={{ background:"#2d0a0a", border:"1px solid #7f1d1d",
+                    borderRadius:10, padding:"10px 14px", marginBottom:10,
+                    display:"flex", alignItems:"center", justifyContent:"space-between", gap:12 }}>
+                    <div style={{ color:"#fca5a5", fontSize:12 }}>
+                      ⚠ Submission failed: {saveError}
+                    </div>
+                    <button onClick={handleEvaluate} style={{
+                      background:"#1d4ed8", border:"none", borderRadius:7,
+                      color:"white", fontSize:12, fontWeight:700,
+                      padding:"5px 12px", cursor:"pointer", flexShrink:0,
+                    }}>
+                      Retry
+                    </button>
+                  </div>
+                )}
 
                 {/* ── Feedback / Congratulations ── */}
                 {(activeResult?.feedback ?? []).length > 0 ? (

@@ -84,7 +84,13 @@ const submissionSchema = new mongoose.Schema(
     },
     synced: {
       type:    Boolean,
-      default: true,   // always true when stored in the real DB
+      default: true,
+    },
+    // Stored at save time so teacher queries can filter out non-student rows
+    submitterRole: {
+      type:    String,
+      enum:    ['student', 'teacher', 'admin'],
+      default: 'student',
     },
   },
   { timestamps: true }
@@ -97,6 +103,7 @@ submissionSchema.index({ token: 1 });
 submissionSchema.index({ result: 1 });
 submissionSchema.index({ submittedAt: -1 });
 submissionSchema.index({ mode: 1 });
+submissionSchema.index({ submitterRole: 1 });
 
 // ── Aggregate helpers ─────────────────────────────────────────────────────────
 submissionSchema.statics.getStats = async function () {

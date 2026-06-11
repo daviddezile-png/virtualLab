@@ -18,6 +18,9 @@ export interface Assignment {
   createdBy?:        string;
   teacherId?:        string;
   uses?:             number;
+  // Per-student timer start (ms epoch). Set by the backend when this student
+  // first redeems the code — authoritative across devices and sessions.
+  startedAt?:        number;
 }
 
 export const isCodeExpired = (a: Assignment): boolean =>
@@ -78,10 +81,13 @@ export const deleteAssignment = async (token: string): Promise<void> => {
 };
 
 export const findAssignment = async (token: string): Promise<Assignment | null> => {
-  try {
-    const res = await apiGet<{ assignment: Assignment }>(`/api/assignments/redeem/${token.toUpperCase().trim()}`);
-    return res.assignment ?? null;
-  } catch { return null; }
+  // Errors propagate so callers can surface backend messages (e.g. "no teacher assigned").
+  const res = await apiGet<{ assignment: Assignment; startedAt?: number }>(
+    `/api/assignments/redeem/${token.toUpperCase().trim()}`
+  );
+  if (!res.assignment) return null;
+  // Attach the server-authoritative per-student timer start to the assignment object.
+  return { ...res.assignment, startedAt: res.startedAt };
 };
 
 export const incrementUses = async (_token: string): Promise<void> => {

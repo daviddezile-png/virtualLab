@@ -1,6 +1,8 @@
-const express    = require('express');
+const express         = require('express');
 const { body, validationResult } = require('express-validator');
-const Assignment = require('../models/Assignment');
+const Assignment      = require('../models/Assignment');
+const User            = require('../models/User');
+const AssignmentTimer = require('../models/AssignmentTimer');
 const { authenticate, requireRole } = require('../middleware/auth');
 
 const router = express.Router();
@@ -49,6 +51,60 @@ router.post('/', requireRole('teacher', 'admin'), [
 // ── GET /api/assignments/redeem/:token ── student redeems a code ──────────────
 router.get('/redeem/:token', async (req, res) => {
   try {
+    // Students must be assigned to a teacher before using assignment codes
+    if (req.user.role === 'student') {
+      const student = await User.findOne({ clientId: req.user.id })
+        .select('assignedTeacherId');
+      if (!student?.assignedTeacherId) {
+        return res.status(403).json({
+          error: 'You must join a class first. Ask your teacher for a class invitation code and enter it on the lab page.',
+          noTeacher: true,
+        });
+      }
+
+      const assignment = await Assignment.findOne({
+        token: req.params.token.toUpperCase(),
+      });
+
+      if (!assignment)
+        return res.status(404).json({ error: 'Invalid code — no assignment found' });
+
+      // Enforce that the assignment belongs to the student's assigned teacher
+      if (assignment.teacherId !== student.assignedTeacherId) {
+        return res.status(403).json({
+          error: 'This assignment code was not issued by your teacher. Ask your teacher for the correct code.',
+        });
+      }
+
+      if (assignment.codeExpiresAt && new Date() > new Date(assignment.codeExpiresAt))
+        return res.status(410).json({ error: 'This assignment code has expired' });
+
+      if (assignment.maxUses > 0 && assignment.useCount >= assignment.maxUses)
+        return res.status(410).json({ error: 'This code has reached its maximum number of uses' });
+
+      // Find or create this student's personal timer for this assignment.
+      // upsert with setOnInsert ensures startedAt is only written on first redemption.
+      const now = new Date();
+      const timerDoc = await AssignmentTimer.findOneAndUpdate(
+        { studentId: req.user.id, token: assignment.token },
+        { $setOnInsert: { studentId: req.user.id, token: assignment.token,
+            practicalId: assignment.practicalId, startedAt: now } },
+        { upsert: true, new: true }
+      );
+
+      // Only increment useCount on the very first redemption by this student
+      if (timerDoc.startedAt.getTime() === now.getTime()) {
+        assignment.useCount += 1;
+        await assignment.save();
+      }
+
+      return res.json({
+        assignment,
+        startedAt: timerDoc.startedAt.getTime(), // ms timestamp — authoritative timer start
+      });
+    }
+
+    // Non-students (teachers previewing, admins) — no teacher-check
     const assignment = await Assignment.findOne({
       token: req.params.token.toUpperCase(),
     });
@@ -62,10 +118,8 @@ router.get('/redeem/:token', async (req, res) => {
     if (assignment.maxUses > 0 && assignment.useCount >= assignment.maxUses)
       return res.status(410).json({ error: 'This code has reached its maximum number of uses' });
 
-    // Increment use count
     assignment.useCount += 1;
     await assignment.save();
-
     res.json({ assignment });
   } catch (err) {
     res.status(500).json({ error: 'Failed to redeem code' });
