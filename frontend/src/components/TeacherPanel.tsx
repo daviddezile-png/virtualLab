@@ -1,8 +1,8 @@
 import React, { useState, useContext, createContext, useEffect } from "react";
 import {
   LayoutDashboard, TestTubes, ClipboardList, Users, BarChart2,
-  ClipboardCheck, Megaphone, Settings, ArrowLeft, Sun, Moon, Menu,
-  Plus, Download, Edit, Trash2, Search, Upload, Send, Copy, Eye,
+  ClipboardCheck, Settings, ArrowLeft, Sun, Moon, Menu,
+  Plus, Download, Edit, Trash2, Search, Upload, Copy, Eye,
   GripVertical, TrendingUp, Award, Clock, FileText, Bell,
   FlaskConical, FlaskRound, Beaker, User, BookOpen, Shield,
   LogOut, CheckCircle, AlertCircle, Activity, UserPlus, Filter,
@@ -19,9 +19,8 @@ import {
   QAQuestion, QAPractical, getAllAnswers, QAAnswer,
 } from "../utils/qaStore";
 import {
-  getAllAnnouncements, saveAnnouncement, deleteAnnouncement,
-  Announcement as StoredAnnouncement,
-} from "../utils/announcementStore";
+  ClassInvite, getClassInvites, generateClassInvite, deleteClassInvite,
+} from "../utils/classInviteStore";
 
 // Persistent settings helpers
 const SETTINGS_KEY = "vlab_teacher_settings";
@@ -89,7 +88,7 @@ const useTheme = () => useContext(ThemeCtx);
 
 type Section =
   | "dashboard" | "questions" | "students"
-  | "analytics" | "submissions" | "announcements" | "settings";
+  | "analytics" | "submissions" | "settings";
 
 interface Student {
   id: string; name: string; email: string; enrolled: string;
@@ -350,7 +349,6 @@ const Dashboard: React.FC = () => {
 
   const quickActions = [
     { Icon:ClipboardList, label:"Create Assignment",   color:C.accent  },
-    { Icon:Megaphone,     label:"Send Announcement",   color:C.purple  },
     { Icon:Download,      label:"Export Analytics",    color:C.amber   },
     { Icon:RefreshCw,     label:"Refresh Data",        color:C.green   },
   ];
@@ -1356,7 +1354,7 @@ const Students: React.FC = () => {
     <div>
       <SectionHeading
         title="Students"
-        sub={`${allStudents.length} student${allStudents.length !== 1 ? "s" : ""} in the system.`}
+        sub={`${allStudents.length} student${allStudents.length !== 1 ? "s" : ""} joined your class via invitation code.`}
         action={
           <div style={{ display:"flex", gap:8 }}>
             <Btn label="Add Student" Icon={UserPlus} small
@@ -1443,10 +1441,11 @@ const Students: React.FC = () => {
           padding:"48px 20px", textAlign:"center" }}>
           <Users size={36} color={C.txtMut} style={{ marginBottom:12, opacity:0.4 }} />
           <div style={{ color:C.txtPri, fontWeight:700, fontSize:15, marginBottom:6 }}>
-            No students yet
+            No students in your class yet
           </div>
-          <div style={{ color:C.txtMut, fontSize:13 }}>
-            Add students above or ask them to self-register on the app.
+          <div style={{ color:C.txtMut, fontSize:13, lineHeight:1.6 }}>
+            Go to <strong>Settings</strong> → generate a class invitation code (CLS-XXXXXX)
+            and share it with your students. They appear here once they enter the code.
           </div>
         </div>
       ) : (
@@ -1496,7 +1495,7 @@ const Students: React.FC = () => {
         </div>
       )}
       <div style={{ color:C.txtMut, fontSize:12, marginTop:10 }}>
-        Showing {filtered.length} of {allStudents.length} registered students
+        Showing {filtered.length} of {allStudents.length} students in your class
       </div>
     </div>
   );
@@ -1677,15 +1676,46 @@ const Analytics: React.FC = () => {
 // Submissions
 // ─────────────────────────────────────────────────────────────────────────────
 
+// ── CSV / Excel export helper ─────────────────────────────────────────────────
+const exportToExcel = (rows: LabSubmission[]) => {
+  const headers = ["Student Name","Reg Number","Practical","Assignment Code","Score (%)","Score /10","Result","pH","Viscosity (cP)","Duration (min)","Submitted"];
+  const csvRows = [
+    headers.join(","),
+    ...rows.map(s => [
+      `"${s.studentName}"`,
+      `"${s.studentReg ?? ""}"`,
+      s.practicalId === "vanishing-cream" ? "Vanishing Cream" : "Cold Cream",
+      `"${s.token ?? ""}"`,
+      s.scorePct,
+      s.score10.toFixed(1),
+      s.result,
+      s.ph.toFixed(2),
+      s.viscosity,
+      s.durationSec > 0 ? Math.round(s.durationSec / 60) : 0,
+      `"${new Date(s.submittedAt).toLocaleDateString()}"`,
+    ].join(",")),
+  ];
+  const csv  = csvRows.join("\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement("a");
+  a.href     = url;
+  a.download = `submissions_${new Date().toISOString().slice(0,10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+};
+
 const Submissions: React.FC = () => {
   const { C } = useTheme();
   const [practicalFilter, setPracticalFilter] = useState("all");
+  const [tokenFilter,     setTokenFilter]     = useState("all");
   const [resultFilter,    setResultFilter]    = useState<"all"|"PASS"|"AVERAGE"|"FAIL">("all");
   const [modeFilter,      setModeFilter]      = useState<"all"|"assignment"|"practice">("all");
   const [search,          setSearch]          = useState("");
   const [refresh,         setRefresh]         = useState(0);
 
-  const [allSubs, setAllSubs] = useState<LabSubmission[]>([]);
+  const [allSubs,      setAllSubs]      = useState<LabSubmission[]>([]);
+  const [assignments,  setAssignments]  = useState<Assignment[]>([]);
 
   useEffect(() => {
     getAllSubmissions().then(subs =>
@@ -1693,10 +1723,12 @@ const Submissions: React.FC = () => {
         new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime()
       ))
     );
+    getAllAssignments().then(setAssignments);
   }, [refresh]);
 
   const filtered = allSubs.filter(s =>
     (practicalFilter === "all" || s.practicalId === practicalFilter) &&
+    (tokenFilter     === "all" || s.token       === tokenFilter)     &&
     (resultFilter    === "all" || s.result      === resultFilter)    &&
     (modeFilter      === "all" || s.mode        === modeFilter)      &&
     (s.studentName.toLowerCase().includes(search.toLowerCase()) ||
@@ -1706,10 +1738,22 @@ const Submissions: React.FC = () => {
   return (
     <div>
       <SectionHeading title="Submissions" sub="All evaluated lab sessions from real students."
-        action={<Btn label="Refresh" Icon={RefreshCw} variant="ghost" small onClick={() => setRefresh(r=>r+1)} />} />
+        action={
+          <div style={{ display:"flex", gap:8 }}>
+            <Btn label="Refresh" Icon={RefreshCw} variant="ghost" small onClick={() => setRefresh(r=>r+1)} />
+            <Btn
+              label={`Export${filtered.length > 0 ? ` (${filtered.length})` : ""}`}
+              Icon={Download}
+              small
+              onClick={() => exportToExcel(filtered)}
+            />
+          </div>
+        }
+      />
 
       {/* Filters */}
       <div style={{ display:"flex", gap:8, marginBottom:20, flexWrap:"wrap" }}>
+        {/* Search */}
         <div style={{ position:"relative", flex:1, minWidth:200 }}>
           <span style={{ position:"absolute", left:11, top:"50%", transform:"translateY(-50%)",
             pointerEvents:"none", display:"flex" }}>
@@ -1720,6 +1764,8 @@ const Submissions: React.FC = () => {
               color:C.txtPri, borderRadius:8, padding:"8px 12px 8px 34px",
               fontSize:13, boxSizing:"border-box", outline:"none" }} />
         </div>
+
+        {/* Practical dropdown */}
         <select value={practicalFilter} onChange={e => setPracticalFilter(e.target.value)}
           style={{ background:C.card, border:`1px solid ${C.border}`, color:C.txtSec,
             borderRadius:8, padding:"8px 12px", fontSize:13, cursor:"pointer", outline:"none" }}>
@@ -1727,6 +1773,21 @@ const Submissions: React.FC = () => {
           <option value="vanishing-cream">Vanishing Cream</option>
           <option value="cold-cream">Cold Cream</option>
         </select>
+
+        {/* Assignment code dropdown */}
+        <select value={tokenFilter} onChange={e => setTokenFilter(e.target.value)}
+          style={{ background:C.card, border:`1px solid ${C.border}`, color:C.txtSec,
+            borderRadius:8, padding:"8px 12px", fontSize:13, cursor:"pointer", outline:"none",
+            fontFamily:"monospace" }}>
+          <option value="all">All Codes</option>
+          {assignments.map(a => (
+            <option key={a.token} value={a.token}>
+              {a.token} — {a.practicalId === "vanishing-cream" ? "VC" : "CC"} · {a.targetGrams}g
+            </option>
+          ))}
+        </select>
+
+        {/* Result filter */}
         {(["all","PASS","AVERAGE","FAIL"] as const).map(f => (
           <button key={f} onClick={() => setResultFilter(f)} style={{
             padding:"7px 12px", borderRadius:8, cursor:"pointer", fontWeight:600,
@@ -1735,6 +1796,8 @@ const Submissions: React.FC = () => {
             color: resultFilter===f ? "white" : C.txtSec,
           }}>{f === "all" ? "All Results" : f}</button>
         ))}
+
+        {/* Mode filter */}
         {(["all","assignment","practice"] as const).map(f => (
           <button key={f} onClick={() => setModeFilter(f)} style={{
             padding:"7px 12px", borderRadius:8, cursor:"pointer", fontWeight:600,
@@ -1760,7 +1823,7 @@ const Submissions: React.FC = () => {
             overflow:"hidden", boxShadow:`0 1px 4px ${C.shadow}` }}>
             <div className="tp-table-wrap">
             <table style={{ width:"100%", borderCollapse:"collapse" }}>
-              <TableHead cols={["Student","Practical","Mode","Score","Result","pH","Viscosity","Duration","Submitted"]} />
+              <TableHead cols={["Student","Practical","Mode","Assignment Code","Score","Result","pH","Viscosity","Duration","Submitted"]} />
               <tbody>
                 {filtered.map((s,i) => (
                   <tr key={s.id} style={{ background: i%2===0?"transparent":`${C.surface}88`,
@@ -1783,6 +1846,17 @@ const Submissions: React.FC = () => {
                         border:`1px solid ${s.mode==="assignment" ? `${C.accent}44` : C.border}`,
                         borderRadius:20, padding:"2px 8px", fontSize:11, fontWeight:700,
                         textTransform:"capitalize" }}>{s.mode}</span>
+                    </td>
+                    <td style={{ padding:"11px 14px" }}>
+                      {s.mode === "assignment" && s.token ? (
+                        <code style={{ background:`${C.accent}12`, color:C.accent,
+                          border:`1px solid ${C.accent}44`, borderRadius:6,
+                          padding:"2px 8px", fontSize:12, fontWeight:700, letterSpacing:1 }}>
+                          {s.token}
+                        </code>
+                      ) : (
+                        <span style={{ color:C.txtMut, fontSize:12 }}>—</span>
+                      )}
                     </td>
                     <td style={{ padding:"11px 14px", minWidth:120 }}><ScoreBar score={s.scorePct} /></td>
                     <td style={{ padding:"11px 14px" }}>{resultBadge(s.result, C)}</td>
@@ -1817,110 +1891,6 @@ const Submissions: React.FC = () => {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Announcements
-// ─────────────────────────────────────────────────────────────────────────────
-
-const Announcements: React.FC = () => {
-  const { C } = useTheme();
-  const [list,    setList]    = useState<StoredAnnouncement[]>([]);
-  const [title,   setTitle]   = useState("");
-  const [body,    setBody]    = useState("");
-  const [target,  setTarget]  = useState("All Students");
-  const [refresh, setRefresh] = useState(0);
-
-  useEffect(() => { getAllAnnouncements().then(setList); }, [refresh]);
-
-  const reload = () => setRefresh(r => r + 1);
-
-  const send = async () => {
-    if (!title.trim() || !body.trim()) return;
-    const students = await getStudents();
-    const a: StoredAnnouncement = {
-      title:  title.trim(),
-      body:   body.trim(),
-      target,
-      sentAt: new Date().toLocaleString(),
-      read:   0,
-      total:  students.length,
-    };
-    await saveAnnouncement(a);
-    setTitle(""); setBody("");
-    reload();
-  };
-
-  const handleDelete = async (id: string) => { await deleteAnnouncement(id); reload(); };
-
-  const lbl: React.CSSProperties = { color:C.txtMut, fontSize:11, display:"block",
-    marginBottom:5, textTransform:"uppercase", letterSpacing:0.7 };
-
-  return (
-    <div>
-      <SectionHeading title="Announcements" sub="Broadcast messages to students."
-        action={<Btn label="Refresh" Icon={RefreshCw} variant="ghost" small onClick={reload} />} />
-
-      <div style={{ display:"grid", gridTemplateColumns:"1fr 380px", gap:20, alignItems:"start" }}>
-        <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
-          {list.length === 0 && (
-            <div style={{ background:C.card, border:`2px dashed ${C.border2}`, borderRadius:12,
-              padding:"32px 20px", textAlign:"center", color:C.txtMut }}>
-              <Megaphone size={28} style={{ marginBottom:8, opacity:0.3 }} />
-              <div style={{ fontSize:13 }}>No announcements yet. Compose and send one on the right.</div>
-            </div>
-          )}
-          {list.map(a => (
-            <div key={a.id} style={{ background:C.card, border:`1px solid ${C.border}`,
-              borderRadius:12, padding:18, boxShadow:`0 1px 4px ${C.shadow}` }}>
-              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start",
-                gap:10, marginBottom:8 }}>
-                <div>
-                  <div style={{ color:C.txtPri, fontWeight:700, fontSize:14 }}>{a.title}</div>
-                  <div style={{ color:C.txtMut, fontSize:11, marginTop:2 }}>{a.sentAt} · To: {a.target}</div>
-                </div>
-                <div style={{ display:"flex", gap:6, alignItems:"center" }}>
-                  <span style={{ background:`${C.green}12`, border:`1px solid ${C.green}44`,
-                    borderRadius:8, padding:"4px 8px", color:C.green, fontSize:11, fontWeight:600 }}>
-                    {a.total} recipients
-                  </span>
-                  <button onClick={() => a.id && handleDelete(a.id)} style={{
-                    background:`${C.red}10`, border:"none", color:C.red,
-                    borderRadius:6, padding:"4px 7px", cursor:"pointer",
-                    display:"flex", alignItems:"center" }}>
-                    <Trash2 size={12} strokeWidth={2} />
-                  </button>
-                </div>
-              </div>
-              <p style={{ color:C.txtSec, fontSize:13, margin:0, lineHeight:1.6 }}>{a.body}</p>
-            </div>
-          ))}
-        </div>
-
-        <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:14,
-          padding:20, position:"sticky", top:20, boxShadow:`0 1px 4px ${C.shadow}` }}>
-          <div style={{ color:C.txtPri, fontWeight:700, fontSize:15, marginBottom:18,
-            display:"flex", alignItems:"center", gap:8 }}>
-            <Megaphone size={16} color={C.accent} strokeWidth={2} /> New Announcement
-          </div>
-          <label style={lbl}>Title</label>
-          <TInput value={title} onChange={e => setTitle(e.target.value)}
-            placeholder="e.g. Lab opens tomorrow" style={{ marginBottom:14 }} />
-          <label style={lbl}>Target Audience</label>
-          <select value={target} onChange={e => setTarget(e.target.value)}
-            style={{ width:"100%", background:C.surface, border:`1px solid ${C.border2}`,
-              color:C.txtSec, borderRadius:8, padding:"9px 12px", fontSize:13,
-              cursor:"pointer", outline:"none", marginBottom:14, boxSizing:"border-box" }}>
-            <option>All Students</option>
-            <option>Vanishing Cream Group</option>
-            <option>Cold Cream Group</option>
-          </select>
-          <label style={lbl}>Message</label>
-          <TTextarea value={body} onChange={e => setBody(e.target.value)}
-            placeholder="Write your message…" rows={5} style={{ marginBottom:16 }} />
-          <Btn label="Send Announcement" Icon={Send} onClick={send} />
-        </div>
-      </div>
-    </div>
-  );
-};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Settings
@@ -1935,12 +1905,45 @@ const SettingsPanel: React.FC = () => {
   const [passScore,   setPassScore]   = useState<number>(stored.passScore   ?? 60);
   const [autoGrade,   setAutoGrade]   = useState<boolean>(stored.autoGrade  ?? true);
   const [emailAlerts, setEmailAlerts] = useState<boolean>(stored.emailAlerts ?? true);
-  const [regOpen,     setRegOpen]     = useState<boolean>(stored.regOpen    ?? true);
   const [teacherEmail,setTeacherEmail]= useState<string>(stored.teacherEmail ?? "teacher@school.edu");
   const [saved,       setSaved]       = useState(false);
 
+  // ── Class invitation codes ───────────────────────────────────────────────────
+  const [invites,      setInvites]      = useState<ClassInvite[]>([]);
+  const [generating,   setGenerating]   = useState(false);
+  const [generateErr,  setGenerateErr]  = useState<string | null>(null);
+  const [copiedInvite, setCopiedInvite] = useState<string | null>(null);
+  const [invRefresh,   setInvRefresh]   = useState(0);
+
+  useEffect(() => { getClassInvites().then(setInvites); }, [invRefresh]);
+
+  const handleGenerateInvite = async () => {
+    setGenerating(true);
+    setGenerateErr(null);
+    try {
+      await generateClassInvite();
+      setInvRefresh(r => r + 1);
+    } catch (err: unknown) {
+      setGenerateErr((err as Error).message ?? "Failed to generate code. Please try again.");
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  const handleCopyInvite = (token: string) => {
+    navigator.clipboard.writeText(token).catch(() => {});
+    setCopiedInvite(token);
+    setTimeout(() => setCopiedInvite(null), 2000);
+  };
+
+  const handleDeleteInvite = async (id: string) => {
+    if (!id) return;
+    await deleteClassInvite(id);
+    setInvRefresh(r => r + 1);
+  };
+
   const save = () => {
-    persistSettings({ timeLimit, maxAttempts, passScore, autoGrade, emailAlerts, regOpen, teacherEmail });
+    persistSettings({ timeLimit, maxAttempts, passScore, autoGrade, emailAlerts, teacherEmail });
     setSaved(true);
     setTimeout(() => setSaved(false), 2500);
   };
@@ -1984,7 +1987,104 @@ const SettingsPanel: React.FC = () => {
 
   return (
     <div style={{ maxWidth:700 }}>
-      <SectionHeading title="Settings" sub="Configure lab behaviour, grading, and access controls." />
+      <SectionHeading title="Settings" sub="Configure lab behaviour, grading, and class invitation codes." />
+
+      {/* ── Class Invitation Codes ── */}
+      <div style={{ background:C.card, border:`1px solid ${C.accent}44`, borderRadius:14,
+        padding:20, marginBottom:18, boxShadow:`0 1px 4px ${C.shadow}` }}>
+
+        <div style={{ color:C.txtPri, fontWeight:700, fontSize:14, marginBottom:6,
+          display:"flex", alignItems:"center", gap:8 }}>
+          <UserPlus size={16} color={C.accent} strokeWidth={2} /> Class Invitation Codes
+        </div>
+        <p style={{ color:C.txtSec, fontSize:12, lineHeight:1.6, margin:"0 0 16px" }}>
+          Generate a code and share it with students. When they enter it on the lab page they will be
+          assigned to your class and can then use your assignment codes.
+        </p>
+
+        {/* Generate button */}
+        <button
+          onClick={handleGenerateInvite}
+          disabled={generating}
+          style={{
+            display:"flex", alignItems:"center", gap:8,
+            marginBottom: generateErr ? 8 : 16,
+            background: generating ? C.surface : C.accent, color:"white", border:"none",
+            borderRadius:9, padding:"10px 18px", fontSize:13, fontWeight:700,
+            cursor: generating ? "not-allowed" : "pointer",
+          }}>
+          <Key size={15} strokeWidth={2} />
+          {generating ? "Generating…" : "Generate New Code"}
+        </button>
+        {generateErr && (
+          <div style={{ display:"flex", alignItems:"center", gap:6, marginBottom:16,
+            color:C.red, fontSize:12, fontWeight:600 }}>
+            <AlertCircle size={13} strokeWidth={2} /> {generateErr}
+          </div>
+        )}
+
+        {/* Invite list */}
+        {invites.length === 0 ? (
+          <div style={{ background:C.surface, border:`2px dashed ${C.border2}`, borderRadius:10,
+            padding:"20px 16px", textAlign:"center", color:C.txtMut, fontSize:13 }}>
+            <UserPlus size={24} style={{ marginBottom:8, opacity:0.3 }} />
+            <div>No invitation codes yet. Generate one above and share it with your students.</div>
+          </div>
+        ) : (
+          <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+            {invites.map(inv => (
+              <div key={inv._id} style={{ background:C.surface, border:`1px solid ${C.border}`,
+                borderRadius:10, padding:"12px 16px",
+                display:"flex", alignItems:"center", gap:12, flexWrap:"wrap" }}>
+
+                {/* Token */}
+                <code style={{ flex:1, color:C.accent, fontWeight:800, fontSize:17,
+                  letterSpacing:2, fontFamily:"monospace" }}>
+                  {inv.token}
+                </code>
+
+                {/* Use count */}
+                <span style={{ color:C.txtMut, fontSize:11, whiteSpace:"nowrap" }}>
+                  {inv.useCount} student{inv.useCount !== 1 ? "s" : ""} joined
+                </span>
+
+                {/* Created date */}
+                <span style={{ color:C.txtMut, fontSize:11, whiteSpace:"nowrap" }}>
+                  {new Date(inv.createdAt ?? "").toLocaleDateString()}
+                </span>
+
+                {/* Copy */}
+                <button onClick={() => handleCopyInvite(inv.token)} style={{
+                  background: copiedInvite === inv.token ? `${C.green}18` : "transparent",
+                  border:`1px solid ${copiedInvite === inv.token ? C.green : C.border2}`,
+                  color: copiedInvite === inv.token ? C.green : C.txtMut,
+                  borderRadius:7, padding:"5px 10px", cursor:"pointer",
+                  display:"flex", alignItems:"center", gap:5, fontSize:12, fontWeight:600,
+                }}>
+                  {copiedInvite === inv.token
+                    ? <><CheckCircle size={12} strokeWidth={2.5} /> Copied</>
+                    : <><Copy size={12} strokeWidth={2} /> Copy</>}
+                </button>
+
+                {/* Delete */}
+                <button onClick={() => inv._id && handleDeleteInvite(inv._id)} style={{
+                  background:`${C.red}10`, border:"none", color:C.red,
+                  borderRadius:7, padding:"5px 8px", cursor:"pointer",
+                  display:"flex", alignItems:"center",
+                }}>
+                  <Trash2 size={13} strokeWidth={2} />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div style={{ color:C.txtMut, fontSize:11, marginTop:12, lineHeight:1.6 }}>
+          Students enter the code <strong style={{ color:C.txtSec }}>CLS-XXXXXX</strong> on the lab
+          page code field. Once joined, they can access your assignment codes.
+        </div>
+      </div>
+
       <Block TitleIcon={Clock} title="Lab Timing">
         <Row label="Time Limit per Practical" sub="Students are auto-submitted when time expires">
           <div style={{ display:"flex", alignItems:"center", gap:8 }}>
@@ -2005,26 +2105,6 @@ const SettingsPanel: React.FC = () => {
           <div style={{ display:"flex", alignItems:"center", gap:8 }}>
             {numInput(passScore, setPassScore)}
             <span style={{ color:C.txtMut, fontSize:12 }}>%</span>
-          </div>
-        </Row>
-      </Block>
-
-      <Block TitleIcon={Shield} title="Student Access">
-        <Row label="Open Registration" sub="Allow new students to self-register with the enrolment code">
-          <Toggle v={regOpen} set={setRegOpen} />
-        </Row>
-        <Row label="Enrolment Code" sub="Share this code with students to join your class">
-          <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-            <code style={{ background:C.surface, border:`1px solid ${C.border2}`,
-              color:C.accent, borderRadius:6, padding:"5px 12px", fontSize:13,
-              letterSpacing:1.5, fontWeight:700 }}>VCLAB-2026</code>
-            <button
-              onClick={() => navigator.clipboard.writeText("VCLAB-2026").catch(()=>{})}
-              style={{ background:"transparent", border:`1px solid ${C.border2}`,
-                color:C.txtMut, borderRadius:6, padding:"5px 8px", cursor:"pointer",
-                display:"flex", alignItems:"center", gap:4, fontSize:12 }}>
-              <Copy size={13} strokeWidth={2} /> Copy
-            </button>
           </div>
         </Row>
       </Block>
@@ -2062,19 +2142,18 @@ const SettingsPanel: React.FC = () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 const NAV: { id:Section; label:string; Icon:LucideIcon }[] = [
-  { id:"dashboard",     label:"Dashboard",     Icon:LayoutDashboard },
-  { id:"questions",     label:"Assignments",   Icon:ClipboardList   },
-  { id:"students",      label:"Students",      Icon:Users           },
-  { id:"analytics",     label:"Analytics",     Icon:BarChart2       },
-  { id:"submissions",   label:"Submissions",   Icon:ClipboardCheck  },
-  { id:"announcements", label:"Announcements", Icon:Megaphone       },
-  { id:"settings",      label:"Settings",      Icon:Settings        },
+  { id:"dashboard",   label:"Dashboard",   Icon:LayoutDashboard },
+  { id:"questions",   label:"Assignments", Icon:ClipboardList   },
+  { id:"students",    label:"Students",    Icon:Users           },
+  { id:"analytics",   label:"Analytics",   Icon:BarChart2       },
+  { id:"submissions", label:"Submissions", Icon:ClipboardCheck  },
+  { id:"settings",    label:"Settings",    Icon:Settings        },
 ];
 
 const LABELS: Record<Section,string> = {
   dashboard:"Dashboard", questions:"Assignments",
-  students:"Students", analytics:"Analytics", submissions:"Submissions",
-  announcements:"Announcements", settings:"Settings",
+  students:"Students", analytics:"Analytics",
+  submissions:"Submissions", settings:"Settings",
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2114,7 +2193,6 @@ const TeacherPanel: React.FC<Props> = ({ onBack }) => {
       case "students":      return <Students />;
       case "analytics":     return <Analytics />;
       case "submissions":   return <Submissions />;
-      case "announcements": return <Announcements />;
       case "settings":      return <SettingsPanel />;
     }
   };
@@ -2200,8 +2278,9 @@ const TeacherPanel: React.FC<Props> = ({ onBack }) => {
           {/* Logout */}
           <div style={{ padding:"10px 8px", borderTop:`1px solid ${C.border}` }}>
             <button onClick={onBack} title="Logout" style={{
-              width:"100%", display:"flex", alignItems:"center", gap:10,
-              padding:"11px 14px",
+              width:"100%", display:"flex", alignItems:"center",
+              justifyContent: sbOpen ? "flex-start" : "center",
+              gap:10, padding: sbOpen ? "11px 14px" : "11px 0",
               borderRadius:9, border:`1px solid ${C.red}33`, cursor:"pointer",
               background:`${C.red}10`, color:C.red, fontSize:13, fontWeight:700,
             }}
@@ -2209,7 +2288,7 @@ const TeacherPanel: React.FC<Props> = ({ onBack }) => {
             onMouseLeave={e => (e.currentTarget.style.background = `${C.red}10`)}
             >
               <LogOut size={16} strokeWidth={2} />
-              <span>Logout</span>
+              {sbOpen && <span>Logout</span>}
             </button>
           </div>
         </aside>

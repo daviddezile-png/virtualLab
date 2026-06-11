@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useContext, createContext } from "react";
 import {
-  LayoutDashboard, Users, ClipboardList, ClipboardCheck,
-  Megaphone, BarChart2, Settings, LogOut, Sun, Moon, Menu, Search,
+  LayoutDashboard, Users, ClipboardCheck,
+  BarChart2, Settings, LogOut, Sun, Moon, Menu, Search,
   Trash2, Shield, Activity, TrendingUp, CheckCircle, AlertCircle,
   GraduationCap, User as UserIcon, Key,
   RefreshCw, Download, Lock, Unlock, Clock, Award, Database,
-  AlertTriangle, ChevronRight, LucideIcon,
+  AlertTriangle, ChevronRight, LucideIcon, Wifi, Server,
+  UserCheck, BarChart, FileCheck, Filter,
 } from "lucide-react";
 import {
   getAllUsers, User, createAdminUser, registerUser,
@@ -14,9 +15,6 @@ import {
   getStoredTheme, storeTheme,
 } from "../utils/userStore";
 import { getAllSubmissions, getStats } from "../utils/submissionStore";
-import { getAllAssignments, isCodeExpired, deleteAssignment } from "../utils/assignmentStore";
-import { getAllQuestions, getAllAnswers, deleteQuestion } from "../utils/qaStore";
-import { getAllAnnouncements, deleteAnnouncement } from "../utils/announcementStore";
 import { getAuditLog, clearAuditLog } from "../utils/auditStore";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -26,7 +24,7 @@ const DARK = {
   bg:"#0a0a0a", sidebar:"#111111", surface:"#161616", card:"#1a1a1a",
   border:"#2a2a2a", border2:"#3a3a3a",
   txtPri:"#f5f5f5", txtSec:"#a3a3a3", txtMut:"#666666",
-  accent:"#22c55e", accentHi:"#16a34a", accentBg:"rgba(34,197,94,0.10)",
+  accent:"#3b82f6", accentHi:"#2563eb", accentBg:"rgba(59,130,246,0.10)",
   red:"#ef4444", amber:"#f59e0b", blue:"#3b82f6",
   shadow:"rgba(0,0,0,0.6)", headerBg:"rgba(10,10,10,0.95)",
 } as const;
@@ -35,7 +33,7 @@ const LIGHT = {
   bg:"#f8fafc", sidebar:"#ffffff", surface:"#f1f5f9", card:"#ffffff",
   border:"#e2e8f0", border2:"#cbd5e1",
   txtPri:"#0f172a", txtSec:"#475569", txtMut:"#94a3b8",
-  accent:"#16a34a", accentHi:"#15803d", accentBg:"rgba(22,163,74,0.08)",
+  accent:"#2563eb", accentHi:"#1d4ed8", accentBg:"rgba(37,99,235,0.08)",
   red:"#dc2626", amber:"#d97706", blue:"#2563eb",
   shadow:"rgba(0,0,0,0.08)", headerBg:"rgba(255,255,255,0.97)",
 } as const;
@@ -47,8 +45,7 @@ const useTheme = () => useContext(ThemeCtx);
 // ─────────────────────────────────────────────────────────────────────────────
 // Section type
 // ─────────────────────────────────────────────────────────────────────────────
-type Section = "dashboard"|"users"|"approvals"|"assignments"|"submissions"|"questions"
-             |"announcements"|"analytics"|"settings"|"auditlog";
+type Section = "dashboard"|"users"|"approvals"|"analytics"|"settings"|"auditlog";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Shared micro-components
@@ -157,13 +154,11 @@ const Dashboard: React.FC = () => {
   const { C } = useTheme();
   const [users,   setUsers]   = useState<User[]>([]);
   const [subs,    setSubs]    = useState<any[]>([]);
-  const [assigns, setAssigns] = useState<any[]>([]);
   const [stats,   setStats]   = useState<any>({ total:0, todayCount:0, classAvg:0, passed:0, average:0, failed:0, avgDur:0 });
 
   useEffect(() => {
     getAllUsers().then(setUsers);
     getAllSubmissions().then(setSubs);
-    getAllAssignments().then(setAssigns);
     getStats().then(setStats);
   }, []);
 
@@ -179,8 +174,8 @@ const Dashboard: React.FC = () => {
       <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(190px,1fr))", gap:14, marginBottom:28 }}>
         <StatCard label="Total Users"     value={users.length}   sub={`${admins} admin · ${teachers} teachers · ${students} students`} Icon={Users}         color={C.accent} />
         <StatCard label="Total Submissions" value={stats.total}  sub={`${stats.todayCount} today`}             Icon={ClipboardCheck} color={C.blue}   />
-        <StatCard label="Class Average"   value={stats.total > 0 ? `${stats.classAvg}%` : "—"} sub="Across all sessions" Icon={TrendingUp}  color={C.amber}  />
-        <StatCard label="Assignments"     value={assigns.length} sub={`${assigns.filter(isCodeExpired).length} expired`} Icon={Key} color="#7c3aed" />
+        <StatCard label="Platform Average" value={stats.total > 0 ? `${stats.classAvg}%` : "—"} sub="Across all sessions" Icon={TrendingUp}  color={C.amber}  />
+        <StatCard label="Pass Rate"       value={stats.total > 0 ? `${Math.round(stats.passed/stats.total*100)}%` : "—"} sub="PASS result" Icon={CheckCircle} color="#7c3aed" />
       </div>
 
       <div className="ap-grid-dash" style={{ display:"grid", gridTemplateColumns:"1fr 320px", gap:20 }}>
@@ -552,534 +547,165 @@ const UserManager: React.FC = () => {
   );
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Assignments
-// ─────────────────────────────────────────────────────────────────────────────
-const AdminAssignments: React.FC = () => {
-  const { C } = useTheme();
-  const [search, setSearch] = useState("");
-  const [refresh, setRefresh] = useState(0);
-  const [allAssignments, setAllAssignments] = useState<any[]>([]);
-
-  useEffect(() => {
-    getAllAssignments().then(data =>
-      setAllAssignments([...data].sort((a,b) => new Date(b.createdAt ?? 0).getTime() - new Date(a.createdAt ?? 0).getTime()))
-    );
-  }, [refresh]);
-
-  const filtered = allAssignments.filter(a =>
-    a.title.toLowerCase().includes(search.toLowerCase()) ||
-    a.token.toLowerCase().includes(search.toLowerCase()) ||
-    a.practicalId.toLowerCase().includes(search.toLowerCase())
-  );
-
-  const handleDelete = async (token: string) => {
-    await deleteAssignment(token);
-    setRefresh(r => r + 1);
-  };
-
-  return (
-    <div>
-      <SectionHeading title="All Assignments" sub={`${allAssignments.length} total assignments across all teachers.`}
-        action={<Btn label="Refresh" Icon={RefreshCw} variant="ghost" small onClick={() => setRefresh(r=>r+1)} />} />
-
-      <div style={{ position:"relative", marginBottom:18 }}>
-        <span style={{ position:"absolute", left:11, top:"50%", transform:"translateY(-50%)",
-          pointerEvents:"none", display:"flex" }}>
-          <Search size={15} color={C.txtMut} />
-        </span>
-        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search by title, code, or practical…"
-          style={{ width:"100%", background:C.card, border:`1px solid ${C.border}`,
-            color:C.txtPri, borderRadius:8, padding:"9px 12px 9px 34px",
-            fontSize:13, boxSizing:"border-box", outline:"none" }} />
-      </div>
-
-      {allAssignments.length === 0 ? (
-        <div style={{ background:C.card, border:`2px dashed ${C.border2}`, borderRadius:14,
-          padding:"40px 20px", textAlign:"center", color:C.txtMut }}>
-          <Key size={30} style={{ marginBottom:10, opacity:0.3 }} />
-          <div>No assignments created yet.</div>
-        </div>
-      ) : (
-        <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:14,
-          overflow:"hidden", boxShadow:`0 1px 4px ${C.shadow}` }}>
-          <div className="ap-table-wrap"><table style={{ width:"100%", borderCollapse:"collapse" }}>
-            <TableHead cols={["Code","Practical","Target","Time Limit","Expires","Uses","Status",""]} />
-            <tbody>
-              {filtered.map((a,i) => {
-                const expired = isCodeExpired(a);
-                return (
-                  <tr key={a.token} style={{ background:i%2===0?"transparent":`${C.surface}88`,
-                    borderBottom:`1px solid ${C.border}` }}>
-                    <td style={{ padding:"11px 14px" }}>
-                      <code style={{ color:C.accent, fontWeight:700, fontSize:14, letterSpacing:1 }}>
-                        {a.token}
-                      </code>
-                      <div style={{ color:C.txtMut, fontSize:11, marginTop:2 }}
-                        title={a.title}>{a.title.slice(0,40)}{a.title.length>40?"…":""}</div>
-                    </td>
-                    <td style={{ padding:"11px 14px", color:C.txtSec, fontSize:12 }}>
-                      {a.practicalId === "vanishing-cream" ? "Vanishing Cream" : "Cold Cream"}
-                    </td>
-                    <td style={{ padding:"11px 14px", color:C.txtPri, fontSize:13, fontWeight:700 }}>
-                      {a.targetGrams} g
-                    </td>
-                    <td style={{ padding:"11px 14px", color:C.txtMut, fontSize:12 }}>
-                      {a.timeLimitMinutes > 0 ? `${a.timeLimitMinutes} min` : "—"}
-                    </td>
-                    <td style={{ padding:"11px 14px", color:C.txtMut, fontSize:12 }}>
-                      {a.codeExpiresAt
-                        ? <span style={{ color: expired ? C.red : C.txtSec }}>
-                            {new Date(a.codeExpiresAt).toLocaleDateString()}
-                          </span>
-                        : <span style={{ color:C.txtMut }}>Never</span>}
-                    </td>
-                    <td style={{ padding:"11px 14px", color:C.txtPri, fontSize:13 }}>{a.uses}</td>
-                    <td style={{ padding:"11px 14px" }}>
-                      <span style={{
-                        background: expired ? `${C.red}12` : `${C.accent}12`,
-                        color: expired ? C.red : C.accent,
-                        border: `1px solid ${expired ? `${C.red}44` : `${C.accent}44`}`,
-                        borderRadius:20, padding:"2px 10px", fontSize:11, fontWeight:700,
-                      }}>{expired ? "Expired" : "Active"}</span>
-                    </td>
-                    <td style={{ padding:"11px 14px" }}>
-                      <button onClick={() => handleDelete(a.token)} title="Delete assignment"
-                        style={{ background:`${C.red}10`, border:"none", color:C.red,
-                          borderRadius:6, padding:"5px 8px", cursor:"pointer",
-                          display:"flex", alignItems:"center" }}>
-                        <Trash2 size={13} strokeWidth={2} />
-                      </button>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table></div>
-          {filtered.length === 0 && (
-            <div style={{ padding:32, textAlign:"center", color:C.txtMut }}>No assignments match.</div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-};
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Submissions
-// ─────────────────────────────────────────────────────────────────────────────
-const AdminSubmissions: React.FC = () => {
-  const { C } = useTheme();
-  const [search, setSearch] = useState("");
-  const [result, setResult] = useState("all");
-  const [prac,   setPrac]   = useState("all");
-  const [all,    setAll]    = useState<any[]>([]);
-
-  useEffect(() => {
-    getAllSubmissions().then(data =>
-      setAll([...data].sort((a,b) => new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime()))
-    );
-  }, []);
-
-  const filtered = all.filter(s =>
-    (result === "all" || s.result === result) &&
-    (prac   === "all" || s.practicalId === prac) &&
-    (s.studentName.toLowerCase().includes(search.toLowerCase()) ||
-     (s.studentReg ?? "").toLowerCase().includes(search.toLowerCase()))
-  );
-
-  return (
-    <div>
-      <SectionHeading title="All Submissions" sub={`${all.length} total lab evaluations platform-wide.`}
-        action={<Btn label="Export CSV" Icon={Download} variant="ghost" small />} />
-
-      <div style={{ display:"flex", gap:10, marginBottom:18, flexWrap:"wrap" }}>
-        <div style={{ flex:1, minWidth:200, position:"relative" }}>
-          <span style={{ position:"absolute", left:11, top:"50%", transform:"translateY(-50%)",
-            pointerEvents:"none", display:"flex" }}>
-            <Search size={15} color={C.txtMut} />
-          </span>
-          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search student…"
-            style={{ width:"100%", background:C.card, border:`1px solid ${C.border}`,
-              color:C.txtPri, borderRadius:8, padding:"8px 12px 8px 32px",
-              fontSize:13, boxSizing:"border-box", outline:"none" }} />
-        </div>
-        <select value={prac} onChange={e => setPrac(e.target.value)}
-          style={{ background:C.card, border:`1px solid ${C.border}`, color:C.txtSec,
-            borderRadius:8, padding:"8px 12px", fontSize:13, cursor:"pointer", outline:"none" }}>
-          <option value="all">All Practicals</option>
-          <option value="vanishing-cream">Vanishing Cream</option>
-          <option value="cold-cream">Cold Cream</option>
-        </select>
-        {["all","PASS","AVERAGE","FAIL"].map(r => (
-          <button key={r} onClick={() => setResult(r)} style={{
-            padding:"7px 12px", borderRadius:8, cursor:"pointer", fontWeight:600,
-            fontSize:12, border:"none",
-            background: result===r ? C.accent : C.card,
-            color: result===r ? "white" : C.txtSec,
-          }}>{r === "all" ? "All" : r}</button>
-        ))}
-      </div>
-
-      {all.length === 0 ? (
-        <div style={{ background:C.card, border:`2px dashed ${C.border2}`, borderRadius:14,
-          padding:"40px 20px", textAlign:"center", color:C.txtMut }}>
-          <ClipboardCheck size={30} style={{ marginBottom:10, opacity:0.3 }} />
-          <div>No submissions yet.</div>
-        </div>
-      ) : (
-        <>
-          <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:14,
-            overflow:"hidden", boxShadow:`0 1px 4px ${C.shadow}` }}>
-            <div className="ap-table-wrap"><table style={{ width:"100%", borderCollapse:"collapse" }}>
-              <TableHead cols={["Student","Practical","Mode","Score","Result","pH","Viscosity","Duration","Date"]} />
-              <tbody>
-                {filtered.map((s,i) => (
-                  <tr key={s.id} style={{ background:i%2===0?"transparent":`${C.surface}88`,
-                    borderBottom:`1px solid ${C.border}` }}>
-                    <td style={{ padding:"10px 14px" }}>
-                      <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-                        <Avatar name={s.studentName} size={26} />
-                        <div>
-                          <div style={{ color:C.txtPri, fontSize:13 }}>{s.studentName}</div>
-                          {s.studentReg && <div style={{ color:C.txtMut, fontSize:10 }}>{s.studentReg}</div>}
-                        </div>
-                      </div>
-                    </td>
-                    <td style={{ padding:"10px 14px", color:C.txtSec, fontSize:12 }}>
-                      {s.practicalId === "vanishing-cream" ? "Vanishing" : "Cold Cream"}
-                    </td>
-                    <td style={{ padding:"10px 14px" }}>
-                      <span style={{
-                        background: s.mode==="assignment" ? `${C.blue}18` : C.surface,
-                        color: s.mode==="assignment" ? C.blue : C.txtMut,
-                        borderRadius:20, padding:"2px 8px", fontSize:11, fontWeight:700, textTransform:"capitalize",
-                      }}>{s.mode}</span>
-                    </td>
-                    <td style={{ padding:"10px 14px", color:C.txtPri, fontSize:13, fontWeight:700 }}>
-                      {s.scorePct}%
-                    </td>
-                    <td style={{ padding:"10px 14px" }}>
-                      <span style={{
-                        background: s.result==="PASS" ? `${C.accent}18` : s.result==="AVERAGE" ? `${C.amber}18` : `${C.red}18`,
-                        color: s.result==="PASS" ? C.accent : s.result==="AVERAGE" ? C.amber : C.red,
-                        borderRadius:20, padding:"2px 10px", fontSize:11, fontWeight:700,
-                      }}>{s.result}</span>
-                    </td>
-                    <td style={{ padding:"10px 14px", color:C.txtSec, fontSize:12, fontFamily:"monospace" }}>
-                      {s.ph.toFixed(2)}
-                    </td>
-                    <td style={{ padding:"10px 14px", color:C.txtSec, fontSize:12, fontFamily:"monospace" }}>
-                      {s.viscosity} cP
-                    </td>
-                    <td style={{ padding:"10px 14px", color:C.txtMut, fontSize:12 }}>
-                      {s.durationSec > 0 ? `${Math.round(s.durationSec/60)} min` : "—"}
-                    </td>
-                    <td style={{ padding:"10px 14px", color:C.txtMut, fontSize:11 }}>
-                      {new Date(s.submittedAt).toLocaleDateString()}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table></div>
-            {filtered.length === 0 && (
-              <div style={{ padding:32, textAlign:"center", color:C.txtMut }}>No submissions match.</div>
-            )}
-          </div>
-          <div style={{ color:C.txtMut, fontSize:12, marginTop:10 }}>
-            {filtered.length} of {all.length} submissions
-          </div>
-        </>
-      )}
-    </div>
-  );
-};
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Q&A Management
-// ─────────────────────────────────────────────────────────────────────────────
-const AdminQA: React.FC = () => {
-  const { C } = useTheme();
-  const [refresh,   setRefresh]   = useState(0);
-  const [questions, setQuestions] = useState<any[]>([]);
-  const [answers,   setAnswers]   = useState<any[]>([]);
-
-  useEffect(() => {
-    getAllQuestions().then(setQuestions);
-    getAllAnswers().then(setAnswers);
-  }, [refresh]);
-
-  const deleteQ = async (id: string) => {
-    await deleteQuestion(id);
-    setRefresh(r => r + 1);
-  };
-
-  return (
-    <div>
-      <SectionHeading title="Q&A Management"
-        sub={`${questions.length} questions · ${answers.length} student answers recorded.`}
-        action={<Btn label="Refresh" Icon={RefreshCw} variant="ghost" small onClick={() => setRefresh(r=>r+1)} />} />
-
-      {questions.length === 0 ? (
-        <div style={{ background:C.card, border:`2px dashed ${C.border2}`, borderRadius:14,
-          padding:"40px 20px", textAlign:"center", color:C.txtMut }}>
-          <ClipboardList size={30} style={{ marginBottom:10, opacity:0.3 }} />
-          <div>No Q&A questions created yet. Teachers create questions in their Assignments panel.</div>
-        </div>
-      ) : (
-        <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
-          {questions.map((q, i) => {
-            const qAnswers  = answers.filter(a => a.questionId === q.id);
-            const correct   = qAnswers.filter(a => a.isCorrect === true).length;
-            const incorrect = qAnswers.filter(a => a.isCorrect === false).length;
-            const pending   = qAnswers.filter(a => a.isCorrect === null).length;
-            return (
-              <div key={q.id} style={{ background:C.card, border:`1px solid ${C.border}`,
-                borderRadius:12, padding:"16px 18px", boxShadow:`0 1px 3px ${C.shadow}` }}>
-                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:12 }}>
-                  <div style={{ flex:1 }}>
-                    <div style={{ display:"flex", gap:8, alignItems:"center", marginBottom:8, flexWrap:"wrap" }}>
-                      <span style={{ color:C.txtMut, fontSize:12 }}>Q{i+1}</span>
-                      <span style={{
-                        background: q.type==="mcq" ? `${C.blue}18` : `${C.accent}18`,
-                        color: q.type==="mcq" ? C.blue : C.accent,
-                        borderRadius:20, padding:"2px 10px", fontSize:11, fontWeight:700,
-                      }}>{q.type === "mcq" ? "MCQ" : "Short Answer"}</span>
-                      <span style={{ background:C.surface, border:`1px solid ${C.border}`,
-                        color:C.txtMut, borderRadius:20, padding:"2px 10px", fontSize:11 }}>
-                        {q.practicalId === "all" ? "All Practicals"
-                          : q.practicalId === "vanishing-cream" ? "Vanishing Cream" : "Cold Cream"}
-                      </span>
-                      <span style={{ color:C.txtMut, fontSize:12 }}>{q.points} pts</span>
-                    </div>
-                    <div style={{ color:C.txtPri, fontSize:14, lineHeight:1.6 }}>{q.text}</div>
-                    {q.type === "mcq" && q.options.length > 0 && (
-                      <div style={{ display:"flex", flexWrap:"wrap", gap:6, marginTop:8 }}>
-                        {q.options.map((opt: string, oi: number) => (
-                          <span key={oi} style={{
-                            background: opt === q.correctAnswer ? `${C.accent}18` : C.surface,
-                            border: `1px solid ${opt === q.correctAnswer ? `${C.accent}44` : C.border}`,
-                            color: opt === q.correctAnswer ? C.accent : C.txtSec,
-                            borderRadius:6, padding:"3px 10px", fontSize:12, fontWeight: opt === q.correctAnswer ? 700 : 400,
-                          }}>
-                            {String.fromCharCode(65+oi)}. {opt}
-                            {opt === q.correctAnswer && " ✓"}
-                          </span>
-                        ))}
-                      </div>
-                    )}
-                    {qAnswers.length > 0 && (
-                      <div style={{ marginTop:10, display:"flex", gap:10, flexWrap:"wrap" }}>
-                        {[
-                          { label:`${correct} Correct`,  color:C.accent },
-                          { label:`${incorrect} Wrong`,   color:C.red   },
-                          { label:`${pending} Pending`,   color:C.amber },
-                        ].map(({ label, color }) => (
-                          <span key={label} style={{ color, fontSize:12, fontWeight:600 }}>{label}</span>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                  <button onClick={() => deleteQ(q.id)}
-                    style={{ background:`${C.red}10`, border:"none", color:C.red,
-                      borderRadius:6, padding:"7px 10px", cursor:"pointer",
-                      display:"flex", alignItems:"center", flexShrink:0 }}>
-                    <Trash2 size={14} strokeWidth={2} />
-                  </button>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-    </div>
-  );
-};
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Announcements
-// ─────────────────────────────────────────────────────────────────────────────
-const AdminAnnouncements: React.FC = () => {
-  const { C } = useTheme();
-  const [list,    setList]   = useState<any[]>([]);
-  const [refresh, setRefresh]= useState(0);
-
-  useEffect(() => { getAllAnnouncements().then(setList); }, [refresh]);
-
-  const handleDelete = async (id: string) => {
-    await deleteAnnouncement(id);
-    setRefresh(r => r + 1);
-  };
-
-  return (
-    <div>
-      <SectionHeading title="All Announcements"
-        sub="View and moderate all announcements from all teachers."
-        action={<Btn label="Refresh" Icon={RefreshCw} variant="ghost" small onClick={() => setRefresh(r=>r+1)} />} />
-
-      {list.length === 0 ? (
-        <div style={{ background:C.card, border:`2px dashed ${C.border2}`, borderRadius:14,
-          padding:"40px 20px", textAlign:"center", color:C.txtMut }}>
-          <Megaphone size={30} style={{ marginBottom:10, opacity:0.3 }} />
-          <div>No announcements have been sent yet.</div>
-        </div>
-      ) : (
-        <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
-          {list.map(a => (
-            <div key={a.id} style={{ background:C.card, border:`1px solid ${C.border}`,
-              borderRadius:12, padding:18, boxShadow:`0 1px 3px ${C.shadow}` }}>
-              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:12 }}>
-                <div style={{ flex:1 }}>
-                  <div style={{ color:C.txtPri, fontWeight:700, fontSize:14 }}>{a.title}</div>
-                  <div style={{ color:C.txtMut, fontSize:11, marginTop:2 }}>
-                    {a.sentAt} · To: {a.target} · {a.total} recipients
-                  </div>
-                  <p style={{ color:C.txtSec, fontSize:13, margin:"8px 0 0", lineHeight:1.6 }}>{a.body}</p>
-                </div>
-                <button onClick={() => handleDelete(a.id)}
-                  style={{ background:`${C.red}10`, border:"none", color:C.red,
-                    borderRadius:6, padding:"7px 10px", cursor:"pointer",
-                    display:"flex", alignItems:"center", flexShrink:0 }}>
-                  <Trash2 size={14} strokeWidth={2} />
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-};
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Analytics
+// Analytics — System Usage, Health, User Adoption, Data Integrity
 // ─────────────────────────────────────────────────────────────────────────────
 const AdminAnalytics: React.FC = () => {
   const { C } = useTheme();
-  const [subs,  setSubs]  = useState<any[]>([]);
-  const [stats, setStats] = useState<any>({ total:0, todayCount:0, classAvg:0, passed:0, average:0, failed:0, avgDur:0 });
+  const [users,   setUsers]   = useState<User[]>([]);
+  const [subs,    setSubs]    = useState<any[]>([]);
+  const [log,     setLog]     = useState<any[]>([]);
+  const [health,  setHealth]  = useState<"ok"|"degraded"|"unknown">("unknown");
+  const [refresh, setRefresh] = useState(0);
 
   useEffect(() => {
+    getAllUsers().then(setUsers);
     getAllSubmissions().then(setSubs);
-    getStats().then(setStats);
-  }, []);
+    getAuditLog().then(setLog);
+    fetch("/health").then(r => r.json()).then(d => setHealth(d.status === "OK" ? "ok" : "degraded")).catch(() => setHealth("degraded"));
+  }, [refresh]);
 
-  const vcSubs = subs.filter(s => s.practicalId === "vanishing-cream");
-  const ccSubs = subs.filter(s => s.practicalId === "cold-cream");
-  const vcAvg  = vcSubs.length > 0 ? Math.round(vcSubs.reduce((a,s)=>a+s.scorePct,0)/vcSubs.length) : 0;
-  const ccAvg  = ccSubs.length > 0 ? Math.round(ccSubs.reduce((a,s)=>a+s.scorePct,0)/ccSubs.length) : 0;
+  const now   = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const week  = new Date(today.getTime() - 6 * 86400000);
 
-  const dist = [
-    { range:"90–100", min:90, max:101, color:C.accent  },
-    { range:"80–89",  min:80, max:90,  color:"#4ade80"  },
-    { range:"70–79",  min:70, max:80,  color:C.amber    },
-    { range:"60–69",  min:60, max:70,  color:"#fb923c"  },
-    { range:"< 60",   min:0,  max:60,  color:C.red      },
-  ].map(r => ({ ...r, count: subs.filter(s => s.scorePct >= r.min && s.scorePct < r.max).length }));
-  const maxC = Math.max(...dist.map(d=>d.count), 1);
+  const students      = users.filter(u => u.role === "student");
+  const teachers      = users.filter(u => u.role === "teacher");
+  const todaySubs     = subs.filter(s => new Date(s.submittedAt) >= today);
+  const weekSubs      = subs.filter(s => new Date(s.submittedAt) >= week);
+  const todayUsers    = log.filter(e => new Date(e.timestamp) >= today && e.action === "user_login").length;
+  const weekUsers     = log.filter(e => new Date(e.timestamp) >= week  && e.action === "user_login").length;
+  const passCount     = subs.filter(s => s.result === "PASS").length;
+  const avgScore      = subs.length > 0 ? Math.round(subs.reduce((a,s) => a+s.scorePct, 0) / subs.length) : 0;
+  const avgDurMin     = subs.length > 0 ? Math.round(subs.reduce((a,s) => a + (s.durationSec||0), 0) / subs.length / 60) : 0;
+  const validSubs     = subs.filter(s => s.scorePct >= 0 && s.scorePct <= 100 && ["PASS","AVERAGE","FAIL"].includes(s.result)).length;
+  const integrityPct  = subs.length > 0 ? Math.round((validSubs / subs.length) * 100) : 100;
 
-  const topStudents = (() => {
-    const map = new Map<string,{name:string;scores:number[]}>();
-    subs.forEach((s: any) => {
-      let cur = map.get(s.studentId);
-      if (!cur) { cur = {name:s.studentName, scores:[]}; map.set(s.studentId, cur); }
-      cur.scores.push(s.scorePct);
-    });
-    return Array.from(map.values())
-      .map(v => ({ name:v.name, avg:Math.round(v.scores.reduce((a,b)=>a+b,0)/v.scores.length) }))
-      .sort((a,b) => b.avg - a.avg)
-      .slice(0,5);
-  })();
+  // Activity heatmap — sessions per day last 7 days
+  const dailyCounts = Array.from({ length: 7 }, (_, i) => {
+    const d = new Date(today.getTime() - (6 - i) * 86400000);
+    const next = new Date(d.getTime() + 86400000);
+    return {
+      label: d.toLocaleDateString(undefined, { weekday:"short" }),
+      count: subs.filter(s => { const t = new Date(s.submittedAt); return t >= d && t < next; }).length,
+    };
+  });
+  const maxDay = Math.max(...dailyCounts.map(d => d.count), 1);
+
+  const Section: React.FC<{ title:string; Icon:LucideIcon; color:string; children:React.ReactNode }> = ({ title, Icon:Ic, color, children }) => (
+    <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:14,
+      padding:20, boxShadow:`0 1px 4px ${C.shadow}` }}>
+      <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:18, paddingBottom:12, borderBottom:`1px solid ${C.border}` }}>
+        <div style={{ width:34, height:34, borderRadius:9, background:`${color}18`,
+          display:"flex", alignItems:"center", justifyContent:"center" }}>
+          <Ic size={17} color={color} strokeWidth={2} />
+        </div>
+        <span style={{ color:C.txtPri, fontWeight:800, fontSize:14 }}>{title}</span>
+      </div>
+      {children}
+    </div>
+  );
+
+  const Metric: React.FC<{ label:string; value:string|number; sub?:string; color?:string }> = ({ label, value, sub, color }) => (
+    <div style={{ marginBottom:14 }}>
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"baseline", marginBottom:4 }}>
+        <span style={{ color:C.txtSec, fontSize:13 }}>{label}</span>
+        <span style={{ color:color ?? C.txtPri, fontWeight:800, fontSize:18, fontFamily:"monospace" }}>{value}</span>
+      </div>
+      {sub && <div style={{ color:C.txtMut, fontSize:11 }}>{sub}</div>}
+      <div style={{ height:3, background:C.surface, borderRadius:2, marginTop:6 }}>
+        <div style={{ width:"100%", height:"100%", background:`${color ?? C.accent}22`, borderRadius:2 }} />
+      </div>
+    </div>
+  );
 
   return (
     <div>
-      <SectionHeading title="Platform Analytics" sub="Performance data across all teachers and students."
-        action={<Btn label="Export Report" Icon={Download} variant="ghost" />} />
+      <SectionHeading
+        title="System Analytics"
+        sub="Platform health, usage, adoption, and data integrity."
+        action={<Btn label="Refresh" Icon={RefreshCw} variant="ghost" small onClick={() => setRefresh(r=>r+1)} />}
+      />
 
-      <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))", gap:14, marginBottom:28 }}>
-        <StatCard label="Total Sessions"  value={stats.total}    sub={`${stats.todayCount} today`}             Icon={ClipboardCheck} color={C.accent} />
-        <StatCard label="Platform Avg"    value={stats.total>0?`${stats.classAvg}%`:"—"} sub="All evaluations" Icon={TrendingUp}     color={C.blue}   />
-        <StatCard label="Pass Rate"       value={stats.total>0?`${Math.round(stats.passed/stats.total*100)}%`:"—"} sub="PASS result" Icon={CheckCircle} color={"#7c3aed"} />
-        <StatCard label="Avg Duration"    value={stats.avgDur>0?`${stats.avgDur} min`:"—"} sub="Per session"   Icon={Clock}         color={C.amber}  />
+      {/* ── Top KPIs ── */}
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))", gap:14, marginBottom:24 }}>
+        <StatCard label="Total Users"       value={users.length}   sub={`${students.length} students · ${teachers.length} teachers`}         Icon={Users}         color={C.accent} />
+        <StatCard label="Total Sessions"    value={subs.length}    sub={`${todaySubs.length} today · ${weekSubs.length} this week`}           Icon={Activity}      color={C.blue}   />
+        <StatCard label="Platform Score"    value={subs.length > 0 ? `${avgScore}%` : "—"} sub={`${passCount} PASS of ${subs.length}`}       Icon={TrendingUp}    color={C.amber}  />
+        <StatCard label="System"            value={health === "ok" ? "Online" : "Degraded"} sub="MongoDB connected"                          Icon={Server}        color={health === "ok" ? C.accent : C.red} />
       </div>
 
-      {subs.length === 0 ? (
-        <div style={{ background:C.card, border:`2px dashed ${C.border2}`, borderRadius:14,
-          padding:"40px 20px", textAlign:"center", color:C.txtMut }}>
-          <BarChart2 size={30} style={{ marginBottom:10, opacity:0.3 }} />
-          <div>Analytics will appear once students start evaluating practicals.</div>
-        </div>
-      ) : (
-        <div className="ap-grid-2col" style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:20 }}>
-          {/* Score by practical */}
-          <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:14,
-            padding:20, boxShadow:`0 1px 4px ${C.shadow}` }}>
-            <div style={{ color:C.txtPri, fontWeight:700, fontSize:14, marginBottom:18 }}>
-              Average Score by Practical
-            </div>
-            {[
-              { label:"Vanishing Cream", score:vcAvg, color:C.blue,   count:vcSubs.length },
-              { label:"Cold Cream",      score:ccAvg, color:"#7c3aed", count:ccSubs.length },
-            ].map(d => (
-              <div key={d.label} style={{ marginBottom:16 }}>
-                <div style={{ display:"flex", justifyContent:"space-between", marginBottom:6 }}>
-                  <span style={{ color:C.txtSec, fontSize:13 }}>{d.label}</span>
-                  <span style={{ color:C.txtPri, fontWeight:700, fontSize:13 }}>
-                    {d.count > 0 ? `${d.score}%` : "No data"}
-                  </span>
-                </div>
-                <div style={{ height:10, background:C.surface, borderRadius:5, overflow:"hidden",
-                  border:`1px solid ${C.border}` }}>
-                  <div style={{ width:`${d.score}%`, height:"100%", background:d.color, borderRadius:5 }} />
-                </div>
-                <div style={{ color:C.txtMut, fontSize:11, marginTop:4 }}>{d.count} session{d.count!==1?"s":""}</div>
-              </div>
-            ))}
-          </div>
+      <div className="ap-grid-2col" style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:20, marginBottom:20 }}>
 
-          {/* Distribution */}
-          <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:14,
-            padding:20, boxShadow:`0 1px 4px ${C.shadow}` }}>
-            <div style={{ color:C.txtPri, fontWeight:700, fontSize:14, marginBottom:18 }}>
-              Score Distribution
-            </div>
-            <div style={{ display:"flex", gap:10, alignItems:"flex-end", height:120 }}>
-              {dist.map(d => (
-                <div key={d.range} style={{ flex:1, display:"flex", flexDirection:"column",
-                  alignItems:"center", gap:4 }}>
-                  <span style={{ color:C.txtSec, fontSize:11 }}>{d.count}</span>
-                  <div style={{ width:"100%", borderRadius:"4px 4px 0 0",
-                    background: d.count>0 ? d.color : C.border,
-                    height:`${(d.count/maxC)*90}px`, minHeight: d.count>0?6:2 }} />
-                  <span style={{ color:C.txtMut, fontSize:10, textAlign:"center" }}>{d.range}</span>
+        {/* System Usage */}
+        <Section title="System Usage" Icon={BarChart} color={C.blue}>
+          <Metric label="Sessions Today"       value={todaySubs.length}  sub="Evaluations submitted" color={C.blue} />
+          <Metric label="Sessions This Week"   value={weekSubs.length}   sub="7-day rolling window"  color={C.blue} />
+          <Metric label="Avg Session Duration" value={avgDurMin > 0 ? `${avgDurMin} min` : "—"} sub="Time per practical" color={C.amber} />
+          <Metric label="Vanishing Cream"      value={subs.filter(s=>s.practicalId==="vanishing-cream").length} sub="sessions total" />
+          <Metric label="Cold Cream"           value={subs.filter(s=>s.practicalId==="cold-cream").length} sub="sessions total" />
+        </Section>
+
+        {/* System Health & Performance */}
+        <Section title="System Health & Performance" Icon={Server} color={C.accent}>
+          <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:16, padding:"10px 14px",
+            background: health === "ok" ? `${C.accent}10` : `${C.red}10`,
+            border:`1px solid ${health === "ok" ? `${C.accent}33` : `${C.red}33`}`, borderRadius:9 }}>
+            <div style={{ width:10, height:10, borderRadius:"50%", background: health === "ok" ? C.accent : C.red,
+              boxShadow:`0 0 6px ${health === "ok" ? C.accent : C.red}` }} />
+            <span style={{ color: health === "ok" ? C.accent : C.red, fontWeight:700, fontSize:13 }}>
+              {health === "ok" ? "All systems operational" : "Service degraded"}
+            </span>
+          </div>
+          <Metric label="API Status"       value={health === "ok" ? "200 OK" : "Error"} color={health === "ok" ? C.accent : C.red} />
+          <Metric label="Database"         value="Connected" sub="MongoDB Atlas" color={C.accent} />
+          <Metric label="Pass Rate"        value={subs.length > 0 ? `${Math.round(passCount/subs.length*100)}%` : "—"} sub="Quality indicator" color={C.accent} />
+          <Metric label="Avg Score"        value={avgScore > 0 ? `${avgScore}%` : "—"} sub="Platform-wide" color={C.amber} />
+        </Section>
+
+        {/* User Adoption & Traffic */}
+        <Section title="User Adoption & Traffic" Icon={UserCheck} color="#7c3aed">
+          <Metric label="Active Today (logins)"  value={todayUsers}  color="#7c3aed" />
+          <Metric label="Active This Week"       value={weekUsers}   color="#7c3aed" />
+          <Metric label="Total Registered"       value={users.length} sub={`${users.filter(u=>u.status==="active").length} active accounts`} />
+          <Metric label="Student : Teacher Ratio" value={teachers.length > 0 ? `${Math.round(students.length/teachers.length)}:1` : "—"} sub="Students per teacher" />
+
+          {/* 7-day activity heatmap */}
+          <div style={{ marginTop:14 }}>
+            <div style={{ color:C.txtMut, fontSize:10, fontWeight:700, letterSpacing:0.8, textTransform:"uppercase", marginBottom:8 }}>7-Day Session Activity</div>
+            <div style={{ display:"flex", gap:6, alignItems:"flex-end", height:60 }}>
+              {dailyCounts.map(d => (
+                <div key={d.label} style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center", gap:3 }}>
+                  <div style={{ width:"100%", borderRadius:"3px 3px 0 0",
+                    background: d.count > 0 ? "#7c3aed" : C.border,
+                    height:`${Math.max(4, (d.count / maxDay) * 52)}px`,
+                    minHeight: d.count > 0 ? 6 : 3, transition:"height .3s" }} />
+                  <span style={{ color:C.txtMut, fontSize:8 }}>{d.label}</span>
+                  <span style={{ color:C.txtSec, fontSize:9, fontWeight:700 }}>{d.count}</span>
                 </div>
               ))}
             </div>
           </div>
+        </Section>
 
-          {/* Top performers */}
-          <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:14,
-            padding:20, boxShadow:`0 1px 4px ${C.shadow}`, gridColumn:"1 / -1" }}>
-            <div style={{ color:C.txtPri, fontWeight:700, fontSize:14, marginBottom:14,
-              display:"flex", alignItems:"center", gap:8 }}>
-              <Award size={15} color={C.accent} strokeWidth={2} /> Top 5 Students Platform-wide
-            </div>
-            {topStudents.length === 0 ? (
-              <div style={{ color:C.txtMut, fontSize:13 }}>No data yet.</div>
-            ) : topStudents.map((s, i) => (
-              <div key={i} style={{ display:"flex", justifyContent:"space-between",
-                alignItems:"center", padding:"8px 0", borderBottom:`1px solid ${C.border}` }}>
-                <div style={{ display:"flex", alignItems:"center", gap:10 }}>
-                  <span style={{ color:C.txtMut, fontWeight:700, fontSize:14, minWidth:24 }}>#{i+1}</span>
-                  <Avatar name={s.name} size={30} />
-                  <span style={{ color:C.txtSec, fontSize:13 }}>{s.name}</span>
-                </div>
-                <span style={{ color:C.accent, fontWeight:800, fontSize:16 }}>{s.avg}%</span>
-              </div>
-            ))}
+        {/* Data Pipeline & Integrity */}
+        <Section title="Data Pipeline & Integrity" Icon={FileCheck} color={C.amber}>
+          <Metric label="Total Records"        value={subs.length}     sub="Submission records in DB" color={C.amber} />
+          <Metric label="Valid Records"        value={validSubs}       sub="Pass schema validation" />
+          <Metric label="Data Integrity"       value={`${integrityPct}%`} sub="Valid / total records"
+            color={integrityPct >= 98 ? C.accent : integrityPct >= 90 ? C.amber : C.red} />
+          <Metric label="Assignment Mode"      value={subs.filter(s=>s.mode==="assignment").length} sub="From assignment codes" />
+          <Metric label="Practice Mode"        value={subs.filter(s=>s.mode==="practice").length}   sub="Self-practice sessions" />
+          <div style={{ marginTop:10, padding:"10px 12px",
+            background: integrityPct >= 98 ? `${C.accent}10` : `${C.amber}10`,
+            border:`1px solid ${integrityPct >= 98 ? `${C.accent}33` : `${C.amber}33`}`, borderRadius:8 }}>
+            <span style={{ color:integrityPct >= 98 ? C.accent : C.amber, fontSize:12, fontWeight:700 }}>
+              {integrityPct >= 98 ? "✓ Data pipeline healthy" : "⚠ Some records may need review"}
+            </span>
           </div>
-        </div>
-      )}
+        </Section>
+      </div>
     </div>
   );
 };
@@ -1129,20 +755,14 @@ const AdminSettings: React.FC = () => {
   );
 
   const handleExportJSON = async () => {
-    const [users, submissions, assignments, questions, announcements, auditLog] = await Promise.all([
+    const [users, submissions, auditLog] = await Promise.all([
       getAllUsers(),
       getAllSubmissions(),
-      getAllAssignments(),
-      getAllQuestions(),
-      getAllAnnouncements(),
       getAuditLog(),
     ]);
     const data = {
       users: users.map(u => ({ ...u, passwordHash:"[hidden]" })),
       submissions,
-      assignments,
-      questions,
-      announcements,
       auditLog,
       exportedAt: new Date().toISOString(),
     };
@@ -1231,77 +851,135 @@ const AdminSettings: React.FC = () => {
 // ─────────────────────────────────────────────────────────────────────────────
 const AuditLog: React.FC = () => {
   const { C } = useTheme();
-  const [search,  setSearch]  = useState("");
-  const [refresh, setRefresh] = useState(0);
-  const [log,     setLog]     = useState<any[]>([]);
+  const [search,     setSearch]     = useState("");
+  const [roleFilter, setRoleFilter] = useState<"all"|"admin"|"teacher"|"student">("all");
+  const [actionFilter, setActionFilter] = useState("all");
+  const [refresh,    setRefresh]    = useState(0);
+  const [log,        setLog]        = useState<any[]>([]);
 
   useEffect(() => { getAuditLog().then(setLog); }, [refresh]);
 
+  const actionColor: Record<string,string> = {
+    user_registered:      C.accent,
+    user_login:           C.blue,
+    user_deleted:         C.red,
+    lab_started:          C.amber,
+    code_entered:         "#7c3aed",
+    submission_evaluated: C.amber,
+    admin_action:         "#ec4899",
+  };
+
+  const allActions = Array.from(new Set(log.map(e => e.action))).sort();
+
   const filtered = log.filter(e =>
-    e.detail.toLowerCase().includes(search.toLowerCase()) ||
-    e.actorName.toLowerCase().includes(search.toLowerCase()) ||
-    e.action.toLowerCase().includes(search.toLowerCase())
+    (roleFilter   === "all" || e.actorRole  === roleFilter)   &&
+    (actionFilter === "all" || e.action     === actionFilter) &&
+    (e.detail.toLowerCase().includes(search.toLowerCase()) ||
+     e.actorName.toLowerCase().includes(search.toLowerCase()) ||
+     e.action.toLowerCase().includes(search.toLowerCase()))
   );
 
-  const actionColor: Record<string,string> = {
-    user_registered:     C.accent,
-    user_login:          C.blue,
-    user_deleted:        C.red,
-    assignment_created:  "#7c3aed",
-    assignment_deleted:  C.red,
-    submission_evaluated:C.amber,
-    announcement_sent:   C.blue,
-    question_created:    C.accent,
-    question_deleted:    C.red,
-    admin_action:        "#ec4899",
-  };
+  // Most active users — count events per actor
+  const userActivity = Array.from(
+    log.reduce((map, e) => {
+      const key = e.actorName;
+      const cur = map.get(key) ?? { name: key, role: e.actorRole, count: 0 };
+      cur.count += 1;
+      map.set(key, cur);
+      return map;
+    }, new Map<string, { name:string; role:string; count:number }>())
+  ).map(([, v]) => v).sort((a, b) => b.count - a.count).slice(0, 6);
 
   const formatTime = (iso: string) => {
     const d = new Date(iso);
     return `${d.toLocaleDateString()} ${d.toLocaleTimeString([], { hour:"2-digit", minute:"2-digit" })}`;
   };
 
-  const handleClearLog = async () => {
-    await clearAuditLog();
-    setRefresh(r => r + 1);
+  const selStyle = {
+    background:C.card, border:`1px solid ${C.border}`, color:C.txtSec,
+    borderRadius:8, padding:"8px 12px", fontSize:12, cursor:"pointer", outline:"none",
   };
 
   return (
     <div>
       <SectionHeading title="Audit Log"
-        sub={`${log.length} recorded events. Newest first.`}
+        sub={`${log.length} recorded events · tracking all user activity.`}
         action={
           <div style={{ display:"flex", gap:8 }}>
             <Btn label="Refresh" Icon={RefreshCw} variant="ghost" small onClick={() => setRefresh(r=>r+1)} />
-            <Btn label="Clear Log" Icon={Trash2} variant="danger" small onClick={handleClearLog} />
+            <Btn label="Clear Log" Icon={Trash2} variant="danger" small onClick={async () => { await clearAuditLog(); setRefresh(r=>r+1); }} />
           </div>
         } />
 
-      <div style={{ position:"relative", marginBottom:16 }}>
-        <span style={{ position:"absolute", left:11, top:"50%", transform:"translateY(-50%)",
-          pointerEvents:"none", display:"flex" }}>
-          <Search size={15} color={C.txtMut} />
-        </span>
-        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search by action, user, or detail…"
-          style={{ width:"100%", background:C.card, border:`1px solid ${C.border}`,
-            color:C.txtPri, borderRadius:8, padding:"9px 12px 9px 34px",
-            fontSize:13, boxSizing:"border-box", outline:"none" }} />
+      {/* Most Active Users panel */}
+      {userActivity.length > 0 && (
+        <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:14,
+          padding:18, marginBottom:20, boxShadow:`0 1px 4px ${C.shadow}` }}>
+          <div style={{ color:C.txtPri, fontWeight:700, fontSize:14, marginBottom:14,
+            display:"flex", alignItems:"center", gap:8 }}>
+            <Award size={15} color={C.accent} strokeWidth={2} /> Most Active Users
+          </div>
+          <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(180px,1fr))", gap:10 }}>
+            {userActivity.map((u, i) => (
+              <div key={u.name} style={{ display:"flex", alignItems:"center", gap:10,
+                background:C.surface, borderRadius:9, padding:"10px 12px",
+                border:`1px solid ${C.border}` }}>
+                <span style={{ color:C.txtMut, fontWeight:800, fontSize:13, minWidth:20 }}>#{i+1}</span>
+                <Avatar name={u.name} size={28} />
+                <div style={{ flex:1, minWidth:0 }}>
+                  <div style={{ color:C.txtPri, fontSize:12, fontWeight:600,
+                    overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{u.name}</div>
+                  <RoleBadge role={u.role} />
+                </div>
+                <span style={{ color:C.accent, fontWeight:800, fontSize:14 }}>{u.count}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Filters row */}
+      <div style={{ display:"flex", gap:8, marginBottom:14, flexWrap:"wrap", alignItems:"center" }}>
+        <div style={{ position:"relative", flex:1, minWidth:200 }}>
+          <span style={{ position:"absolute", left:11, top:"50%", transform:"translateY(-50%)",
+            pointerEvents:"none", display:"flex" }}>
+            <Search size={14} color={C.txtMut} />
+          </span>
+          <input value={search} onChange={e => setSearch(e.target.value)}
+            placeholder="Search by action, user, or detail…"
+            style={{ width:"100%", background:C.card, border:`1px solid ${C.border}`,
+              color:C.txtPri, borderRadius:8, padding:"8px 12px 8px 32px",
+              fontSize:13, boxSizing:"border-box", outline:"none" }} />
+        </div>
+        <select value={roleFilter} onChange={e => setRoleFilter(e.target.value as any)} style={selStyle}>
+          <option value="all">All Roles</option>
+          <option value="admin">Admin</option>
+          <option value="teacher">Teacher</option>
+          <option value="student">Student</option>
+        </select>
+        <select value={actionFilter} onChange={e => setActionFilter(e.target.value)} style={selStyle}>
+          <option value="all">All Actions</option>
+          {allActions.map(a => (
+            <option key={a} value={a}>{a.replace(/_/g, " ")}</option>
+          ))}
+        </select>
       </div>
 
       {log.length === 0 ? (
         <div style={{ background:C.card, border:`2px dashed ${C.border2}`, borderRadius:14,
           padding:"40px 20px", textAlign:"center", color:C.txtMut }}>
           <Activity size={30} style={{ marginBottom:10, opacity:0.3 }} />
-          <div>No audit events recorded yet. Events are logged as users interact with the platform.</div>
+          <div>No audit events recorded yet.</div>
         </div>
       ) : (
         <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:14,
           overflow:"hidden", boxShadow:`0 1px 4px ${C.shadow}` }}>
-          <div className="ap-table-wrap"><table style={{ width:"100%", borderCollapse:"collapse" }}>
+          <div className="ap-table-wrap">
+          <table style={{ width:"100%", borderCollapse:"collapse" }}>
             <TableHead cols={["Time","Action","Actor","Role","Detail"]} />
             <tbody>
               {filtered.map((e, i) => (
-                <tr key={e.id} style={{ background:i%2===0?"transparent":`${C.surface}88`,
+                <tr key={`${e.id ?? i}`} style={{ background:i%2===0?"transparent":`${C.surface}88`,
                   borderBottom:`1px solid ${C.border}` }}>
                   <td style={{ padding:"10px 14px", color:C.txtMut, fontSize:11, whiteSpace:"nowrap" }}>
                     {formatTime(e.timestamp)}
@@ -1309,20 +987,25 @@ const AuditLog: React.FC = () => {
                   <td style={{ padding:"10px 14px" }}>
                     <span style={{ background:`${actionColor[e.action] ?? C.txtMut}18`,
                       color:actionColor[e.action] ?? C.txtMut,
-                      borderRadius:20, padding:"2px 10px", fontSize:11, fontWeight:700,
-                      whiteSpace:"nowrap" }}>
+                      borderRadius:20, padding:"2px 10px", fontSize:11, fontWeight:700, whiteSpace:"nowrap" }}>
                       {e.action.replace(/_/g, " ")}
                     </span>
                   </td>
-                  <td style={{ padding:"10px 14px", color:C.txtPri, fontSize:13 }}>{e.actorName}</td>
+                  <td style={{ padding:"10px 14px" }}>
+                    <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                      <Avatar name={e.actorName} size={24} />
+                      <span style={{ color:C.txtPri, fontSize:13 }}>{e.actorName}</span>
+                    </div>
+                  </td>
                   <td style={{ padding:"10px 14px" }}><RoleBadge role={e.actorRole} /></td>
                   <td style={{ padding:"10px 14px", color:C.txtSec, fontSize:12 }}>{e.detail}</td>
                 </tr>
               ))}
             </tbody>
-          </table></div>
+          </table>
+          </div>
           {filtered.length === 0 && (
-            <div style={{ padding:32, textAlign:"center", color:C.txtMut }}>No log entries match.</div>
+            <div style={{ padding:32, textAlign:"center", color:C.txtMut }}>No log entries match the filters.</div>
           )}
         </div>
       )}
@@ -1553,22 +1236,17 @@ const TeacherApprovals: React.FC = () => {
 // NAV
 // ─────────────────────────────────────────────────────────────────────────────
 const NAV: { id:Section; label:string; Icon:LucideIcon }[] = [
-  { id:"dashboard",     label:"Dashboard",        Icon:LayoutDashboard },
-  { id:"users",         label:"Users",            Icon:Users           },
-  { id:"approvals",     label:"Teacher Approvals",Icon:GraduationCap   },
-  { id:"assignments",   label:"Assignments",      Icon:Key             },
-  { id:"submissions",   label:"Submissions",      Icon:ClipboardCheck  },
-  { id:"questions",     label:"Q&A",              Icon:ClipboardList   },
-  { id:"announcements", label:"Announcements",    Icon:Megaphone       },
-  { id:"analytics",     label:"Analytics",        Icon:BarChart2       },
-  { id:"settings",      label:"Settings",         Icon:Settings        },
-  { id:"auditlog",      label:"Audit Log",        Icon:Activity        },
+  { id:"dashboard",   label:"Dashboard",        Icon:LayoutDashboard },
+  { id:"users",       label:"Users",            Icon:Users           },
+  { id:"approvals",   label:"Teacher Approvals",Icon:GraduationCap   },
+  { id:"analytics",   label:"Analytics",        Icon:BarChart2       },
+  { id:"settings",    label:"Settings",         Icon:Settings        },
+  { id:"auditlog",    label:"Audit Log",        Icon:Activity        },
 ];
 
 const LABELS: Record<Section,string> = {
   dashboard:"Dashboard", users:"Users", approvals:"Teacher Approvals",
-  assignments:"Assignments", submissions:"Submissions", questions:"Q&A",
-  announcements:"Announcements", analytics:"Analytics", settings:"Settings",
+  analytics:"Analytics", settings:"Settings",
   auditlog:"Audit Log",
 };
 
@@ -1610,16 +1288,12 @@ const AdminPanel: React.FC<Props> = ({ onLogout }) => {
 
   const render = () => {
     switch (section) {
-      case "dashboard":     return <Dashboard />;
-      case "users":         return <UserManager />;
-      case "approvals":     return <TeacherApprovals />;
-      case "assignments":   return <AdminAssignments />;
-      case "submissions":   return <AdminSubmissions />;
-      case "questions":     return <AdminQA />;
-      case "announcements": return <AdminAnnouncements />;
-      case "analytics":     return <AdminAnalytics />;
-      case "settings":      return <AdminSettings />;
-      case "auditlog":      return <AuditLog />;
+      case "dashboard":  return <Dashboard />;
+      case "users":      return <UserManager />;
+      case "approvals":  return <TeacherApprovals />;
+      case "analytics":  return <AdminAnalytics />;
+      case "settings":   return <AdminSettings />;
+      case "auditlog":   return <AuditLog />;
     }
   };
 

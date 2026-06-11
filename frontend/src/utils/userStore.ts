@@ -9,17 +9,19 @@ export type Role       = "admin" | "teacher" | "student";
 export type UserStatus = "active" | "pending" | "rejected";
 
 export interface User {
-  id?:          string;      // MongoDB _id
-  clientId:     string;      // e.g. "u1716000000-abc12"
-  role:         Role;
-  fullName:     string;
-  email:        string;
-  regNumber?:   string | null;
-  status?:      UserStatus;
-  suspended?:   boolean;
-  seeded?:      boolean;
-  createdAt?:   string;
-  lastLogin?:   string;
+  id?:                   string;      // MongoDB _id
+  clientId:              string;      // e.g. "u1716000000-abc12"
+  role:                  Role;
+  fullName:              string;
+  email:                 string;
+  regNumber?:            string | null;
+  status?:               UserStatus;
+  suspended?:            boolean;
+  seeded?:               boolean;
+  createdAt?:            string;
+  lastLogin?:            string;
+  assignedTeacherId?:    string | null;
+  assignedTeacherName?:  string | null;
 }
 
 export interface AuthResult {

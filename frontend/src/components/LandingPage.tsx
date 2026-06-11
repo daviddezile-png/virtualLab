@@ -19,9 +19,9 @@ const DARK = {
   pri:      "#fafafa",
   sec:      "#a3a3a3",
   mut:      "#737373",
-  green:    "#22c55e",
-  greenHi:  "#16a34a",
-  greenBg:  "rgba(34,197,94,0.10)",
+  green:    "#1d4ed8",
+  greenHi:  "#1e40af",
+  greenBg:  "rgba(29,78,216,0.12)",
 } as const;
 
 const LIGHT = {
@@ -34,9 +34,9 @@ const LIGHT = {
   pri:      "#0a0a0a",
   sec:      "#525252",
   mut:      "#a3a3a3",
-  green:    "#10b981",
-  greenHi:  "#059669",
-  greenBg:  "rgba(16,185,129,0.08)",
+  green:    "#2563eb",
+  greenHi:  "#1d4ed8",
+  greenBg:  "rgba(37,99,235,0.08)",
 } as const;
 
 interface Props {

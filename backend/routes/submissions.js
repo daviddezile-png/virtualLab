@@ -1,6 +1,7 @@
 const express    = require('express');
 const { body, validationResult } = require('express-validator');
 const Submission = require('../models/Submission');
+const Assignment = require('../models/Assignment');
 const { authenticate, requireRole } = require('../middleware/auth');
 
 const router = express.Router();
@@ -8,7 +9,7 @@ router.use(authenticate);
 
 // ── GET /api/submissions ──────────────────────────────────────────────────────
 // Students → own submissions only
-// Teachers → all student submissions (never teachers/admins)
+// Teachers → practice submissions (all) + assignment submissions for their own codes only
 // Admins   → everything, with optional studentId filter
 router.get('/', async (req, res) => {
   try {
@@ -19,9 +20,17 @@ router.get('/', async (req, res) => {
       // Students can only see their own
       query.studentId = req.user.id;
     } else if (req.user.role === 'teacher') {
-      // Teachers see all student submissions — never teacher/admin submissions
-      query.submitterRole = { $ne: 'teacher' };   // defence-in-depth
-      if (studentId) query.studentId = studentId; // optional filter by specific student
+      // Teachers see only student submissions — never teacher/admin rows
+      query.submitterRole = { $ne: 'teacher' };
+      // For assignment-mode submissions: only show those created with this teacher's codes.
+      // Practice-mode submissions have no token, so all teachers see those.
+      const teacherAssignments = await Assignment.find({ teacherId: req.user.id }).select('token');
+      const teacherTokens = teacherAssignments.map(a => a.token).filter(Boolean);
+      query.$or = [
+        { mode: 'practice' },
+        { mode: 'assignment', token: { $in: teacherTokens } },
+      ];
+      if (studentId) query.studentId = studentId;
     } else if (studentId) {
       // Admin with optional filter
       query.studentId = studentId;
@@ -68,12 +77,30 @@ router.post('/', requireRole('student'), [
       if (existing) return res.status(200).json({ submission: existing });
     }
 
+    // Explicitly pick only schema fields — never spread req.body directly,
+    // as unknown keys (e.g. the frontend's `id` field) can conflict with
+    // Mongoose's built-in `id` virtual and cause a CastError on _id.
+    const b = req.body;
     const submission = await Submission.create({
-      ...req.body,
-      studentId:     req.user.id,           // always from JWT — never trust body
-      studentName:   req.body.studentName || '',
-      submitterRole: req.user.role,         // stored so teacher queries can filter
+      clientId:      clientId || undefined,
+      token:         b.token         ?? '',
+      practicalId:   b.practicalId,
+      mode:          b.mode,
+      studentId:     req.user.id,           // always from JWT
+      studentName:   b.studentName   || '',
+      studentReg:    b.studentReg    ?? null,
+      submittedAt:   b.submittedAt,
+      durationSec:   Number(b.durationSec)  || 0,
+      score10:       Number(b.score10)      || 0,
+      scorePct:      Number(b.scorePct)     || 0,
+      passCount:     Number(b.passCount)    || 0,
+      totalSteps:    Number(b.totalSteps)   || 14,
+      result:        b.result,
+      ph:            Number(b.ph)           || 0,
+      viscosity:     Number(b.viscosity)    || 0,
+      stability:     b.stability     || 'unknown',
       synced:        true,
+      submitterRole: req.user.role,
     });
 
     res.status(201).json({ submission });

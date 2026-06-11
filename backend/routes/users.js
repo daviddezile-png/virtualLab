@@ -33,8 +33,13 @@ router.get('/', requireRole('admin'), async (req, res) => {
 router.get('/students', requireRole('teacher', 'admin'), async (req, res) => {
   try {
     const { search } = req.query;
-    // Hard-coded role:'student' — teachers can NEVER see other teachers or admins
     const query = { role: 'student', status: 'active', suspended: { $ne: true } };
+
+    // Teachers only see students who joined their class via invitation code
+    if (req.user.role === 'teacher') {
+      query.assignedTeacherId = req.user.id;
+    }
+
     if (search) {
       query.$or = [
         { fullName:  { $regex: search, $options: 'i' } },
@@ -42,10 +47,10 @@ router.get('/students', requireRole('teacher', 'admin'), async (req, res) => {
         { regNumber: { $regex: search, $options: 'i' } },
       ];
     }
-    // Only return fields teachers need — never expose passwordHash or internal fields
+
     const users = await User.find(query)
       .sort({ createdAt: -1 })
-      .select('clientId role fullName email regNumber status createdAt lastLogin');
+      .select('clientId role fullName email regNumber status createdAt lastLogin assignedTeacherId assignedTeacherName');
     res.json({ users });
   } catch (err) {
     res.status(500).json({ error: 'Failed to fetch students' });
