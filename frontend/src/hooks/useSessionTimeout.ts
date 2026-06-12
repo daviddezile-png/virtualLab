@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 
-const IDLE_MINUTES    = 20; // show warning after 20 min idle
-const WARNING_SECONDS = 180; // 3-minute countdown before auto-logout
+const IDLE_MINUTES    = 2;  // show warning after 2 min idle
+const WARNING_SECONDS = 60; // 1-minute countdown before auto-logout (total = 3 min)
 
 const EVENTS = ["mousemove","keydown","click","scroll","touchstart"] as const;
 

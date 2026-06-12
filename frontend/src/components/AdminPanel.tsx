@@ -23,7 +23,7 @@ import { getAuditLog, clearAuditLog } from "../utils/auditStore";
 const DARK = {
   bg:"#0a0a0a", sidebar:"#111111", surface:"#161616", card:"#1a1a1a",
   border:"#2a2a2a", border2:"#3a3a3a",
-  txtPri:"#f5f5f5", txtSec:"#a3a3a3", txtMut:"#666666",
+  txtPri:"#f5f5f5", txtSec:"#c4c4c4", txtMut:"#9ca3af",
   accent:"#3b82f6", accentHi:"#2563eb", accentBg:"rgba(59,130,246,0.10)",
   red:"#ef4444", amber:"#f59e0b", blue:"#3b82f6",
   shadow:"rgba(0,0,0,0.6)", headerBg:"rgba(10,10,10,0.95)",
@@ -32,7 +32,7 @@ const DARK = {
 const LIGHT = {
   bg:"#f8fafc", sidebar:"#ffffff", surface:"#f1f5f9", card:"#ffffff",
   border:"#e2e8f0", border2:"#cbd5e1",
-  txtPri:"#0f172a", txtSec:"#475569", txtMut:"#94a3b8",
+  txtPri:"#0f172a", txtSec:"#334155", txtMut:"#64748b",
   accent:"#2563eb", accentHi:"#1d4ed8", accentBg:"rgba(37,99,235,0.08)",
   red:"#dc2626", amber:"#d97706", blue:"#2563eb",
   shadow:"rgba(0,0,0,0.08)", headerBg:"rgba(255,255,255,0.97)",
