@@ -251,7 +251,7 @@ const LabSelection: React.FC<Props> = ({ onSelect, onTeacherPanel, onAssignment 
             <div style={{ color:"white", fontWeight:900, fontSize:"clamp(14px,1.5vw,17px)", letterSpacing:0.2 }}>
               Cream Formulation Virtual Laboratory
             </div>
-            <div style={{ color:"#475569", fontSize:11 }}>Pharmaceutical Chemistry · Emulsion Practicals</div>
+            <div style={{ color:"#94a3b8", fontSize:11 }}>Pharmaceutical Chemistry · Emulsion Practicals</div>
           </div>
         </div>
         <div style={{ display:"flex", alignItems:"center", gap:10 }}>
@@ -260,7 +260,7 @@ const LabSelection: React.FC<Props> = ({ onSelect, onTeacherPanel, onAssignment 
               <div style={{ color:"#e2e8f0", fontSize:12, fontWeight:700 }}>
                 {currentUser.fullName}
               </div>
-              <div style={{ color:"#475569", fontSize:10, textTransform:"capitalize" }}>
+              <div style={{ color:"#94a3b8", fontSize:10, textTransform:"capitalize" }}>
                 {currentUser.role}{currentUser.regNumber ? ` · ${currentUser.regNumber}` : ""}
                 {assignedTeacher ? ` · 🎓 ${assignedTeacher}` : ""}
               </div>
@@ -357,10 +357,10 @@ const LabSelection: React.FC<Props> = ({ onSelect, onTeacherPanel, onAssignment 
             </button>
           </div>
 
-          <div style={{ color:"#334155", fontSize:11, marginTop:8, lineHeight:1.6 }}>
+          <div style={{ color:"#94a3b8", fontSize:11, marginTop:8, lineHeight:1.6 }}>
             {assignedTeacher
-              ? <>Assignment codes look like <code style={{ color:"#475569" }}>VC-XXXXXX</code> · Invitation codes look like <code style={{ color:"#475569" }}>CLS-XXXXXX</code></>
-              : <>Ask your teacher for a class invitation code (starts with <code style={{ color:"#475569" }}>CLS-</code>) to join their class before accessing assignments.</>}
+              ? <>Assignment codes look like <code style={{ color:"#94a3b8" }}>VC-XXXXXX</code> · Invitation codes look like <code style={{ color:"#94a3b8" }}>CLS-XXXXXX</code></>
+              : <>Ask your teacher for a class invitation code (starts with <code style={{ color:"#94a3b8" }}>CLS-</code>) to join their class before accessing assignments.</>}
           </div>
         </div>
       </div>
@@ -389,7 +389,7 @@ const LabSelection: React.FC<Props> = ({ onSelect, onTeacherPanel, onAssignment 
             Lab Mode
           </span>
         </h1>
-        <p style={{ color:"#64748b", fontSize:"clamp(13px,1.2vw,15px)", maxWidth:"min(580px,90vw)", margin:"0 auto",
+        <p style={{ color:"#94a3b8", fontSize:"clamp(13px,1.2vw,15px)", maxWidth:"min(580px,90vw)", margin:"0 auto",
           lineHeight:1.75 }}>
           Use these practicals for <strong style={{ color:"#94a3b8" }}>self-training</strong>.
           For a teacher assignment, enter your code above.
@@ -436,7 +436,7 @@ const LabSelection: React.FC<Props> = ({ onSelect, onTeacherPanel, onAssignment 
                     <span style={{ color:"white", fontWeight:900, fontSize:"clamp(16px,1.6vw,20px)" }}>{p.title}</span>
                     {!p.available && (
                       <span style={{ background:"#1e293b", border:"1px solid #334155",
-                        color:"#64748b", fontSize:9, fontWeight:700, borderRadius:10,
+                        color:"#94a3b8", fontSize:9, fontWeight:700, borderRadius:10,
                         padding:"2px 8px", letterSpacing:0.8, textTransform:"uppercase" }}>
                         Coming Soon
                       </span>
@@ -469,7 +469,7 @@ const LabSelection: React.FC<Props> = ({ onSelect, onTeacherPanel, onAssignment 
               </div>
 
               <div style={{ padding:"0 26px 14px" }}>
-                <div style={{ color:"#475569", fontSize:10, fontWeight:700,
+                <div style={{ color:"#94a3b8", fontSize:10, fontWeight:700,
                   letterSpacing:1, textTransform:"uppercase", marginBottom:8 }}>Chemicals</div>
                 <div style={{ display:"flex", gap:7, flexWrap:"wrap" }}>
                   {p.chemicals.map(c => (
@@ -485,20 +485,20 @@ const LabSelection: React.FC<Props> = ({ onSelect, onTeacherPanel, onAssignment 
               </div>
 
               <div style={{ padding:"0 26px 16px" }}>
-                <div style={{ color:"#475569", fontSize:10, fontWeight:700,
+                <div style={{ color:"#94a3b8", fontSize:10, fontWeight:700,
                   letterSpacing:1, textTransform:"uppercase", marginBottom:8 }}>What you will learn</div>
                 <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
                   {p.learnings.map(l => (
                     <span key={l} style={{ background:"rgba(255,255,255,0.03)",
                       border:"1px solid #1e293b", borderRadius:6,
-                      color:"#64748b", fontSize:11, padding:"2px 9px" }}>{l}</span>
+                      color:"#94a3b8", fontSize:11, padding:"2px 9px" }}>{l}</span>
                   ))}
                 </div>
               </div>
 
               <div style={{ margin:"0 26px 18px", background:"rgba(255,255,255,0.03)",
                 border:`1px solid ${p.accentColor}22`, borderRadius:10, padding:"9px 13px" }}>
-                <span style={{ color:"#475569", fontSize:10, fontWeight:700 }}>Expected outcome: </span>
+                <span style={{ color:"#94a3b8", fontSize:10, fontWeight:700 }}>Expected outcome: </span>
                 <span style={{ color:"#94a3b8", fontSize:11 }}>{p.outcome}</span>
               </div>
 

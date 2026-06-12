@@ -292,7 +292,7 @@ function App() {
           </div>
           <div>
             <div style={{ color:"white", fontWeight:800, fontSize:14 }}>{practicalLabel}</div>
-            <div style={{ color:"#475569", fontSize:10 }}>
+            <div style={{ color:"#94a3b8", fontSize:10 }}>
               {user ? `${user.fullName} · ${user.role}` : "Cream Formulation Virtual Laboratory"}
             </div>
           </div>
