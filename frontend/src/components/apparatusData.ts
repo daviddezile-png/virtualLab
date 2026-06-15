@@ -40,6 +40,7 @@ export interface Apparatus {
     stirringSeconds?: number;         // total seconds stirred
     minCoolingTemp?: number;          // lowest temperature reached in ice bucket
     pouringSourceHistory?: string[];  // IDs poured into this beaker, in order
+    containedInId?: string | null;    // id of the container this item is resting inside
     composition?: {
       stearicAcid?: number;
       liquidParaffin?: number;
@@ -106,7 +107,7 @@ export const getInitialApparatus = (LEFT_GAP: number, shelfY: number, TABLE_Y: n
     width: 70,
     height: 150,
     isInteractive: true,
-    data: { maxVolume: 1000, currentVolume: 500, hasLid: true, isPouring: false, pouringTargetId: null, pouringProgress: 0, liquidColor: "rgba(185, 228, 255, 0.32)", lidColor: "#3b82f6", pH: 7.0, viscosity: 1, density: 1.0 },
+    data: { maxVolume: 1000, currentVolume: 920, hasLid: true, isPouring: false, pouringTargetId: null, pouringProgress: 0, liquidColor: "rgba(185, 228, 255, 0.32)", lidColor: "#3b82f6", pH: 7.0, viscosity: 1, density: 1.0 },
   },
   {
     id: "graduated-cylinder-100",
@@ -130,7 +131,7 @@ export const getInitialApparatus = (LEFT_GAP: number, shelfY: number, TABLE_Y: n
     height: 130,
     isInteractive: true,
     data: {
-      maxVolume: 500, currentVolume: 300, hasLid: true, isPouring: false, pouringTargetId: null,
+      maxVolume: 500, currentVolume: 470, hasLid: true, isPouring: false, pouringTargetId: null,
       pouringProgress: 0, liquidColor: "rgba(255, 252, 245, 0.95)", lidColor: "#8B6914",
       pH: 3.5, viscosity: 15, isSolid: true, density: 0.847,
     },
@@ -144,7 +145,7 @@ export const getInitialApparatus = (LEFT_GAP: number, shelfY: number, TABLE_Y: n
     width: 60,
     height: 130,
     isInteractive: true,
-    data: { maxVolume: 500, currentVolume: 300, hasLid: true, isPouring: false, pouringTargetId: null, pouringProgress: 0, liquidColor: "rgba(255, 248, 195, 0.70)", lidColor: "#FF8C00", pH: 7.0, viscosity: 110, density: 0.88 },
+    data: { maxVolume: 500, currentVolume: 470, hasLid: true, isPouring: false, pouringTargetId: null, pouringProgress: 0, liquidColor: "rgba(255, 248, 195, 0.70)", lidColor: "#FF8C00", pH: 7.0, viscosity: 110, density: 0.88 },
   },
   {
     id: "container-glycerin",
@@ -155,7 +156,7 @@ export const getInitialApparatus = (LEFT_GAP: number, shelfY: number, TABLE_Y: n
     width: 60,
     height: 130,
     isInteractive: true,
-    data: { maxVolume: 500, currentVolume: 300, hasLid: true, isPouring: false, pouringTargetId: null, pouringProgress: 0, liquidColor: "rgba(235, 250, 215, 0.62)", lidColor: "#E8E8E8", pH: 7.5, viscosity: 1412, density: 1.261 },
+    data: { maxVolume: 500, currentVolume: 470, hasLid: true, isPouring: false, pouringTargetId: null, pouringProgress: 0, liquidColor: "rgba(235, 250, 215, 0.62)", lidColor: "#E8E8E8", pH: 7.5, viscosity: 1412, density: 1.261 },
   },
   {
     id: "container-koh-triethanolamine",
@@ -166,7 +167,7 @@ export const getInitialApparatus = (LEFT_GAP: number, shelfY: number, TABLE_Y: n
     width: 60,
     height: 130,
     isInteractive: true,
-    data: { maxVolume: 500, currentVolume: 300, hasLid: true, isPouring: false, pouringTargetId: null, pouringProgress: 0, liquidColor: "rgba(255, 245, 175, 0.68)", lidColor: "#654321", pH: 13.5, viscosity: 3, density: 1.1 },
+    data: { maxVolume: 500, currentVolume: 470, hasLid: true, isPouring: false, pouringTargetId: null, pouringProgress: 0, liquidColor: "rgba(255, 245, 175, 0.68)", lidColor: "#654321", pH: 13.5, viscosity: 3, density: 1.1 },
   },
   // ── Table equipment (y positions are TABLE_Y-based, not shelf-based) ──────
   {
@@ -269,7 +270,7 @@ export const getInitialApparatus = (LEFT_GAP: number, shelfY: number, TABLE_Y: n
     height: 130,
     isInteractive: true,
     data: {
-      maxVolume: 300, currentVolume: 200, hasLid: true,
+      maxVolume: 300, currentVolume: 275, hasLid: true,
       isPouring: false, pouringTargetId: null, pouringProgress: 0,
       liquidColor: "rgba(255,213,79,0.82)", lidColor: "#b8860b",
       isSolid: true, density: 0.96,
@@ -285,7 +286,7 @@ export const getInitialApparatus = (LEFT_GAP: number, shelfY: number, TABLE_Y: n
     height: 130,
     isInteractive: true,
     data: {
-      maxVolume: 300, currentVolume: 200, hasLid: true,
+      maxVolume: 300, currentVolume: 275, hasLid: true,
       isPouring: false, pouringTargetId: null, pouringProgress: 0,
       liquidColor: "rgba(200,240,255,0.65)", lidColor: "#0ea5e9",
       pH: 9.2, viscosity: 1.2, density: 1.07,
@@ -307,27 +308,37 @@ export const getInitialApparatusColdCream = (LEFT_GAP: number, shelfY: number, T
   { id:"beaker-500-main",   type:"beaker",  name:"500 mL Beaker (Main Mixing)",  x:LEFT_GAP+170, y:shelfY-120, width:70, height:120, isInteractive:true, data:{maxVolume:500,currentVolume:0,hasLid:false,liquidColor:"rgba(240,235,220,0.6)"} },
   // ── Group 2: Distilled water + graduated cylinder ─────────────────────────
   { id:"distilled-water-bottle", type:"bottle", name:"Distilled Water", x:LEFT_GAP+265, y:shelfY-150, width:70, height:150, isInteractive:true,
-    data:{maxVolume:1000,currentVolume:500,hasLid:true,isPouring:false,pouringTargetId:null,pouringProgress:0,liquidColor:"rgba(185,228,255,0.32)",lidColor:"#3b82f6",pH:7.0,viscosity:1,density:1.0} },
+    data:{maxVolume:1000,currentVolume:920,hasLid:true,isPouring:false,pouringTargetId:null,pouringProgress:0,liquidColor:"rgba(185,228,255,0.32)",lidColor:"#3b82f6",pH:7.0,viscosity:1,density:1.0} },
   { id:"graduated-cylinder-100", type:"cylinder", name:"100 mL Graduated Cylinder", x:LEFT_GAP+350, y:shelfY-120, width:40, height:120, isInteractive:true,
     data:{maxVolume:100,currentVolume:0,hasLid:false,liquidColor:"rgba(56,189,248,0.6)"} },
-  // ── Group 3: Cold-cream chemicals ─────────────────────────────────────────
+  // ── Group 3: ALL chemicals (every reagent is available in both practicals so
+  //     a wrong-chemical selection can be caught) ───────────────────────────
   { id:"container-beeswax", type:"bottle", name:"Beeswax", x:LEFT_GAP+415, y:shelfY-130, width:60, height:130, isInteractive:true,
-    data:{maxVolume:300,currentVolume:200,hasLid:true,isPouring:false,pouringTargetId:null,pouringProgress:0,
+    data:{maxVolume:300,currentVolume:275,hasLid:true,isPouring:false,pouringTargetId:null,pouringProgress:0,
       liquidColor:"rgba(255,213,79,0.85)",lidColor:"#b8860b",isSolid:true,density:0.96} },
   { id:"container-liquid-paraffin", type:"bottle", name:"Liquid Paraffin", x:LEFT_GAP+490, y:shelfY-130, width:60, height:130, isInteractive:true,
-    data:{maxVolume:500,currentVolume:300,hasLid:true,isPouring:false,pouringTargetId:null,pouringProgress:0,
+    data:{maxVolume:500,currentVolume:470,hasLid:true,isPouring:false,pouringTargetId:null,pouringProgress:0,
       liquidColor:"rgba(255,248,195,0.70)",lidColor:"#FF8C00",pH:7.0,viscosity:110,density:0.88} },
   { id:"container-borax", type:"bottle", name:"Borax Solution", x:LEFT_GAP+565, y:shelfY-130, width:60, height:130, isInteractive:true,
-    data:{maxVolume:300,currentVolume:200,hasLid:true,isPouring:false,pouringTargetId:null,pouringProgress:0,
+    data:{maxVolume:300,currentVolume:275,hasLid:true,isPouring:false,pouringTargetId:null,pouringProgress:0,
       liquidColor:"rgba(200,240,255,0.65)",lidColor:"#0ea5e9",pH:9.2,viscosity:1.2,density:1.07} },
+  { id:"container-stearic-acid", type:"bottle", name:"Stearic Acid", x:LEFT_GAP+640, y:shelfY-130, width:60, height:130, isInteractive:true,
+    data:{maxVolume:500,currentVolume:470,hasLid:true,isPouring:false,pouringTargetId:null,pouringProgress:0,
+      liquidColor:"rgba(255,252,245,0.95)",lidColor:"#8B6914",pH:3.5,viscosity:15,isSolid:true,density:0.847} },
+  { id:"container-glycerin", type:"bottle", name:"Glycerin", x:LEFT_GAP+715, y:shelfY-130, width:60, height:130, isInteractive:true,
+    data:{maxVolume:500,currentVolume:470,hasLid:true,isPouring:false,pouringTargetId:null,pouringProgress:0,
+      liquidColor:"rgba(235,250,215,0.62)",lidColor:"#E8E8E8",pH:7.5,viscosity:1412,density:1.261} },
+  { id:"container-koh-triethanolamine", type:"bottle", name:"KOH & Triethanolamine", x:LEFT_GAP+790, y:shelfY-130, width:60, height:130, isInteractive:true,
+    data:{maxVolume:500,currentVolume:470,hasLid:true,isPouring:false,pouringTargetId:null,pouringProgress:0,
+      liquidColor:"rgba(255,245,175,0.68)",lidColor:"#654321",pH:13.5,viscosity:3,density:1.1} },
   // ── Table equipment ───────────────────────────────────────────────────────
   { id:"ice-bucket",        type:"icebucket",    name:"Ice Bucket",             x:LEFT_GAP+300, y:TABLE_Y-110, width:160, height:110, isInteractive:false, data:{iceLevel:100} },
   { id:"hot-plate-1",       type:"hotplate",      name:"Hot Plate",              x:LEFT_GAP+500, y:TABLE_Y-65,  width:130, height:65,  isInteractive:true,  data:{isOn:false,temperature:25,targetTemperature:70} },
   { id:"weight-balance",    type:"weightbalance", name:"Digital Weight Balance", x:LEFT_GAP+80,  y:TABLE_Y-85,  width:150, height:85,  isInteractive:true,  data:{isOn:true} },
-  // ── Group 4: Instruments ──────────────────────────────────────────────────
-  { id:"thermometer-digital",type:"thermometer",  name:"Digital Thermometer",   x:LEFT_GAP+650, y:shelfY-130,  width:30,  height:130, isInteractive:true, data:{readingTemperature:25} },
-  { id:"glass-stirring-rod", type:"stirringrod",  name:"Glass Stirring Rod",    x:LEFT_GAP+695, y:shelfY-155,  width:20,  height:155, isInteractive:true, data:{isStirring:false,stirringTargetId:null} },
-  { id:"spatula",            type:"spatula",       name:"Spatula",               x:LEFT_GAP+730, y:shelfY-150,  width:18,  height:150, isInteractive:true, data:{spatulaLoad:0,spatulaLoadSourceId:null} },
-  { id:"ph-meter",           type:"phmeter",       name:"pH Meter",              x:LEFT_GAP+763, y:shelfY-165,  width:48,  height:165, isInteractive:true, data:{phReading:7.0} },
-  { id:"viscosity-gauge",    type:"viscositygauge",name:"Viscosity Gauge",       x:LEFT_GAP+826, y:shelfY-150,  width:62,  height:150, isInteractive:true, data:{viscosityReading:0,isViscosityActive:false} },
+  // ── Group 4: Instruments (shifted right to make room for all chemicals) ─────
+  { id:"thermometer-digital",type:"thermometer",  name:"Digital Thermometer",   x:LEFT_GAP+875,  y:shelfY-130,  width:30,  height:130, isInteractive:true, data:{readingTemperature:25} },
+  { id:"glass-stirring-rod", type:"stirringrod",  name:"Glass Stirring Rod",    x:LEFT_GAP+920,  y:shelfY-155,  width:20,  height:155, isInteractive:true, data:{isStirring:false,stirringTargetId:null} },
+  { id:"spatula",            type:"spatula",       name:"Spatula",               x:LEFT_GAP+955,  y:shelfY-150,  width:18,  height:150, isInteractive:true, data:{spatulaLoad:0,spatulaLoadSourceId:null} },
+  { id:"ph-meter",           type:"phmeter",       name:"pH Meter",              x:LEFT_GAP+988,  y:shelfY-165,  width:48,  height:165, isInteractive:true, data:{phReading:7.0} },
+  { id:"viscosity-gauge",    type:"viscositygauge",name:"Viscosity Gauge",       x:LEFT_GAP+1051, y:shelfY-150,  width:62,  height:150, isInteractive:true, data:{viscosityReading:0,isViscosityActive:false} },
 ];

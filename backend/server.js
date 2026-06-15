@@ -101,6 +101,9 @@ connectDB().then(() => {
 
   process.on('SIGTERM', () => shutdown('SIGTERM'));
   process.on('SIGINT',  () => shutdown('SIGINT'));
+}).catch((err) => {
+  console.error('❌ Failed to start server:', err.message);
+  process.exit(1);
 });
 
 module.exports = app;

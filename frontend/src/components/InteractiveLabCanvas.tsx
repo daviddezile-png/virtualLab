@@ -23,6 +23,63 @@ const parseRgba = (color: string): [number, number, number, number] => {
   return [56, 189, 248, 0.8];
 };
 
+// Lighten / darken a "#rrggbb" colour by `amt` (−255..255); returns rgb() string.
+const shadeColor = (col: string, amt: number): string => {
+  const m = col.match(/^#([0-9a-fA-F]{6})$/);
+  if (!m) return col;
+  const n = parseInt(m[1], 16);
+  const clamp = (v: number) => Math.max(0, Math.min(255, v));
+  const r = clamp((n >> 16) + amt);
+  const g = clamp(((n >> 8) & 255) + amt);
+  const b = clamp((n & 255) + amt);
+  return `rgb(${r}, ${g}, ${b})`;
+};
+
+// ── Containment model ─────────────────────────────────────────────────────────
+// Instruments that can be lowered INTO a container.  When contained they rest on
+// the inner floor of the container, render in front of (i.e. inside) the glass,
+// and travel with the container when it is dragged.  The spatula additionally
+// dips into wide-mouth solid reagent jars.
+const CONTAINABLE_TYPES = ["stirringrod", "thermometer", "phmeter", "viscositygauge", "spatula"];
+const CONTAINER_TYPES   = ["beaker", "cylinder"];
+
+// Maximum solid (grams) a spatula blade can hold in a single scoop.
+const MAX_SPATULA_LOAD = 30;
+
+// Thickness of the container's glass floor — the contained item's tip rests this
+// many px above the outer bottom so it never pokes through onto the table.
+const containerInnerOffset = (type: string): number => (type === "cylinder" ? 7 : 5);
+
+// Can `item` be lowered into container `c`?  Glassware holds any probe; a solid
+// wide-mouth jar additionally accepts the spatula.
+const isContainerFor = (item: Apparatus, c: Apparatus): boolean =>
+  CONTAINER_TYPES.includes(c.type) ||
+  (item.type === "spatula" && c.type === "bottle" && !!c.data?.isSolid);
+
+// Y position so that `item`'s tip rests inside `container` — on the glass floor
+// for beakers/cylinders, or just inside the mouth for a wide solid jar.
+const restYInside = (item: Apparatus, container: Apparatus): number => {
+  if (container.type === "bottle")
+    return container.y + container.height * 0.34 - item.height;
+  return container.y + container.height - containerInnerOffset(container.type) - item.height;
+};
+
+// Find the container whose mouth the item's tip is currently inside, if any.
+const findContainerFor = (item: Apparatus, list: Apparatus[]): Apparatus | null => {
+  if (!CONTAINABLE_TYPES.includes(item.type)) return null;
+  const cx   = item.x + item.width / 2;
+  const tipY = item.y + item.height;
+  return (
+    list.find(
+      (c) =>
+        isContainerFor(item, c) &&
+        c.id !== item.id &&
+        cx   >= c.x && cx   <= c.x + c.width &&
+        tipY >= c.y + 4 && tipY <= c.y + c.height + 26,
+    ) ?? null
+  );
+};
+
 const drawBeaker = (
   ctx: CanvasRenderingContext2D,
   x: number,
@@ -286,6 +343,41 @@ const drawBeaker = (
   ctx.stroke();
   ctx.fill();
 
+  // Vertical glass highlight streak (left of centre) — real glass catches light
+  ctx.fillStyle = "rgba(255, 255, 255, 0.16)";
+  ctx.beginPath();
+  ctx.roundRect(x + w * 0.18, y + 6, w * 0.07, h - 16, 2);
+  ctx.fill();
+
+  // Rolled rim across the open top (real beakers have a reinforced lip)
+  ctx.strokeStyle = "rgba(255, 255, 255, 0.92)";
+  ctx.lineWidth = 2.6;
+  ctx.lineCap = "round";
+  ctx.beginPath();
+  ctx.moveTo(x + 1, y);
+  ctx.lineTo(x + w - 1, y);
+  ctx.stroke();
+  ctx.lineWidth = 1;
+  ctx.strokeStyle = "rgba(120, 170, 210, 0.55)";
+  ctx.beginPath();
+  ctx.moveTo(x + 1, y + 2.5);
+  ctx.lineTo(x + w - 1, y + 2.5);
+  ctx.stroke();
+
+  // Pouring spout — small triangular lip at the top-right, as on a real beaker
+  ctx.fillStyle = glassGradient;
+  ctx.strokeStyle = "rgba(255, 255, 255, 0.9)";
+  ctx.lineWidth = 1.6;
+  ctx.lineJoin = "round";
+  ctx.beginPath();
+  ctx.moveTo(x + w - 2, y + 1);
+  ctx.quadraticCurveTo(x + w + 7, y - 3, x + w + 8, y + 4);
+  ctx.quadraticCurveTo(x + w + 4, y + 4, x + w - 2, y + 7);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+  ctx.lineCap = "butt";
+
   // 3. Markings & Numbers
   // Layout: tick line starts from the left glass wall, number follows at the line end.
   ctx.strokeStyle = "rgba(255,255,255,0.75)";
@@ -363,10 +455,29 @@ const drawCylinder = (
     ctx.fill();
   }
 
-  // 2. Base of the cylinder
-  ctx.fillStyle = "rgba(180, 210, 240, 0.6)";
+  // 2. Hexagonal / round foot base of the cylinder (wider, weighted stand)
+  const footCX = x + w / 2;
+  const footCY = y + h + 4;
+  const footRx = w * 0.92;
+  const footGrad = ctx.createLinearGradient(footCX - footRx, 0, footCX + footRx, 0);
+  footGrad.addColorStop(0, "rgba(150, 185, 220, 0.75)");
+  footGrad.addColorStop(0.5, "rgba(210, 235, 255, 0.55)");
+  footGrad.addColorStop(1, "rgba(150, 185, 220, 0.75)");
+  ctx.fillStyle = footGrad;
+  ctx.strokeStyle = "rgba(255, 255, 255, 0.7)";
+  ctx.lineWidth = 1.2;
   ctx.beginPath();
-  ctx.ellipse(x + w / 2, y + h, w, 8, 0, 0, Math.PI * 2);
+  ctx.ellipse(footCX, footCY, footRx, 6, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+  // Short neck linking body to foot
+  ctx.fillStyle = "rgba(190, 220, 250, 0.6)";
+  ctx.beginPath();
+  ctx.moveTo(x + w * 0.30, y + h - 2);
+  ctx.lineTo(x + w * 0.70, y + h - 2);
+  ctx.lineTo(footCX + footRx * 0.45, footCY - 2);
+  ctx.lineTo(footCX - footRx * 0.45, footCY - 2);
+  ctx.closePath();
   ctx.fill();
 
   // 3. Glass Body
@@ -380,6 +491,28 @@ const drawCylinder = (
   ctx.strokeStyle = "rgba(255, 255, 255, 0.7)";
   ctx.lineWidth = 2;
   ctx.strokeRect(x, y, w, h);
+
+  // Vertical glass highlight streak
+  ctx.fillStyle = "rgba(255, 255, 255, 0.16)";
+  ctx.fillRect(x + w * 0.20, y + 5, w * 0.10, h - 12);
+
+  // Flared rim + pouring spout at the top (real graduated cylinders flare out)
+  ctx.fillStyle = "rgba(225, 242, 255, 0.55)";
+  ctx.strokeStyle = "rgba(255, 255, 255, 0.85)";
+  ctx.lineWidth = 1.6;
+  ctx.lineJoin = "round";
+  ctx.beginPath();
+  ctx.moveTo(x - 2, y + 5);
+  ctx.quadraticCurveTo(x - 3, y - 1, x + w * 0.30, y - 1);   // left flare
+  ctx.lineTo(x + w * 0.62, y - 1);
+  ctx.quadraticCurveTo(x + w + 6, y - 2, x + w + 7, y + 4);  // spout lip
+  ctx.quadraticCurveTo(x + w + 1, y + 4, x + w + 2, y + 5);
+  ctx.lineTo(x + w + 2, y + 6);
+  ctx.lineTo(x - 2, y + 6);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+  ctx.lineJoin = "miter";
 
   // 4. Dynamic Markings and Numbers
   // Layout: tick line from left wall, number follows immediately after the line end.
@@ -439,90 +572,166 @@ const drawBottle = (
     ctx.rotate(tiltAngle);
     ctx.translate(-(x + w / 2), -y);
   }
-  const neckHeight = h * 0.2;
-  const bodyHeight = h - neckHeight;
-  const bodyY = y + neckHeight;
-  const isWater = name.toLowerCase().includes("water");
+  // ── Container geometry ────────────────────────────────────────────────────
+  // Liquid reagents use a wide body with sloping shoulders and a NARROW screw
+  // neck.  SOLID reagents (stearic acid / beeswax) use a wide-mouth jar so a
+  // spatula can be dipped in to chop and lift out the solid.
+  const r          = 6;
+  const capH       = isSolid ? Math.max(h * 0.13, 10) : Math.max(h * 0.09, 7);
+  const neckH      = isSolid ? Math.max(h * 0.04, 3)  : Math.max(h * 0.07, 5);
+  const shoulderH  = isSolid ? h * 0.05 : h * 0.13;
+  const neckTopY   = y + capH;
+  const neckBotY   = neckTopY + neckH;
+  const bodyTopY   = neckBotY + shoulderH;
+  const bodyBotY   = y + h;
+  const cx         = x + w / 2;
+  const neckW      = isSolid ? Math.max(w * 0.74, 30) : Math.max(w * 0.34, 11);   // wide mouth for solids
+  const capW       = isSolid ? Math.min(w * 0.94, neckW + 12) : neckW + 6;
+  const isWater    = name.toLowerCase().includes("water");
 
-  // 1. Content (liquid or solid)
+  // Bottle silhouette: narrow neck → sloping shoulders → full-width rounded body
+  const silhouette = () => {
+    ctx.beginPath();
+    ctx.moveTo(cx - neckW / 2, neckTopY);
+    ctx.lineTo(cx - neckW / 2, neckBotY);
+    ctx.quadraticCurveTo(x, neckBotY + shoulderH * 0.25, x, bodyTopY);   // left shoulder
+    ctx.lineTo(x, bodyBotY - r);
+    ctx.quadraticCurveTo(x, bodyBotY, x + r, bodyBotY);
+    ctx.lineTo(x + w - r, bodyBotY);
+    ctx.quadraticCurveTo(x + w, bodyBotY, x + w, bodyBotY - r);
+    ctx.lineTo(x + w, bodyTopY);
+    ctx.quadraticCurveTo(x + w, neckBotY + shoulderH * 0.25, cx + neckW / 2, neckBotY); // right shoulder
+    ctx.lineTo(cx + neckW / 2, neckTopY);
+    ctx.closePath();
+  };
+
+  // 1. Content (liquid or solid) — clipped to the bottle silhouette
   if (currentVol > 0) {
-    const fillLevel = currentVol / maxVol;
-    const fillH = bodyHeight * fillLevel;
-    const fillY = bodyY + (bodyHeight - fillH);
+    const fillLevel = Math.min(currentVol / maxVol, 1);
+    const fillH = (bodyBotY - bodyTopY) * fillLevel;
+    const fillY = bodyBotY - fillH;
+
+    ctx.save();
+    silhouette();
+    ctx.clip();
 
     if (isSolid) {
       // Wax-like solid: creamy white base
       ctx.fillStyle = "rgba(255, 250, 240, 0.97)";
-      ctx.beginPath();
-      ctx.roundRect(x + 2, fillY, w - 4, fillH, [0, 0, 6, 6]);
-      ctx.fill();
-
-      // Wavy chunky surface to show it's a solid
-      ctx.save();
-      ctx.beginPath();
-      ctx.roundRect(x + 2, fillY, w - 4, fillH, [0, 0, 6, 6]);
-      ctx.clip();
+      ctx.fillRect(x, fillY, w, fillH);
 
       // Horizontal wax layering lines
       ctx.strokeStyle = "rgba(220, 210, 195, 0.6)";
       ctx.lineWidth = 1;
-      for (let ly = fillY + 4; ly < bodyY + bodyHeight - 4; ly += 7) {
+      for (let ly = fillY + 4; ly < bodyBotY - 3; ly += 7) {
         ctx.beginPath();
-        ctx.moveTo(x + 4, ly);
-        ctx.lineTo(x + w - 4, ly);
+        ctx.moveTo(x + 3, ly);
+        ctx.lineTo(x + w - 3, ly);
         ctx.stroke();
       }
 
-      // Irregular chunks on top surface
+      // Irregular chunks on the top surface
       ctx.fillStyle = "rgba(240, 232, 218, 0.85)";
       for (let ci = 0; ci < 5; ci++) {
-        const cx2 = x + 4 + ci * ((w - 8) / 5);
+        const cx2 = x + 3 + ci * ((w - 6) / 5);
         const ch = 5 + (ci % 3) * 3;
         ctx.beginPath();
-        ctx.roundRect(cx2, fillY, (w - 8) / 5 - 1, ch, 2);
+        ctx.roundRect(cx2, fillY, (w - 6) / 5 - 1, ch, 2);
         ctx.fill();
       }
 
       // Waxy sheen
       ctx.fillStyle = "rgba(255, 255, 255, 0.22)";
-      ctx.beginPath();
-      ctx.roundRect(x + 4, fillY, w * 0.3, fillH * 0.6, 2);
-      ctx.fill();
-      ctx.restore();
+      ctx.fillRect(x + 4, fillY, w * 0.28, fillH * 0.6);
     } else {
-      ctx.fillStyle = liquidColor;
+      const [lr, lg, lb, la] = parseRgba(liquidColor);
+      const liqGrad = ctx.createLinearGradient(x, fillY, x, bodyBotY);
+      liqGrad.addColorStop(0, `rgba(${Math.min(255,lr+25)},${Math.min(255,lg+25)},${Math.min(255,lb+25)},${la})`);
+      liqGrad.addColorStop(1, `rgba(${Math.max(0,lr-15)},${Math.max(0,lg-15)},${Math.max(0,lb-15)},${Math.min(1,la*1.15)})`);
+      ctx.fillStyle = liqGrad;
+      ctx.fillRect(x, fillY, w, fillH);
+      // Surface line
+      ctx.strokeStyle = "rgba(255,255,255,0.4)";
+      ctx.lineWidth = 1;
       ctx.beginPath();
-      ctx.roundRect(x, fillY, w, fillH, [0, 0, 8, 8]);
-      ctx.fill();
+      ctx.moveTo(x + 2, fillY);
+      ctx.lineTo(x + w - 2, fillY);
+      ctx.stroke();
     }
+    ctx.restore();
   }
 
-  // 2. Bottle Body
+  // 2. Glass body
+  const glassGrad = ctx.createLinearGradient(x, y, x + w, y);
+  glassGrad.addColorStop(0,   isWater ? "rgba(220,238,252,0.30)" : "rgba(248,250,252,0.22)");
+  glassGrad.addColorStop(0.5, "rgba(255,255,255,0.12)");
+  glassGrad.addColorStop(1,   "rgba(200,222,242,0.34)");
+  ctx.fillStyle = glassGrad;
   ctx.strokeStyle = "rgba(255, 255, 255, 0.8)";
   ctx.lineWidth = 1.5;
-  ctx.fillStyle = isWater ? "rgba(255,255,255,0.1)" : "rgba(248,250,252,0.18)";
-  ctx.beginPath();
-  ctx.roundRect(x, bodyY, w, bodyHeight, [0, 0, 8, 8]);
+  silhouette();
   ctx.fill();
   ctx.stroke();
 
-  // 3. Neck & Cap
+  // Vertical glass highlight streak
+  ctx.fillStyle = "rgba(255,255,255,0.16)";
+  ctx.fillRect(x + w * 0.18, bodyTopY + 4, w * 0.08, (bodyBotY - bodyTopY) - 12);
+
+  // 3. Neck closure — screw cap (lid on) or open glass rim (lid off)
   if (hasLid) {
-    ctx.fillStyle = lidColor;
-    ctx.fillRect(x + w * 0.3, y, w * 0.4, neckHeight);
+    const capGrad = ctx.createLinearGradient(cx - capW / 2, 0, cx + capW / 2, 0);
+    capGrad.addColorStop(0,   shadeColor(lidColor, -28));
+    capGrad.addColorStop(0.5, lidColor);
+    capGrad.addColorStop(1,   shadeColor(lidColor, -40));
+    ctx.fillStyle = capGrad;
+    ctx.strokeStyle = "rgba(0,0,0,0.22)";
+    ctx.lineWidth = 0.8;
+    ctx.beginPath();
+    ctx.roundRect(cx - capW / 2, y, capW, capH + 3, 3);
+    ctx.fill();
+    ctx.stroke();
+    // Knurled ribs on the cap (screw-cap grip)
+    ctx.strokeStyle = "rgba(0,0,0,0.18)";
+    ctx.lineWidth = 0.7;
+    for (let rx = cx - capW / 2 + 2.5; rx < cx + capW / 2 - 1; rx += 2.6) {
+      ctx.beginPath();
+      ctx.moveTo(rx, y + 2);
+      ctx.lineTo(rx, y + capH + 1.5);
+      ctx.stroke();
+    }
+    // Cap top highlight
+    ctx.fillStyle = "rgba(255,255,255,0.28)";
+    ctx.beginPath();
+    ctx.roundRect(cx - capW / 2 + 2, y + 1, capW * 0.4, 2.5, 1);
+    ctx.fill();
+  } else {
+    // Open ground-glass neck rim
+    ctx.fillStyle = "rgba(210,232,250,0.5)";
+    ctx.strokeStyle = "rgba(255,255,255,0.8)";
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.ellipse(cx, neckTopY, neckW / 2, 2.6, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
   }
 
   // 4. Label
+  const labelY = bodyTopY + (bodyBotY - bodyTopY) * 0.30;
   ctx.fillStyle = "white";
-  ctx.fillRect(x + 5, bodyY + 10, w - 10, 25);
+  ctx.beginPath();
+  ctx.roundRect(x + 4, labelY, w - 8, 26, 2);
+  ctx.fill();
+  ctx.strokeStyle = "rgba(0,0,0,0.08)";
+  ctx.lineWidth = 0.8;
+  ctx.stroke();
   ctx.fillStyle = "#1e293b";
   ctx.font = "bold 8px Arial";
   ctx.textAlign = "center";
-  ctx.fillText(name.split(" ")[0], x + w / 2, bodyY + 25);
+  ctx.fillText(name.split(" ")[0], cx, labelY + 13);
   if (isSolid) {
     ctx.fillStyle = "#7c4a00";
     ctx.font = "6px Arial";
-    ctx.fillText("SOLID", x + w / 2, bodyY + 34);
+    ctx.fillText("SOLID", cx, labelY + 22);
   }
   ctx.restore();
 };
@@ -544,6 +753,10 @@ const calcBeakerWeight = (a: { data?: { composition?: Record<string,number>; sol
   return Math.round(w * 10) / 10;
 };
 
+// The spatula is drawn upright while inside a container (like the glass rod) so
+// it stays within the boundary.  When carrying chopped chemical through the air
+// it is held at a slight inclination (`tiltAngle`) for realism.  `action` adds a
+// freshly-cut chip on the blade while chopping.  No bouncing, no falling chunks.
 const drawSpatula = (
   ctx: CanvasRenderingContext2D,
   x: number,
@@ -551,20 +764,25 @@ const drawSpatula = (
   w: number,
   h: number,
   load: number = 0,
-  pressingIntoSolid: boolean = false,
+  action: "idle" | "chop" | "tip" = "idle",
+  tiltAngle: number = 0,
 ) => {
   ctx.save();
 
-  // Tilt entire spatula when pressing into solid (whole instrument inclines ~18°)
-  if (pressingIntoSolid) {
-    const pivotX = x + w / 2;
-    const pivotY = y + h * 0.35;           // pivot near upper third of handle
+  const cx = x + w / 2;
+  const handleW = Math.max(w * 0.30, 3.5);
+  const bladeH  = h * 0.22;
+  const handleH = h - bladeH;
+  const bladeW  = w * 0.90;
+  const bladeY  = y + handleH - 2;
+
+  // Incline the whole spatula when carrying its load (pivot near the grip)
+  if (tiltAngle !== 0) {
+    const pivotX = cx, pivotY = y + h * 0.16;
     ctx.translate(pivotX, pivotY);
-    ctx.rotate(0.32);                       // ~18° clockwise — leaning into solid
+    ctx.rotate(tiltAngle);
     ctx.translate(-pivotX, -pivotY);
   }
-
-  const cx = x + w / 2;
 
   // Shadow
   ctx.shadowColor = "rgba(0,0,0,0.18)";
@@ -572,9 +790,6 @@ const drawSpatula = (
   ctx.shadowOffsetX = 1;
 
   // Handle — stainless steel rod
-  const handleW = Math.max(w * 0.30, 3.5);
-  const bladeH  = h * 0.22;
-  const handleH = h - bladeH;
   const handleGrad = ctx.createLinearGradient(cx - handleW, 0, cx + handleW, 0);
   handleGrad.addColorStop(0,   "rgba(160, 175, 190, 0.70)");
   handleGrad.addColorStop(0.3, "rgba(230, 240, 248, 0.55)");
@@ -597,18 +812,11 @@ const drawSpatula = (
   ctx.shadowBlur = 0;
   ctx.shadowOffsetX = 0;
 
-  // Blade — wider flat rectangle (drawn inside the bend transform below)
-  const bladeW = w * 0.90;
-  const bladeY = y + handleH - 2;
+  // Blade — wide flat scoop
   const bladeGrad = ctx.createLinearGradient(cx - bladeW / 2, 0, cx + bladeW / 2, 0);
   bladeGrad.addColorStop(0,   "rgba(160, 175, 190, 0.80)");
   bladeGrad.addColorStop(0.5, "rgba(235, 245, 252, 0.60)");
   bladeGrad.addColorStop(1,   "rgba(150, 168, 185, 0.82)");
-
-  // ── Blade always drawn flat (whole-body tilt handles scooping motion) ───
-  ctx.save();
-
-  // Blade body (drawn relative to pivot)
   ctx.fillStyle = bladeGrad;
   ctx.strokeStyle = "rgba(200, 215, 230, 0.88)";
   ctx.lineWidth = 0.8;
@@ -617,29 +825,35 @@ const drawSpatula = (
   ctx.fill();
   ctx.stroke();
 
-  // Wax load on blade when carrying solid
+  // ── Solid load resting on the blade ──
   if (load > 0) {
-    const loadAlpha = Math.min(load / 20, 1);
-    // Mound of wax sitting on top of the blade
+    const loadAlpha = Math.min(load / MAX_SPATULA_LOAD, 1);
+    const moundCY = bladeY + bladeH * 0.35;
     ctx.fillStyle = `rgba(255, 250, 240, ${0.85 + loadAlpha * 0.12})`;
     ctx.beginPath();
-    ctx.ellipse(cx, bladeY + bladeH * 0.35, bladeW * 0.42 * loadAlpha + bladeW * 0.18,
+    ctx.ellipse(cx, moundCY, bladeW * 0.40 * loadAlpha + bladeW * 0.16,
       bladeH * 0.55 * loadAlpha + bladeH * 0.15, 0, 0, Math.PI * 2);
     ctx.fill();
-    // Surface texture — small bumps to look like powdery wax
+    // Powdery texture bumps
     ctx.fillStyle = "rgba(240, 228, 210, 0.72)";
     for (let i = 0; i < 4; i++) {
       const bx = cx + (i - 1.5) * (bladeW * 0.12);
-      const by = bladeY + bladeH * 0.28;
+      const by = moundCY - bladeH * 0.07;
       ctx.beginPath();
       ctx.ellipse(bx, by, 2.2, 1.2, i * 0.5, 0, Math.PI * 2);
       ctx.fill();
     }
   }
 
-  ctx.restore();   // end blade transform
+  // ── A freshly-cut chip on the blade while chopping ──
+  if (action === "chop") {
+    ctx.fillStyle = "rgba(252, 246, 234, 0.9)";
+    ctx.beginPath();
+    ctx.ellipse(cx, bladeY + bladeH * 0.5, bladeW * 0.24, bladeH * 0.42, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
 
-  ctx.restore();   // end overall spatula transform
+  ctx.restore();
 };
 
 const drawWeightBalance = (
@@ -818,35 +1032,57 @@ const drawHotPlate = (
   ctx.roundRect(x, y, w, topH, [7, 7, 0, 0]);
   ctx.fill();
 
-  // Heating coil rings
-  const plateCX = x + w / 2;
-  const plateCY = y + topH / 2;
-  const maxR = Math.min(w * 0.34, topH * 0.70);
-  for (let i = 3; i >= 1; i--) {
-    const r = maxR * (i / 3);
-    ctx.strokeStyle = isOn
-      ? `rgba(255, ${Math.floor(55 + 75 * (i / 3))}, 0, ${0.28 + 0.38 * (i / 3)})`
-      : `rgba(48, 62, 78, ${0.16 + 0.14 * (i / 3)})`;
-    ctx.lineWidth = 1.8;
+  // ── Flat solid metal plate (no coil rings) ───────────────────────────────
+  // Brushed-metal grain when cool
+  if (!isOn || temperature < 45) {
+    ctx.save();
     ctx.beginPath();
-    ctx.arc(plateCX, plateCY, r, 0, Math.PI * 2);
-    ctx.stroke();
+    ctx.roundRect(x + 2, y + 2, w - 4, topH - 3, [6, 6, 0, 0]);
+    ctx.clip();
+    ctx.strokeStyle = "rgba(255,255,255,0.05)";
+    ctx.lineWidth = 1;
+    for (let lx = x + 3; lx < x + w - 2; lx += 4) {
+      ctx.beginPath();
+      ctx.moveTo(lx, y + 2);
+      ctx.lineTo(lx, y + topH - 2);
+      ctx.stroke();
+    }
+    ctx.restore();
   }
 
-  // Pulsing radial glow when on
+  // Uniform heat colour across the WHOLE plate — the metal itself glows hotter
+  // as the temperature rises (no circular element).
   if (isOn) {
     const heatRatio = Math.min((temperature - 25) / Math.max(targetTemperature - 25, 1), 1);
-    const glowR = maxR * 1.4;
-    const pulse = 0.09 + 0.07 * Math.sin(frame * 0.18);
-    const glow = ctx.createRadialGradient(plateCX, plateCY, 0, plateCX, plateCY, glowR);
-    glow.addColorStop(0, `rgba(255, 110, 0, ${0.2 + 0.55 * heatRatio + pulse})`);
-    glow.addColorStop(0.55, `rgba(255, 35, 0, ${(0.12 + 0.38 * heatRatio) * 0.55})`);
-    glow.addColorStop(1, "rgba(180, 0, 0, 0)");
-    ctx.fillStyle = glow;
+    const pulse = 0.05 * Math.sin(frame * 0.16);
+    ctx.save();
     ctx.beginPath();
-    ctx.arc(plateCX, plateCY, glowR, 0, Math.PI * 2);
-    ctx.fill();
+    ctx.roundRect(x + 2, y + 2, w - 4, topH - 3, [6, 6, 0, 0]);
+    ctx.clip();
+    const hg = ctx.createLinearGradient(x, y, x, frontY);
+    hg.addColorStop(0,   `rgba(255, 170, 60, ${0.10 + 0.30 * heatRatio + pulse})`);
+    hg.addColorStop(0.5, `rgba(255, 85, 15, ${0.12 + 0.50 * heatRatio + pulse})`);
+    hg.addColorStop(1,   `rgba(205, 30, 0, ${0.10 + 0.34 * heatRatio})`);
+    ctx.fillStyle = hg;
+    ctx.fillRect(x + 2, y + 2, w - 4, topH - 3);
+    // Brighter soft centre band so the metal looks incandescent when very hot
+    if (heatRatio > 0.5) {
+      const cg = ctx.createLinearGradient(x, y, x + w, y);
+      cg.addColorStop(0, "rgba(255,210,120,0)");
+      cg.addColorStop(0.5, `rgba(255,225,150,${(heatRatio - 0.5) * 0.5})`);
+      cg.addColorStop(1, "rgba(255,210,120,0)");
+      ctx.fillStyle = cg;
+      ctx.fillRect(x + 2, y + 2, w - 4, topH - 3);
+    }
+    ctx.restore();
   }
+
+  // Recessed plate edge — defines the metal heating surface
+  ctx.strokeStyle = isOn ? "rgba(120,30,0,0.55)" : "rgba(40,55,70,0.5)";
+  ctx.lineWidth = 1.4;
+  ctx.beginPath();
+  ctx.roundRect(x + 2, y + 2, w - 4, topH - 3, [6, 6, 0, 0]);
+  ctx.stroke();
 
   // ── Front control panel ──
 
@@ -1107,22 +1343,41 @@ const drawStirringRod = (
   ctx.shadowBlur = 0;
   ctx.shadowOffsetX = 0;
 
-  // Inner light reflection stripe
-  ctx.fillStyle = "rgba(255, 255, 255, 0.26)";
+  // Inner light reflection stripe (soft, broad)
+  ctx.fillStyle = "rgba(255, 255, 255, 0.22)";
   ctx.beginPath();
-  ctx.roundRect(rodCX - rodW / 2 + 1, y + 6, rodW * 0.28, h - 12, 1);
+  ctx.roundRect(rodCX - rodW / 2 + 1, y + 6, rodW * 0.30, h - 12, 1);
   ctx.fill();
 
-  // Top cap
-  ctx.fillStyle = "rgba(215, 236, 255, 0.72)";
+  // Sharp specular highlight line — gives solid-glass shine
+  ctx.fillStyle = "rgba(255, 255, 255, 0.6)";
   ctx.beginPath();
-  ctx.ellipse(rodCX, y + 2, rodW * 0.62, 3.5, 0, 0, Math.PI * 2);
+  ctx.roundRect(rodCX - rodW * 0.30, y + 8, rodW * 0.10, h - 16, 1);
   ctx.fill();
 
-  // Bottom rounded tip
-  ctx.fillStyle = "rgba(198, 226, 252, 0.78)";
+  // Fire-polished rounded top end
+  ctx.fillStyle = "rgba(222, 240, 255, 0.85)";
   ctx.beginPath();
-  ctx.ellipse(rodCX, y + h - 2, rodW * 0.62, 4, 0, 0, Math.PI * 2);
+  ctx.ellipse(rodCX, y + 3, rodW * 0.5, 3.5, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = "rgba(255, 255, 255, 0.55)";
+  ctx.beginPath();
+  ctx.ellipse(rodCX - rodW * 0.12, y + 2.5, rodW * 0.16, 1.4, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Rounded, slightly bulbous bottom tip (as on a real stirring rod)
+  const tipCY = y + h - rodW * 0.42;
+  ctx.fillStyle = rodGrad;
+  ctx.strokeStyle = "rgba(198, 226, 252, 0.9)";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.arc(rodCX, tipCY, rodW * 0.56, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+  // Highlight on the bottom bulb
+  ctx.fillStyle = "rgba(255, 255, 255, 0.5)";
+  ctx.beginPath();
+  ctx.arc(rodCX - rodW * 0.14, tipCY - rodW * 0.14, rodW * 0.18, 0, Math.PI * 2);
   ctx.fill();
 
   ctx.restore();
@@ -1370,112 +1625,131 @@ const drawIceBucket = (
 ) => {
   ctx.save();
 
-  const topW    = w;
-  const botW    = w * 0.74;
-  const botX    = x + (w - botW) / 2;
+  // ── Rectangular plastic container (ice bath) ──────────────────────────────
+  const botW = w * 0.92;                 // very slight taper, mostly rectangular
+  const botX = x + (w - botW) / 2;
+  const rimY = y + 6;                     // inner rim line where ice sits
 
   // Shadow
-  ctx.shadowColor  = "rgba(0,0,0,0.35)";
-  ctx.shadowBlur   = 14;
-  ctx.shadowOffsetY = 6;
+  ctx.shadowColor  = "rgba(0,0,0,0.30)";
+  ctx.shadowBlur   = 12;
+  ctx.shadowOffsetY = 5;
 
-  // Bucket body (trapezoid)
+  // Plastic body — translucent white/blue, rounded bottom corners
   const bodyGrad = ctx.createLinearGradient(x, y, x + w, y);
-  bodyGrad.addColorStop(0,   "#b0c4d8");
-  bodyGrad.addColorStop(0.45, "#dde9f5");
-  bodyGrad.addColorStop(1,   "#8fa8be");
+  bodyGrad.addColorStop(0,    "rgba(206, 224, 240, 0.88)");
+  bodyGrad.addColorStop(0.45, "rgba(240, 248, 253, 0.82)");
+  bodyGrad.addColorStop(1,    "rgba(192, 212, 230, 0.88)");
   ctx.fillStyle = bodyGrad;
   ctx.beginPath();
-  ctx.moveTo(x, y);
-  ctx.lineTo(x + topW, y);
-  ctx.lineTo(botX + botW, y + h);
-  ctx.lineTo(botX, y + h);
+  ctx.moveTo(x, rimY);
+  ctx.lineTo(x + w, rimY);
+  ctx.lineTo(botX + botW, y + h - 9);
+  ctx.quadraticCurveTo(botX + botW, y + h, botX + botW - 9, y + h);
+  ctx.lineTo(botX + 9, y + h);
+  ctx.quadraticCurveTo(botX, y + h, botX, y + h - 9);
   ctx.closePath();
   ctx.fill();
   ctx.shadowBlur = 0; ctx.shadowOffsetY = 0;
 
-  // Ice and water contents
+  // Inner cavity shading (depth)
+  ctx.fillStyle = "rgba(120, 150, 175, 0.20)";
+  ctx.beginPath();
+  ctx.moveTo(x + 4, rimY + 4);
+  ctx.lineTo(x + w - 4, rimY + 4);
+  ctx.lineTo(botX + botW - 5, y + h - 6);
+  ctx.lineTo(botX + 5, y + h - 6);
+  ctx.closePath();
+  ctx.fill();
+
+  // Cold water pooled at the bottom
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(x + 4, rimY + 4);
+  ctx.lineTo(x + w - 4, rimY + 4);
+  ctx.lineTo(botX + botW - 5, y + h - 6);
+  ctx.lineTo(botX + 5, y + h - 6);
+  ctx.closePath();
+  ctx.clip();
+  ctx.fillStyle = "rgba(170, 215, 245, 0.40)";
+  ctx.fillRect(x, y + h * 0.55, w, h);
+  ctx.restore();
+
+  // Plastic side highlight
+  ctx.fillStyle = "rgba(255,255,255,0.30)";
+  ctx.fillRect(x + w * 0.10, rimY + 4, w * 0.05, h - 14);
+
+  // ── Ice cubes mounded at the top (some peeking above the rim) ──────────────
   if (iceLevel > 0) {
-    const fillH  = (h - 18) * 0.85 * (iceLevel / 100);
-    const fillY  = y + h - 10 - fillH;
-    const prog   = (y + h - 10 - fillY) / (h - 18); // 0..1 fill ratio
-    const lW     = topW - 2 * prog * (topW - botW) / 2;
-    const lX     = x + (topW - lW) / 2;
+    const drawCube = (ccx: number, ccy: number, s: number, rot: number) => {
+      ctx.save();
+      ctx.translate(ccx, ccy);
+      ctx.rotate(rot);
+      const g = ctx.createLinearGradient(-s / 2, -s / 2, s / 2, s / 2);
+      g.addColorStop(0,   "rgba(255,255,255,0.96)");
+      g.addColorStop(0.5, "rgba(226,243,254,0.92)");
+      g.addColorStop(1,   "rgba(188,224,248,0.88)");
+      ctx.fillStyle = g;
+      ctx.strokeStyle = "rgba(255,255,255,0.75)";
+      ctx.lineWidth = 0.8;
+      ctx.beginPath();
+      ctx.roundRect(-s / 2, -s / 2, s, s * 0.86, 2);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = "rgba(255,255,255,0.6)";
+      ctx.beginPath();
+      ctx.roundRect(-s / 2 + 1.5, -s / 2 + 1.5, s * 0.32, s * 0.26, 1);
+      ctx.fill();
+      ctx.restore();
+    };
 
-    ctx.save();
-    // Clip to inside the bucket
-    ctx.beginPath();
-    ctx.moveTo(x + 3, y + 3);
-    ctx.lineTo(x + topW - 3, y + 3);
-    ctx.lineTo(botX + botW - 3, y + h - 3);
-    ctx.lineTo(botX + 3, y + h - 3);
-    ctx.closePath();
-    ctx.clip();
-
-    // Cold water layer at bottom
-    ctx.fillStyle = "rgba(186, 230, 253, 0.55)";
-    ctx.fillRect(lX, fillY + fillH * 0.65, lW, fillH * 0.38);
-
-    // Ice chunks
-    const cols   = 4;
-    const rows   = Math.max(1, Math.ceil(iceLevel / 30));
-    const cW2    = lW / cols - 4;
-    const cH2    = fillH / (rows + 1) * 0.55;
-    for (let r = 0; r < rows; r++) {
-      for (let c = 0; c < cols; c++) {
-        const ix = lX + 2 + c * (lW / cols) + (r % 2 === 0 ? 3 : 0);
-        const iy = fillY + 4 + r * (fillH / rows);
-        ctx.fillStyle = `rgba(224, 242, 254, ${0.80 + (c % 2) * 0.12})`;
-        ctx.beginPath();
-        ctx.roundRect(ix, iy, cW2, cH2, 3);
-        ctx.fill();
-        // Shine on each cube
-        ctx.fillStyle = "rgba(255,255,255,0.55)";
-        ctx.beginPath();
-        ctx.roundRect(ix + 2, iy + 2, cW2 * 0.38, cH2 * 0.32, 1);
-        ctx.fill();
+    const s    = w * 0.15;
+    const n    = Math.max(3, Math.floor((w - 8) / (s * 0.95)));
+    const span = w - 10 - s;
+    const fillFrac = Math.min(iceLevel / 100, 1);
+    // Back row — sits on the rim
+    for (let i = 0; i < n; i++) {
+      const ccx = x + 6 + s / 2 + (n > 1 ? (i / (n - 1)) * span : 0);
+      const jit = (((i * 37) % 7) - 3) * 0.5;
+      drawCube(ccx, rimY + 3 + jit, s, (((i * 53) % 10) - 5) * 0.04);
+    }
+    // Front row — overlapping, peeking just above the rim
+    if (fillFrac > 0.35) {
+      for (let i = 0; i < n - 1; i++) {
+        const ccx = x + 6 + s + (n > 1 ? (i / (n - 1)) * span : 0);
+        const jit = (((i * 53) % 5) - 2) * 0.6;
+        drawCube(ccx, rimY - 3 + jit, s * 0.95, (((i * 29) % 10) - 5) * 0.05);
       }
     }
-    ctx.restore();
   }
 
-  // Rim (top edge)
-  ctx.strokeStyle = "rgba(148, 163, 184, 0.95)";
-  ctx.lineWidth   = 3;
+  // Plastic rim lip across the top
+  ctx.strokeStyle = "rgba(150, 175, 198, 0.95)";
+  ctx.lineWidth   = 3.5;
+  ctx.lineCap = "round";
   ctx.beginPath();
-  ctx.moveTo(x, y);
-  ctx.lineTo(x + topW, y);
+  ctx.moveTo(x + 1, rimY);
+  ctx.lineTo(x + w - 1, rimY);
+  ctx.stroke();
+  ctx.lineCap = "butt";
+
+  // Side outlines
+  ctx.strokeStyle = "rgba(150, 175, 198, 0.45)";
+  ctx.lineWidth   = 1.3;
+  ctx.beginPath();
+  ctx.moveTo(x, rimY);
+  ctx.lineTo(botX, y + h - 6);
+  ctx.moveTo(x + w, rimY);
+  ctx.lineTo(botX + botW, y + h - 6);
   ctx.stroke();
 
-  // Side outline
-  ctx.strokeStyle = "rgba(148, 163, 184, 0.50)";
-  ctx.lineWidth   = 1.5;
-  ctx.beginPath();
-  ctx.moveTo(x, y);
-  ctx.lineTo(botX, y + h);
-  ctx.moveTo(x + topW, y);
-  ctx.lineTo(botX + botW, y + h);
-  ctx.stroke();
-
-  // Handle arcs
-  ctx.strokeStyle = "rgba(148, 163, 184, 0.70)";
-  ctx.lineWidth   = 2;
-  ctx.beginPath();
-  ctx.arc(x + w * 0.22, y - 4, 8, Math.PI, 0);
-  ctx.stroke();
-  ctx.beginPath();
-  ctx.arc(x + w * 0.78, y - 4, 8, Math.PI, 0);
-  ctx.stroke();
-
-  // "ICE BUCKET" label
-  ctx.fillStyle   = "#334155";
-  ctx.font        = "bold 9px Arial";
-  ctx.textAlign   = "center";
-  ctx.fillText("ICE BUCKET", x + w / 2, y + 13);
-
-  // 0°C badge
-  ctx.fillStyle   = "#0ea5e9";
-  ctx.font        = "bold 8px Arial";
+  // "ICE BATH" label + 0 °C badge on the lower front of the container
+  ctx.fillStyle = "#475569";
+  ctx.font      = "bold 8px Arial";
+  ctx.textAlign = "center";
+  ctx.fillText("ICE BATH", x + w / 2, y + h - 14);
+  ctx.fillStyle = "#0ea5e9";
+  ctx.font      = "bold 8px Arial";
   ctx.fillText("0 °C", x + w / 2, y + h - 5);
 
   ctx.restore();
@@ -1554,6 +1828,14 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
   const canvasRef     = useRef<HTMLCanvasElement>(null);
   const holdStirRef   = useRef<{ rodId: string; targetId: string } | null>(null);
   const draggingRef   = useRef<{ id: string; offsetX: number; offsetY: number } | null>(null);
+  const dragStartRef  = useRef<{ x: number; y: number } | null>(null); // mousedown client coords
+  const dragMovedRef  = useRef(false);                                  // true once a real drag occurs
+  // ── Touch interaction state ───────────────────────────────────────────────
+  const touchStartRef     = useRef<{ clientX: number; clientY: number; x: number; y: number; time: number } | null>(null);
+  const longPressTimerRef = useRef<number | null>(null);  // pending long-press → context menu
+  const longPressFiredRef = useRef(false);                // a long-press already opened a menu
+  const lastTapRef        = useRef<{ time: number; x: number; y: number } | null>(null); // for double-tap
+  const panningRef        = useRef<{ startX: number; scrollLeft: number } | null>(null); // empty-area pan
   const prevAppRef    = useRef<Apparatus[]>([]);
   const notifIdRef    = useRef(0);
   const milestoneRef  = useRef<Set<string>>(new Set()); // prevents duplicate one-shot alerts
@@ -1600,11 +1882,14 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
   const benchHeight = canvasSize.height - (TABLE_Y + LIP_HEIGHT); // Reaches bottom
   const shelfY = 220;
 
-  const [apparatus, setApparatus] = useState<Apparatus[]>(() =>
-    isColdCream
-      ? getInitialApparatusColdCream(LEFT_GAP, shelfY, TABLE_Y)
-      : getInitialApparatus(LEFT_GAP, shelfY, TABLE_Y),
+  // Initial layout for the active practical — used both for the apparatus state
+  // and for holder / reset-to-shelf positions so they always match.
+  const initialApparatusFor = useCallback(
+    () => (isColdCream ? getInitialApparatusColdCream : getInitialApparatus)(LEFT_GAP, shelfY, TABLE_Y),
+    [isColdCream, LEFT_GAP, shelfY, TABLE_Y],
   );
+
+  const [apparatus, setApparatus] = useState<Apparatus[]>(() => initialApparatusFor());
 
   // latestApparatusRef mirrors apparatus without using setApparatus as a snapshot vehicle
   const latestApparatusRef = useRef<Apparatus[]>(apparatus);
@@ -1642,87 +1927,189 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
 
   const drawApparatus = useCallback(
     (ctx: CanvasRenderingContext2D) => {
-      // COLORS
-      const WALL_COLOR = "#003e63";
-      const NAV_COLOR = "#002d4a";
-      const TABLE_TOP_COLOR = "#b2c3d4";
-      const TABLE_FRONT_COLOR = "#879cb0";
-      const CABINET_SIDE_COLOR = "#6a7e91";
-      const DRAWER_COLOR = "#9cb1c4";
-      const HIGHLIGHT_STRIP = "#f8fafc";
+      const benchTopY = TABLE_Y + LIP_HEIGHT;
 
-      // 1. CLEAR & BACKGROUND
-      ctx.fillStyle = WALL_COLOR;
+      // 1. WALL BACKGROUND — vertical gradient gives the room depth
+      const wallGrad = ctx.createLinearGradient(0, NAV_BAR_HEIGHT, 0, TABLE_Y);
+      wallGrad.addColorStop(0, "#00314e");
+      wallGrad.addColorStop(1, "#00557f");
+      ctx.fillStyle = wallGrad;
       ctx.fillRect(0, 0, canvasSize.width, canvasSize.height);
 
-      // 2. NAVIGATION BAR
-      ctx.fillStyle = NAV_COLOR;
-      ctx.fillRect(0, 0, canvasSize.width, NAV_BAR_HEIGHT);
+      // Faint vertical wall-panel seams
+      ctx.strokeStyle = "rgba(255,255,255,0.035)";
+      ctx.lineWidth = 1;
+      for (let px = LEFT_GAP + 80; px < canvasSize.width; px += 165) {
+        ctx.beginPath();
+        ctx.moveTo(px, NAV_BAR_HEIGHT);
+        ctx.lineTo(px, TABLE_Y);
+        ctx.stroke();
+      }
 
-      // 3. STORAGE SHELF — extend to cover every item resting on it
+      // 2. NAVIGATION BAR — with sheen and a recessed bottom edge
+      ctx.fillStyle = "#002335";
+      ctx.fillRect(0, 0, canvasSize.width, NAV_BAR_HEIGHT);
+      const navGrad = ctx.createLinearGradient(0, 0, 0, NAV_BAR_HEIGHT);
+      navGrad.addColorStop(0, "rgba(255,255,255,0.06)");
+      navGrad.addColorStop(1, "rgba(0,0,0,0.12)");
+      ctx.fillStyle = navGrad;
+      ctx.fillRect(0, 0, canvasSize.width, NAV_BAR_HEIGHT);
+      ctx.fillStyle = "rgba(0,0,0,0.30)";
+      ctx.fillRect(0, NAV_BAR_HEIGHT - 2, canvasSize.width, 2);
+      ctx.fillStyle = "rgba(120,160,190,0.25)";
+      ctx.fillRect(0, NAV_BAR_HEIGHT, canvasSize.width, 1);
+
+      // 3. STORAGE SHELF — a solid board with thickness, brackets and a cast shadow
       const shelfRightEdge = apparatus.reduce((maxX, a) => {
         const onShelf = Math.abs((a.y + a.height) - shelfY) < 30;
         return onShelf ? Math.max(maxX, a.x + a.width + 20) : maxX;
       }, tableTotalWidth + LEFT_GAP);
       const shelfDrawWidth = shelfRightEdge - LEFT_GAP;
-      ctx.fillStyle = "rgba(255, 255, 255, 0.2)";
-      ctx.fillRect(LEFT_GAP, shelfY, shelfDrawWidth, 6);
+      const SHELF_THICK = 11;
 
-      // 4. DRAW TABLE
-      const drawCabinet = (x: number, isRight: boolean) => {
-        ctx.fillStyle = TABLE_FRONT_COLOR;
-        ctx.fillRect(x, TABLE_Y + LIP_HEIGHT, CABINET_WIDTH, benchHeight);
+      // Shadow cast on the wall just below the shelf
+      const shShadow = ctx.createLinearGradient(0, shelfY + SHELF_THICK, 0, shelfY + SHELF_THICK + 22);
+      shShadow.addColorStop(0, "rgba(0,0,0,0.30)");
+      shShadow.addColorStop(1, "rgba(0,0,0,0)");
+      ctx.fillStyle = shShadow;
+      ctx.fillRect(LEFT_GAP + 5, shelfY + SHELF_THICK, shelfDrawWidth, 22);
+
+      // Triangular support brackets beneath the board
+      ctx.fillStyle = "#3c4d59";
+      for (let bx = LEFT_GAP + 45; bx < LEFT_GAP + shelfDrawWidth - 25; bx += 235) {
+        ctx.beginPath();
+        ctx.moveTo(bx, shelfY + SHELF_THICK);
+        ctx.lineTo(bx + 11, shelfY + SHELF_THICK);
+        ctx.lineTo(bx, shelfY + SHELF_THICK + 32);
+        ctx.closePath();
+        ctx.fill();
+      }
+
+      // Shelf board — front edge (thickness) shaded for 3D
+      const boardGrad = ctx.createLinearGradient(0, shelfY, 0, shelfY + SHELF_THICK);
+      boardGrad.addColorStop(0, "#dce6f0");
+      boardGrad.addColorStop(0.45, "#bccadb");
+      boardGrad.addColorStop(1, "#8a9cb0");
+      ctx.fillStyle = boardGrad;
+      ctx.fillRect(LEFT_GAP, shelfY, shelfDrawWidth, SHELF_THICK);
+      // Lit top edge where items rest
+      ctx.fillStyle = "rgba(255,255,255,0.6)";
+      ctx.fillRect(LEFT_GAP, shelfY - 1, shelfDrawWidth, 2);
+      // Dark underside line
+      ctx.fillStyle = "rgba(35,50,65,0.55)";
+      ctx.fillRect(LEFT_GAP, shelfY + SHELF_THICK - 1.5, shelfDrawWidth, 1.5);
+      // Right end cap for depth
+      ctx.fillStyle = "rgba(55,75,92,0.6)";
+      ctx.fillRect(LEFT_GAP + shelfDrawWidth, shelfY, 4, SHELF_THICK + 1);
+
+      // 4. DRAW TABLE / BENCH
+      const drawCabinet = (cabX: number, isRight: boolean) => {
+        // Front face — vertical gradient (lit at the counter, darker toward floor)
+        const fg = ctx.createLinearGradient(cabX, benchTopY, cabX, benchTopY + benchHeight);
+        fg.addColorStop(0, "#96aabd");
+        fg.addColorStop(0.5, "#7e93a7");
+        fg.addColorStop(1, "#5d7183");
+        ctx.fillStyle = fg;
+        ctx.fillRect(cabX, benchTopY, CABINET_WIDTH, benchHeight);
+
+        // Left edge highlight + right edge seam (panel relief)
+        ctx.fillStyle = "rgba(255,255,255,0.12)";
+        ctx.fillRect(cabX, benchTopY, 3, benchHeight);
+        ctx.fillStyle = "rgba(25,40,55,0.30)";
+        ctx.fillRect(cabX + CABINET_WIDTH - 3, benchTopY, 3, benchHeight);
 
         if (isRight) {
-          ctx.fillStyle = CABINET_SIDE_COLOR;
-          ctx.fillRect(
-            x + CABINET_WIDTH,
-            TABLE_Y + LIP_HEIGHT,
-            SIDE_DEPTH,
-            benchHeight,
-          );
+          // Angled side panel recedes (darker)
+          const sg = ctx.createLinearGradient(cabX + CABINET_WIDTH, 0, cabX + CABINET_WIDTH + SIDE_DEPTH, 0);
+          sg.addColorStop(0, "#5a6e80");
+          sg.addColorStop(1, "#3d4d5c");
+          ctx.fillStyle = sg;
+          ctx.fillRect(cabX + CABINET_WIDTH, benchTopY, SIDE_DEPTH, benchHeight);
         }
 
-        // Drawers
+        // Drawers — inset bevel + metallic bar handle
         for (let i = 0; i < 2; i++) {
-          const dY = TABLE_Y + LIP_HEIGHT + 30 + i * 90;
-          if (dY + 70 < canvasSize.height) {
-            // Only draw if room
-            ctx.fillStyle = DRAWER_COLOR;
-            ctx.fillRect(x + 10, dY, CABINET_WIDTH - 20, 65);
-            ctx.fillStyle = "#334155";
-            ctx.beginPath();
-            ctx.roundRect(x + CABINET_WIDTH / 2 - 25, dY + 30, 50, 6, 2);
-            ctx.fill();
-            ctx.fillStyle = HIGHLIGHT_STRIP;
-            ctx.fillRect(x, dY + 75, CABINET_WIDTH, 4);
-          }
+          const dY = benchTopY + 30 + i * 90;
+          if (dY + 70 >= canvasSize.height) continue;
+          const dx = cabX + 12, dw = CABINET_WIDTH - 24, dh = 62;
+          const dg = ctx.createLinearGradient(0, dY, 0, dY + dh);
+          dg.addColorStop(0, "#b3c3d3");
+          dg.addColorStop(1, "#8499ad");
+          ctx.fillStyle = dg;
+          ctx.beginPath();
+          ctx.roundRect(dx, dY, dw, dh, 5);
+          ctx.fill();
+          // Top-left highlight
+          ctx.strokeStyle = "rgba(255,255,255,0.5)";
+          ctx.lineWidth = 1.5;
+          ctx.beginPath();
+          ctx.moveTo(dx + 1.5, dY + dh - 2);
+          ctx.lineTo(dx + 1.5, dY + 1.5);
+          ctx.lineTo(dx + dw - 2, dY + 1.5);
+          ctx.stroke();
+          // Bottom-right shadow
+          ctx.strokeStyle = "rgba(28,42,56,0.5)";
+          ctx.beginPath();
+          ctx.moveTo(dx + dw - 1.5, dY + 2);
+          ctx.lineTo(dx + dw - 1.5, dY + dh - 1.5);
+          ctx.lineTo(dx + 2, dY + dh - 1.5);
+          ctx.stroke();
+          // Metallic bar handle
+          const hw = Math.min(72, dw * 0.42);
+          const hx = cabX + CABINET_WIDTH / 2 - hw / 2;
+          const hy = dY + dh / 2 - 3;
+          const hg = ctx.createLinearGradient(0, hy, 0, hy + 7);
+          hg.addColorStop(0, "#eef3f8");
+          hg.addColorStop(0.5, "#aab9c7");
+          hg.addColorStop(1, "#748699");
+          ctx.fillStyle = hg;
+          ctx.beginPath();
+          ctx.roundRect(hx, hy, hw, 7, 3.5);
+          ctx.fill();
+          ctx.fillStyle = "rgba(0,0,0,0.16)";
+          ctx.beginPath();
+          ctx.roundRect(hx, hy + 5, hw, 2, 1);
+          ctx.fill();
         }
       };
 
-      // Middle segment
-      ctx.fillStyle = TABLE_FRONT_COLOR;
-      ctx.fillRect(
-        LEFT_GAP + CABINET_WIDTH,
-        TABLE_Y + LIP_HEIGHT,
-        tableTotalWidth - CABINET_WIDTH * 2,
-        benchHeight / 2.5,
-      );
+      // Recessed back panel between the two cabinets
+      ctx.fillStyle = "#5e7183";
+      ctx.fillRect(LEFT_GAP + CABINET_WIDTH, benchTopY, tableTotalWidth - CABINET_WIDTH * 2, benchHeight / 2.5);
+      const midShade = ctx.createLinearGradient(0, benchTopY, 0, benchTopY + benchHeight / 2.5);
+      midShade.addColorStop(0, "rgba(0,0,0,0)");
+      midShade.addColorStop(1, "rgba(0,0,0,0.38)");
+      ctx.fillStyle = midShade;
+      ctx.fillRect(LEFT_GAP + CABINET_WIDTH, benchTopY, tableTotalWidth - CABINET_WIDTH * 2, benchHeight / 2.5);
 
       drawCabinet(LEFT_GAP, false);
       drawCabinet(LEFT_GAP + tableTotalWidth - CABINET_WIDTH, true);
 
-      // Table Top Surface
-      ctx.fillStyle = TABLE_TOP_COLOR;
+      // 5. COUNTERTOP — beveled front edge for a thick 3D worktop
+      const topGrad = ctx.createLinearGradient(0, TABLE_Y, 0, TABLE_Y + LIP_HEIGHT);
+      topGrad.addColorStop(0, "#cdd9e6");
+      topGrad.addColorStop(0.2, "#b2c3d4");
+      topGrad.addColorStop(1, "#7d91a5");
+      ctx.fillStyle = topGrad;
       ctx.fillRect(LEFT_GAP, TABLE_Y, tableTotalWidth + SIDE_DEPTH, LIP_HEIGHT);
-      ctx.fillStyle = HIGHLIGHT_STRIP;
+      // Bright bevel highlight at the very top edge
+      ctx.fillStyle = "rgba(255,255,255,0.85)";
       ctx.fillRect(LEFT_GAP, TABLE_Y, tableTotalWidth + SIDE_DEPTH, 2);
+      // Soft sheen band
+      ctx.fillStyle = "rgba(255,255,255,0.16)";
+      ctx.fillRect(LEFT_GAP, TABLE_Y + 3, tableTotalWidth + SIDE_DEPTH, 3);
+      // Right-side depth chamfer
+      ctx.fillStyle = "rgba(40,55,70,0.30)";
+      ctx.fillRect(LEFT_GAP + tableTotalWidth, TABLE_Y, SIDE_DEPTH, LIP_HEIGHT);
+      // Dark separation line beneath the lip
+      ctx.fillStyle = "rgba(28,42,56,0.5)";
+      ctx.fillRect(LEFT_GAP, TABLE_Y + LIP_HEIGHT - 2, tableTotalWidth + SIDE_DEPTH, 2);
 
       // ── Instrument holder stands on the shelf ──────────────────────────────
       // Draw a small bracket/dock for each instrument that lives on the shelf.
       // These show WHERE instruments belong when not in use.
       // Holders always fixed at original shelf positions
-      const origHolderList = getInitialApparatus(LEFT_GAP, shelfY, TABLE_Y);
+      const origHolderList = initialApparatusFor();
       const HOLDER_IDS = ["thermometer-digital","glass-stirring-rod","spatula","ph-meter","viscosity-gauge"];
       origHolderList.forEach((item) => {
         if (!HOLDER_IDS.includes(item.id)) return;
@@ -1746,7 +2133,47 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
       });
 
       // 5. APPARATUS RENDERING logic
-      apparatus.forEach((item) => {
+      // Build a render order where every contained item is drawn immediately
+      // AFTER its container, so it appears INSIDE the glass (in front of it)
+      // rather than hidden behind it.  The item currently being dragged is drawn
+      // last of all so it stays visible while it is lifted out.
+      const dragId = draggingRef.current?.id ?? null;
+      const childrenByParent = new Map<string, Apparatus[]>();
+      apparatus.forEach((a) => {
+        const pid = a.data?.containedInId;
+        if (pid) {
+          if (!childrenByParent.has(pid)) childrenByParent.set(pid, []);
+          childrenByParent.get(pid)!.push(a);
+        }
+      });
+      const renderOrder: Apparatus[] = [];
+      const seen = new Set<string>();
+      const pushItem = (a: Apparatus) => {
+        if (seen.has(a.id)) return;
+        seen.add(a.id);
+        renderOrder.push(a);
+        (childrenByParent.get(a.id) ?? []).forEach((kid) => {
+          if (kid.id !== dragId && !seen.has(kid.id)) { seen.add(kid.id); renderOrder.push(kid); }
+        });
+      };
+      apparatus.forEach((a) => {
+        if (a.id === dragId) return;          // drawn last, on top
+        if (a.data?.containedInId) return;     // drawn with its container
+        pushItem(a);
+      });
+      // Safety: any orphan whose container no longer exists still gets drawn.
+      // (Items whose parent IS present are deferred to that parent's push so a
+      // dragged container's contents stay layered on top of it, not behind.)
+      apparatus.forEach((a) => {
+        if (a.id === dragId || seen.has(a.id)) return;
+        const pid = a.data?.containedInId;
+        if (pid && apparatus.some((p) => p.id === pid)) return;
+        pushItem(a);
+      });
+      // Dragged item (and its contents, if it is a container) on top
+      if (dragId) { const d = apparatus.find((a) => a.id === dragId); if (d) pushItem(d); }
+
+      renderOrder.forEach((item) => {
         const { x: origX, y: origY, width, height, type, name, id } = item;
 
         // When pouring, the source container moves above the target container
@@ -1892,15 +2319,32 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
         } else if (type === "viscositygauge") {
           drawViscosityGauge(ctx, x, y, width, height, item.data?.viscosityReading ?? 0, item.data?.isViscosityActive ?? false, hotPlateFrame);
         } else if (type === "spatula") {
-          // Deflect blade downward when pressing into a solid reagent bottle
+          // Decide the spatula's working action from what its blade is over:
+          //  • empty blade inside a solid jar  → chopping motion
+          //  • loaded blade inside a beaker    → tipping its content out
           const bladeCX  = x + width / 2;
           const bladeBot = y + height;
-          const pressingIntoSolid = dragging?.id === item.id && apparatus.some(
+          const load     = item.data?.spatulaLoad ?? 0;
+          const isActive = dragging?.id === item.id;   // only while being handled
+          const overSolid = apparatus.some(
             (a) => a.data?.isSolid &&
                    bladeCX  >= a.x && bladeCX  <= a.x + a.width &&
                    bladeBot >= a.y && bladeBot <= a.y + a.height,
           );
-          drawSpatula(ctx, x, y, width, height, item.data?.spatulaLoad ?? 0, pressingIntoSolid);
+          const overBeaker = apparatus.some(
+            (a) => (a.type === "beaker" || a.type === "cylinder") &&
+                   bladeCX  >= a.x && bladeCX  <= a.x + a.width &&
+                   bladeBot >= a.y && bladeBot <= a.y + a.height,
+          );
+          const action: "idle" | "chop" | "tip" =
+            isActive && load === 0 && overSolid ? "chop" :
+            isActive && load > 0  && overBeaker ? "tip"  : "idle";
+          // Carrying chopped chemical through the air → hold at a realistic
+          // incline.  Stay upright while the blade is inside a container so it
+          // never pokes through the wall.
+          const carrying  = load > 0 && !overSolid && !overBeaker;
+          const tiltAngle = carrying ? 0.2 : 0;
+          drawSpatula(ctx, x, y, width, height, load, action, tiltAngle);
         } else if (type === "weightbalance") {
           // Platform top matches drawWeightBalance: y + h*0.60 - 8
           const platformTop = item.y + item.height * 0.60 - 8;
@@ -1949,9 +2393,13 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
             // startX/Y = rotated spout exit (already computed above)
             const startX = streamExitX;
             const startY = streamExitY;
-            // endX/Y = top opening of the target container
-            const endX = target.x + target.width / 2;
-            const endY = target.y + 6;
+            // endX/Y = the lip / "head" of the target's mouth nearest the source,
+            // so the liquid runs in at the edge of the opening (not the centre).
+            const pourFromLeft = streamExitX <= target.x + target.width / 2;
+            const endX = pourFromLeft
+              ? target.x + target.width * 0.22
+              : target.x + target.width * 0.78;
+            const endY = target.y + 3;
             const progress = item.data?.pouringProgress || 0;
 
             // Control point: stream exits the spout roughly vertically then
@@ -2074,7 +2522,7 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
         }
       });
     },
-    [canvasSize, apparatus, benchHeight, tableTotalWidth, hoveredId, hotPlateFrame],
+    [canvasSize, apparatus, benchHeight, tableTotalWidth, hoveredId, hotPlateFrame, initialApparatusFor],
   );
 
   useEffect(() => {
@@ -2625,28 +3073,36 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
     }
   }, [drawApparatus]);
 
-  const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
+  // Shared press logic for mouse and touch.  Returns what it set up so the
+  // caller (touch) can decide on long-press / tap handling.
+  const pointerDownAt = (
+    clientX: number, clientY: number, kind: "mouse" | "touch",
+  ): "stir" | "lid" | "drag" | "none" => {
     const rect = canvasRef.current?.getBoundingClientRect();
-    if (!rect) return;
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
+    if (!rect) return "none";
+    const x = clientX - rect.left;
+    const y = clientY - rect.top;
     const clicked = apparatus.find(
       (a) => x >= a.x && x <= a.x + a.width && y >= a.y && y <= a.y + a.height,
     );
-    if (clicked) {
-      // Stirring rod — live-detect whether tip is inside a beaker with liquid
-      if (clicked.type === "stirringrod") {
-        const probeBottom = clicked.y + clicked.height;
-        const probeCX     = clicked.x + clicked.width / 2;
-        const beakerUnder = apparatus.find(
-          (a) =>
-            (a.type === "beaker" || a.type === "cylinder") &&
-            probeCX     >= a.x && probeCX     <= a.x + a.width &&
-            probeBottom >= a.y && probeBottom <= a.y + a.height &&
-            (a.data?.currentVolume ?? 0) > 0,
-        );
-        if (beakerUnder) {
-          // Tip is inside liquid → hold to stir, rod stays fixed
+    if (!clicked) return "none";
+
+    // Stirring rod — live-detect whether tip is inside a beaker with liquid
+    if (clicked.type === "stirringrod") {
+      const probeBottom = clicked.y + clicked.height;
+      const probeCX     = clicked.x + clicked.width / 2;
+      const beakerUnder = apparatus.find(
+        (a) =>
+          (a.type === "beaker" || a.type === "cylinder") &&
+          probeCX     >= a.x && probeCX     <= a.x + a.width &&
+          probeBottom >= a.y && probeBottom <= a.y + a.height &&
+          (a.data?.currentVolume ?? 0) > 0,
+      );
+      if (beakerUnder) {
+        // Grab the LOWER half (near the mouth) to stir; grab the UPPER half to
+        // lift the rod back out of the beaker.
+        const grabUpperHandle = y < clicked.y + (beakerUnder.y - clicked.y) * 0.5;
+        if (!grabUpperHandle) {
           holdStirRef.current = { rodId: clicked.id, targetId: beakerUnder.id };
           setApparatus((prev) =>
             prev.map((a) =>
@@ -2655,25 +3111,47 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
                 : a,
             ),
           );
-          e.preventDefault();
-          window.addEventListener("mouseup", handleMouseUp);
-          return; // locked — no drag
+          if (kind === "mouse") window.addEventListener("mouseup", handleMouseUp);
+          return "stir"; // locked — no drag
         }
-        // Tip is outside any beaker → fall through to drag so user can reposition rod
       }
+    }
 
-      // If lid is present, show lid modal
-      if (clicked.data?.hasLid) {
+    // Lid handling — only the CAP/neck region opens the lid modal, so the body
+    // of a closed container can still be grabbed and dragged.  Geometry mirrors
+    // drawBottle (wide cap for solid jars, narrow for liquids).
+    if (clicked.type === "bottle" || clicked.type === "container") {
+      const solid = !!clicked.data?.isSolid;
+      const capH  = solid ? Math.max(clicked.height * 0.13, 10) : Math.max(clicked.height * 0.09, 7);
+      const neckH = solid ? Math.max(clicked.height * 0.04, 3)  : Math.max(clicked.height * 0.07, 5);
+      const neckW = solid ? Math.max(clicked.width * 0.74, 30)  : Math.max(clicked.width * 0.34, 11);
+      const capW  = solid ? Math.min(clicked.width * 0.94, neckW + 12) : neckW + 6;
+      const ccx   = clicked.x + clicked.width / 2;
+      const inLidZone =
+        x >= ccx - capW / 2 - 3 && x <= ccx + capW / 2 + 3 &&
+        y >= clicked.y - 2 && y <= clicked.y + capH + neckH + 2;
+      if (inLidZone) {
         setShowLidModal({ id: clicked.id });
-        return;
+        return "lid";
       }
-      const dragState = { id: clicked.id, offsetX: x - clicked.x, offsetY: y - clicked.y };
-      draggingRef.current = dragState;
-      setDragging(dragState);
-      e.preventDefault();
+      // else fall through → drag the container (lid stays as-is)
+    }
+
+    const dragState = { id: clicked.id, offsetX: x - clicked.x, offsetY: y - clicked.y };
+    draggingRef.current = dragState;
+    dragStartRef.current = { x: clientX, y: clientY };
+    dragMovedRef.current = false;
+    setDragging(dragState);
+    if (kind === "mouse") {
       window.addEventListener("mousemove", handleMouseMove);
       window.addEventListener("mouseup", handleMouseUp);
     }
+    return "drag";
+  };
+
+  const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    e.preventDefault();
+    pointerDownAt(e.clientX, e.clientY, "mouse");
   };
 
   const handleMouseMove = useCallback(
@@ -2682,6 +3160,13 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
       if (!drag) return;
       const rect = canvasRef.current?.getBoundingClientRect();
       if (!rect) return;
+      // Mark as a real drag only once the pointer travels a few px — keeps a
+      // click / double-click from being treated as a drag (e.g. spurious pour).
+      if (dragStartRef.current) {
+        const dxm = e.clientX - dragStartRef.current.x;
+        const dym = e.clientY - dragStartRef.current.y;
+        if (Math.hypot(dxm, dym) > 4) dragMovedRef.current = true;
+      }
       const x = e.clientX - rect.left;
       const y = e.clientY - rect.top;
       const snapDistance = 50;
@@ -2692,7 +3177,9 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
         const balancePlatformY = balance
           ? balance.y + balance.height * 0.60 - 8
           : null;
-        return prev.map((app) => {
+        const draggedApp = prev.find((a) => a.id === drag.id);
+        let carryDx = 0, carryDy = 0;
+        const moved = prev.map((app) => {
           if (app.id === drag.id) {
             let newY = y - drag.offsetY;
             let snapped = false;
@@ -2742,10 +3229,26 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
 
             const boundedX = Math.max(0, Math.min(x - drag.offsetX, canvasSize.width - app.width));
             const boundedY = Math.max(NAV_BAR_HEIGHT, Math.min(newY, canvasSize.height - app.height));
+            carryDx = boundedX - app.x;
+            carryDy = boundedY - app.y;
             return { ...app, x: boundedX, y: boundedY };
           }
           return app;
         });
+
+        // When a container (beaker, cylinder OR a solid jar holding a spatula)
+        // is dragged, its contents travel with it and keep resting inside — you
+        // can't separate them by moving the container; lift the item out instead.
+        if (draggedApp && (carryDx !== 0 || carryDy !== 0) &&
+            moved.some((a) => a.data?.containedInId === drag.id)) {
+          const newContainer = { ...draggedApp, x: draggedApp.x + carryDx, y: draggedApp.y + carryDy };
+          return moved.map((app) =>
+            app.data?.containedInId === drag.id
+              ? { ...app, x: app.x + carryDx, y: restYInside(app, newContainer) }
+              : app,
+          );
+        }
+        return moved;
       });
     },
     [TABLE_Y, shelfY, canvasSize, NAV_BAR_HEIGHT],   // dragging removed — we read from ref instead
@@ -2768,10 +3271,14 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
     }
 
     if (dragging) {
-      pushHistory(); // ← snapshot the position before the drag is finalised
-      // Check if dropped over a valid target (beaker or cylinder, lid off)
+      const didMove = dragMovedRef.current;
+      if (didMove) pushHistory(); // ← snapshot the position before a real drag is finalised
+      // Check if dropped over a valid target (beaker or cylinder, lid off).
+      // Only when the container was actually dragged — a plain click/double-click
+      // must never raise the pour prompt.
       const dragged = apparatus.find((a) => a.id === dragging.id);
       if (
+        didMove &&
         dragged &&
         !dragged.data?.hasLid &&
         (dragged.data?.currentVolume ?? 0) > 0 &&
@@ -2815,6 +3322,23 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
               ? { ...a, data: { ...a.data, stirringTargetId: beakerUnder?.id ?? null } }
               : a,
           ),
+        );
+      }
+
+      // Containment — an instrument lowered into a beaker/cylinder becomes part
+      // of it: it snaps to rest on the inner floor (never touching the table)
+      // and is tagged so it travels with the container.  Lifted clear, the tag
+      // is removed so it sits on the table/shelf again.
+      if (dragged && CONTAINABLE_TYPES.includes(dragged.type)) {
+        const container = findContainerFor(dragged, apparatus);
+        setApparatus((prev) =>
+          prev.map((a) => {
+            if (a.id !== dragged.id) return a;
+            if (container) {
+              return { ...a, y: restYInside(a, container), data: { ...a.data, containedInId: container.id } };
+            }
+            return { ...a, data: { ...a.data, containedInId: null } };
+          }),
         );
       }
 
@@ -2867,7 +3391,8 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
               // Scaled default: 18g stearic or 12g beeswax, multiplied by assignment multiplier
               const baseGrams    = solidContainer.id === "container-beeswax" ? 12 : 18;
               const defaultGrams = Math.max(1, Math.round(baseGrams * multiplier));
-              const maxScoop     = Math.min(available, 50);
+              // Capped by what's left AND by the most a spatula can carry at once
+              const maxScoop     = Math.min(available, MAX_SPATULA_LOAD);
               setSelectedScoopGrams(Math.min(defaultGrams, maxScoop));
               setShowScoopModal({ spatulaId: dragged.id, sourceId: solidContainer.id, maxGrams: maxScoop });
             }
@@ -2876,10 +3401,217 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
       }
     }
     draggingRef.current = null;
+    dragStartRef.current = null;
+    dragMovedRef.current = false;
     setDragging(null);
     window.removeEventListener("mousemove", handleMouseMove);
     window.removeEventListener("mouseup", handleMouseUp);
   }, [dragging, apparatus, handleMouseMove]);
+
+  // ── Shared tap / double-tap / context-menu handlers (mouse + touch) ────────
+  const canvasContextMenuAt = (x: number, y: number, clientX: number, clientY: number) => {
+    setMoveMenu(null);
+    setLidContextMenu(null);
+    const clicked = apparatus.find(
+      (a) => x >= a.x && x <= a.x + a.width && y >= a.y && y <= a.y + a.height,
+    );
+    if (!clicked) return;
+    // Lid menu for bottles/containers; move menu for everything else
+    if (clicked.type === "bottle" || clicked.type === "container")
+      setLidContextMenu({ id: clicked.id, x: clientX, y: clientY });
+    else
+      setMoveMenu({ id: clicked.id, x: clientX, y: clientY });
+  };
+
+  const canvasDoubleTapAt = (x: number, y: number) => {
+    const clicked = apparatus.find(
+      (a) => x >= a.x && x <= a.x + a.width && y >= a.y && y <= a.y + a.height,
+    );
+    if (clicked && (clicked.type === "bottle" || clicked.type === "container"))
+      setShowLidModal({ id: clicked.id });
+  };
+
+  const canvasTapAt = (x: number, y: number) => {
+    if (lidContextMenu) { setLidContextMenu(null); return; }
+    if (moveMenu) { setMoveMenu(null); return; }
+
+    // Viscosity gauge tap — activate spindle measurement
+    const viscGauge = apparatus.find(
+      (a) =>
+        a.type === "viscositygauge" &&
+        x >= a.x && x <= a.x + a.width &&
+        y >= a.y && y <= a.y + a.height,
+    );
+    if (viscGauge) {
+      const probeBottom = viscGauge.y + viscGauge.height;
+      const probeCX = viscGauge.x + viscGauge.width / 2;
+      const beakerUnder = apparatus.find(
+        (a) =>
+          a.id !== viscGauge.id &&
+          (a.type === "beaker" || a.type === "cylinder") &&
+          probeCX >= a.x && probeCX <= a.x + a.width &&
+          probeBottom >= a.y && probeBottom <= a.y + a.height,
+      );
+      if (beakerUnder && !viscGauge.data?.isViscosityActive) {
+        setApparatus((prev) =>
+          prev.map((a) =>
+            a.id === viscGauge.id ? { ...a, data: { ...a.data, isViscosityActive: true, viscosityReading: 0 } } : a,
+          ),
+        );
+        setTimeout(() => {
+          setApparatus((prev) =>
+            prev.map((a) =>
+              a.id === viscGauge.id ? { ...a, data: { ...a.data, isViscosityActive: false } } : a,
+            ),
+          );
+        }, 3000);
+        return;
+      }
+    }
+
+    const clicked = apparatus.find(
+      (a) => x >= a.x && x <= a.x + a.width && y >= a.y && y <= a.y + a.height,
+    );
+    if (clicked) {
+      if (clicked.type === "hotplate") {
+        const topH = clicked.height * 0.42;
+        const frontH = clicked.height - topH;
+        const btnR = Math.min(frontH * 0.34, 12);
+        const btnCX = clicked.x + btnR + 5;
+        const btnCY = clicked.y + topH + frontH / 2;
+        const dx = x - btnCX;
+        const dy = y - btnCY;
+        if (Math.sqrt(dx * dx + dy * dy) <= btnR + 4) {
+          setApparatus((prev) =>
+            prev.map((a) =>
+              a.type === "hotplate"
+                ? { ...a, data: { ...a.data, isOn: !a.data?.isOn, temperature: a.data?.isOn ? 25 : (a.data?.temperature ?? 25) } }
+                : a,
+            ),
+          );
+          return;
+        }
+        setSelectedApparatus(clicked);
+        setShowHotPlateModal(true);
+        return;
+      }
+      setSelectedApparatus(clicked);
+    }
+  };
+
+  // ── Touch handlers (registered natively so preventDefault works) ───────────
+  const clearLongPress = () => {
+    if (longPressTimerRef.current !== null) {
+      clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+  };
+
+  const onCanvasTouchStart = (e: TouchEvent) => {
+    if (e.touches.length !== 1) {        // multi-touch → cancel any interaction
+      clearLongPress();
+      draggingRef.current = null;
+      panningRef.current = null;
+      return;
+    }
+    const t = e.touches[0];
+    const rect = canvasRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const x = t.clientX - rect.left;
+    const y = t.clientY - rect.top;
+    touchStartRef.current = { clientX: t.clientX, clientY: t.clientY, x, y, time: Date.now() };
+    longPressFiredRef.current = false;
+
+    const result = pointerDownAt(t.clientX, t.clientY, "touch");
+    if (result === "none") {
+      // Empty area → drag to pan the view horizontally
+      const wrap = canvasRef.current?.parentElement;
+      panningRef.current = wrap ? { startX: t.clientX, scrollLeft: wrap.scrollLeft } : null;
+      return;
+    }
+    e.preventDefault();   // grabbed an apparatus → suppress scroll & synthetic mouse
+    if (result === "drag") {
+      // Hold still on a draggable → open its context menu (like a right-click)
+      longPressTimerRef.current = window.setTimeout(() => {
+        longPressTimerRef.current = null;
+        longPressFiredRef.current = true;
+        draggingRef.current = null;
+        setDragging(null);
+        dragMovedRef.current = false;
+        canvasContextMenuAt(x, y, t.clientX, t.clientY);
+      }, 500);
+    }
+  };
+
+  const onCanvasTouchMove = (e: TouchEvent) => {
+    const t = e.touches[0];
+    if (!t) return;
+    if (panningRef.current) {
+      const wrap = canvasRef.current?.parentElement;
+      if (wrap) wrap.scrollLeft = panningRef.current.scrollLeft - (t.clientX - panningRef.current.startX);
+      e.preventDefault();
+      return;
+    }
+    if (touchStartRef.current) {
+      const d = Math.hypot(t.clientX - touchStartRef.current.clientX, t.clientY - touchStartRef.current.clientY);
+      if (d > 8) clearLongPress();   // a real move → no context menu
+    }
+    if (draggingRef.current) {
+      e.preventDefault();
+      handleMouseMove({ clientX: t.clientX, clientY: t.clientY });
+    }
+  };
+
+  const onCanvasTouchEnd = () => {
+    clearLongPress();
+    if (panningRef.current) { panningRef.current = null; touchStartRef.current = null; return; }
+    if (longPressFiredRef.current) {     // context menu already shown
+      longPressFiredRef.current = false;
+      draggingRef.current = null;
+      setDragging(null);
+      dragMovedRef.current = false;
+      touchStartRef.current = null;
+      return;
+    }
+    const moved   = dragMovedRef.current;
+    const wasStir = !!holdStirRef.current;
+    handleMouseUp();                      // finalize a drag or release the stir
+    if (!moved && !wasStir && touchStartRef.current) {
+      const { x, y } = touchStartRef.current;
+      const now  = Date.now();
+      const last = lastTapRef.current;
+      if (last && now - last.time < 320 && Math.hypot(x - last.x, y - last.y) < 28) {
+        lastTapRef.current = null;        // double-tap → lid modal
+        canvasDoubleTapAt(x, y);
+      } else {
+        lastTapRef.current = { time: now, x, y };
+        canvasTapAt(x, y);                // single tap → buttons / activation
+      }
+    }
+    touchStartRef.current = null;
+  };
+
+  // Keep the latest closures available to the once-registered native listeners
+  const touchFnsRef = useRef({ start: onCanvasTouchStart, move: onCanvasTouchMove, end: onCanvasTouchEnd });
+  touchFnsRef.current = { start: onCanvasTouchStart, move: onCanvasTouchMove, end: onCanvasTouchEnd };
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const s  = (e: TouchEvent) => touchFnsRef.current.start(e);
+    const m  = (e: TouchEvent) => touchFnsRef.current.move(e);
+    const en = ()              => touchFnsRef.current.end();
+    canvas.addEventListener("touchstart", s,  { passive: false });
+    canvas.addEventListener("touchmove",  m,  { passive: false });
+    canvas.addEventListener("touchend",   en, { passive: false });
+    canvas.addEventListener("touchcancel", en, { passive: false });
+    return () => {
+      canvas.removeEventListener("touchstart", s);
+      canvas.removeEventListener("touchmove",  m);
+      canvas.removeEventListener("touchend",   en);
+      canvas.removeEventListener("touchcancel", en);
+    };
+  }, []);
 
   return (
     <div className="lab-canvas-container">
@@ -2890,28 +3622,16 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
           width={canvasSize.width}
           height={canvasSize.height}
           className="lab-canvas"
+          style={{ touchAction: "none" }}
           onMouseDown={handleMouseDown}
           onMouseMove={handleMouseMove}
           onMouseUp={() => handleMouseUp()}
           onMouseLeave={() => setHoveredId(null)}
           onContextMenu={(e) => {
             e.preventDefault();
-            setMoveMenu(null);
-            setLidContextMenu(null);
             const rect = canvasRef.current?.getBoundingClientRect();
             if (!rect) return;
-            const cx = e.clientX - rect.left;
-            const cy = e.clientY - rect.top;
-            const clicked = apparatus.find(
-              (a) => cx >= a.x && cx <= a.x + a.width && cy >= a.y && cy <= a.y + a.height,
-            );
-            if (!clicked) return;
-            // Lid menu for bottles/containers; move menu for everything else
-            if (clicked.type === "bottle" || clicked.type === "container") {
-              setLidContextMenu({ id: clicked.id, x: e.clientX, y: e.clientY });
-            } else {
-              setMoveMenu({ id: clicked.id, x: e.clientX, y: e.clientY });
-            }
+            canvasContextMenuAt(e.clientX - rect.left, e.clientY - rect.top, e.clientX, e.clientY);
           }}
           onMouseMoveCapture={(e) => {
             const rect = canvasRef.current?.getBoundingClientRect();
@@ -2928,117 +3648,15 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
             setHoveredId(hovered?.id || null);
           }}
           onClick={(e) => {
-            if (lidContextMenu) { setLidContextMenu(null); return; }
-            if (moveMenu) { setMoveMenu(null); return; }
-            if (dragging) return;
+            if (dragging) return;   // ignore the click that ends a drag
             const rect = canvasRef.current?.getBoundingClientRect();
             if (!rect) return;
-            const x = e.clientX - rect.left;
-            const y = e.clientY - rect.top;
-            // Spatula click is handled by drag-drop in mouseUp — skip here
-
-            // Viscosity gauge click — activate spindle measurement
-            const viscGauge = apparatus.find(
-              (a) =>
-                a.type === "viscositygauge" &&
-                x >= a.x && x <= a.x + a.width &&
-                y >= a.y && y <= a.y + a.height,
-            );
-            if (viscGauge) {
-              const probeBottom = viscGauge.y + viscGauge.height;
-              const probeCX = viscGauge.x + viscGauge.width / 2;
-              const beakerUnder = apparatus.find(
-                (a) =>
-                  a.id !== viscGauge.id &&
-                  (a.type === "beaker" || a.type === "cylinder") &&
-                  probeCX >= a.x && probeCX <= a.x + a.width &&
-                  probeBottom >= a.y && probeBottom <= a.y + a.height,
-              );
-              if (beakerUnder && !viscGauge.data?.isViscosityActive) {
-                // Start measurement — spin spindle for 3 s
-                setApparatus((prev) =>
-                  prev.map((a) =>
-                    a.id === viscGauge.id
-                      ? { ...a, data: { ...a.data, isViscosityActive: true, viscosityReading: 0 } }
-                      : a,
-                  ),
-                );
-                setTimeout(() => {
-                  setApparatus((prev) =>
-                    prev.map((a) =>
-                      a.id === viscGauge.id
-                        ? { ...a, data: { ...a.data, isViscosityActive: false } }
-                        : a,
-                    ),
-                  );
-                }, 3000);
-                return;
-              }
-            }
-
-            // Stirring rod click is handled by hold-to-stir in mouseDown — skip here
-
-            const clicked = apparatus.find(
-              (a) =>
-                x >= a.x &&
-                x <= a.x + a.width &&
-                y >= a.y &&
-                y <= a.y + a.height,
-            );
-            if (clicked) {
-              if (clicked.type === "hotplate") {
-                // Check if click landed on the power button
-                const topH = clicked.height * 0.42;
-                const frontH = clicked.height - topH;
-                const btnR = Math.min(frontH * 0.34, 12);
-                const btnCX = clicked.x + btnR + 5;
-                const btnCY = clicked.y + topH + frontH / 2;
-                const dx = x - btnCX;
-                const dy = y - btnCY;
-                if (Math.sqrt(dx * dx + dy * dy) <= btnR + 4) {
-                  // Toggle power on/off
-                  setApparatus((prev) =>
-                    prev.map((a) =>
-                      a.type === "hotplate"
-                        ? {
-                            ...a,
-                            data: {
-                              ...a.data,
-                              isOn: !a.data?.isOn,
-                              temperature: a.data?.isOn ? 25 : (a.data?.temperature ?? 25),
-                            },
-                          }
-                        : a,
-                    ),
-                  );
-                  return;
-                }
-                // Clicked elsewhere on the hot plate — open settings modal
-                setSelectedApparatus(clicked);
-                setShowHotPlateModal(true);
-                return;
-              }
-              setSelectedApparatus(clicked);
-            }
+            canvasTapAt(e.clientX - rect.left, e.clientY - rect.top);
           }}
           onDoubleClick={(e) => {
             const rect = canvasRef.current?.getBoundingClientRect();
             if (!rect) return;
-            const x = e.clientX - rect.left;
-            const y = e.clientY - rect.top;
-            const clicked = apparatus.find(
-              (a) =>
-                x >= a.x &&
-                x <= a.x + a.width &&
-                y >= a.y &&
-                y <= a.y + a.height,
-            );
-            if (clicked) {
-              if (clicked.type === "bottle" || clicked.type === "container") {
-                setShowLidModal({ id: clicked.id });
-              }
-              // Info modal removed — protocol workbook covers apparatus information
-            }
+            canvasDoubleTapAt(e.clientX - rect.left, e.clientY - rect.top);
           }}
         />
       </div>
@@ -3657,7 +4275,7 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
         if (FIXED.has(item.id)) return null;
 
         // Original positions from initial state
-        const origList = getInitialApparatus(LEFT_GAP, shelfY, TABLE_Y);
+        const origList = initialApparatusFor();
         const orig = origList.find(a => a.id === item.id);
         const shelfPos = orig ? { x: orig.x, y: orig.y } : { x: item.x, y: shelfY - item.height };
 
@@ -3675,14 +4293,11 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
           if (!tgt) return null;
           return { x: tgt.x + (tgt.width - item.width) / 2, y: tgt.y + tgt.height * surfaceFrac - item.height };
         };
-        // dockInto: places probe instruments INSIDE the beaker.
-        // The rod/probe tip floats in the liquid — well above the base (15% padding zone)
-        // and below the typical liquid surface so it's visibly submerged.
-        // 72% of beaker height from top = ~13% above the usable floor (85%).
+        // dockInto: places probe instruments INSIDE the beaker, resting on the
+        // inner floor (tip touches the inside bottom — never the table below).
         const dockInto = (tgt: typeof mainBeaker, slotOffset = 0) => {
           if (!tgt) return null;
-          const beakerInnerBot = tgt.y + tgt.height * 0.72;
-          const iy = beakerInnerBot - item.height;
+          const iy = restYInside(item, tgt);
           // Horizontal: centre ± slot offset to avoid exact overlap
           const ix = tgt.x + (tgt.width - item.width) / 2 + slotOffset;
           return { x: ix, y: iy };
@@ -3754,9 +4369,25 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
                   onMouseLeave={e => (e.currentTarget.style.background="transparent")}
                   onClick={() => {
                     if (!d.pos) return;
-                    setApparatus(prev => prev.map(a =>
-                      a.id === item.id ? { ...a, x: d.pos!.x, y: d.pos!.y } : a
-                    ));
+                    const dx = d.pos.x - item.x;
+                    const movedContainer = { ...item, x: d.pos.x, y: d.pos.y };
+                    setApparatus(prev => prev.map(a => {
+                      if (a.id === item.id) {
+                        // Re-evaluate containment after the move so docking into a
+                        // beaker tags it (travels with the container), and moving
+                        // it elsewhere releases it.
+                        if (CONTAINABLE_TYPES.includes(a.type)) {
+                          const c = findContainerFor(movedContainer, prev);
+                          return { ...movedContainer, data: { ...a.data, containedInId: c?.id ?? null } };
+                        }
+                        return { ...movedContainer };
+                      }
+                      // Contents of a moved container travel with it.
+                      if (a.data?.containedInId === item.id) {
+                        return { ...a, x: a.x + dx, y: restYInside(a, movedContainer) };
+                      }
+                      return a;
+                    }));
                     setMoveMenu(null);
                   }}>
                   <span style={{ fontSize:18 }}>{d.icon}</span>
@@ -3790,7 +4421,7 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
         const MOVABLE = new Set(["beaker","cylinder","thermometer","stirringrod","phmeter","viscositygauge","spatula"]);
         if (!MOVABLE.has(item.type)) return null;
 
-        const origList = getInitialApparatus(LEFT_GAP, shelfY, TABLE_Y);
+        const origList = initialApparatusFor();
         const orig = origList.find(a => a.id === item.id);
         const shelfPos = orig ? { x: orig.x, y: orig.y } : { x: item.x, y: shelfY - item.height };
 
@@ -3818,7 +4449,9 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
                 onMouseLeave={e => (e.currentTarget.style.background="transparent")}
                 onClick={() => {
                   setApparatus(prev => prev.map(a =>
-                    a.id === item.id ? { ...a, x: shelfPos.x, y: shelfPos.y } : a
+                    a.id === item.id
+                      ? { ...a, x: shelfPos.x, y: shelfPos.y, data: { ...a.data, containedInId: null } }
+                      : a
                   ));
                   setMoveMenu(null);
                 }}>
@@ -3870,60 +4503,139 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
         const baseAmount     = isBeeswaxScoop ? 12 : 18;
         const targetGrams    = +(baseAmount * multiplier).toFixed(1);
         const density        = src.data?.density ?? (isBeeswaxScoop ? 0.96 : 0.847);
+        const maxG           = showScoopModal.maxGrams;
+        // Never exceed what the spatula can carry
+        const curG           = Math.max(1, Math.min(Math.round(selectedScoopGrams), maxG));
+        const pct            = maxG > 1 ? ((curG - 1) / (maxG - 1)) * 100 : 100;
+        const swatch         = src.data?.liquidColor || "rgba(255,250,240,0.95)";
+        const available      = Math.round((src.data?.currentVolume ?? 0) * density);
+        const presets        = [
+          ...(assignment ? [{ label: "Target", val: Math.max(1, Math.min(Math.round(targetGrams), maxG)) }] : []),
+          { label: "½ load", val: Math.max(1, Math.round(maxG / 2)) },
+          { label: "Max",    val: maxG },
+        ];
         return (
-          <div style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.35)",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center" }}>
-            <div style={{ background:"white",borderRadius:14,padding:32,minWidth:340,boxShadow:"0 8px 40px #0003" }}>
-              <h2 style={{ fontWeight:700,fontSize:18,marginBottom:8 }}>Scoop {solidName}</h2>
-              <p style={{ color:"#475569",fontSize:14,marginBottom:4 }}>
-                Measure <b>solid {solidName.toLowerCase()}</b> into the beaker.
-              </p>
-              {/* Assignment target hint */}
-              {assignment && (
-                <div style={{ background:"#eff6ff", border:"1px solid #bfdbfe", borderRadius:8,
-                  padding:"8px 12px", marginBottom:12, fontSize:13, color:"#1d4ed8" }}>
-                  🎯 Assignment target: <strong>{targetGrams} g</strong>
-                  <span style={{ color:"#6b7280", fontWeight:400 }}> ({assignment.targetGrams} g cream × {multiplier})</span>
-                </div>
-              )}
-              <p style={{ color:"#64748b",fontSize:13,marginBottom:20 }}>
-                Available: <b>{Math.round((src.data?.currentVolume ?? 0) * density)} g</b>
-              </p>
-              <div style={{ marginBottom:20 }}>
-                <div style={{ display:"flex",alignItems:"center",gap:14,marginBottom:8 }}>
-                  <input type="range" min={1} max={showScoopModal.maxGrams} value={selectedScoopGrams}
-                    style={{ flex:1 }}
-                    onChange={(e) => setSelectedScoopGrams(+e.target.value)} />
-                  <span style={{ minWidth:64,background:"#1e3a5f",color:"#7dd3fc",fontFamily:"monospace",fontWeight:700,fontSize:16,borderRadius:8,padding:"4px 10px",textAlign:"center" }}>
-                    {selectedScoopGrams} g
-                  </span>
-                </div>
-                <div style={{ display:"flex",justifyContent:"space-between",fontSize:11,color:"#94a3b8" }}>
-                  <span>1 g</span><span>{showScoopModal.maxGrams} g</span>
+          <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.65)",
+            zIndex:200, display:"flex", alignItems:"center", justifyContent:"center" }}>
+            <div style={{ background:"#0f172a", borderRadius:20,
+              width:"min(440px, 95vw)", boxShadow:"0 24px 80px rgba(0,0,0,0.8)",
+              border:"1px solid #1e293b", overflow:"hidden" }}>
+
+              {/* ── Header ── */}
+              <div style={{ background:"linear-gradient(135deg,#1c1207,#27200f)",
+                padding:"20px 24px 16px", borderBottom:"1px solid #2a2010" }}>
+                <div style={{ display:"flex", alignItems:"center", gap:12 }}>
+                  <div style={{ width:42, height:42, borderRadius:12, background:swatch,
+                    border:"2px solid rgba(255,255,255,0.15)", flexShrink:0 }} />
+                  <div>
+                    <div style={{ color:"white", fontWeight:800, fontSize:17 }}>Chop {solidName}</div>
+                    <div style={{ color:"#b08948", fontSize:12, marginTop:2 }}>
+                      Measure solid onto the spatula
+                    </div>
+                  </div>
                 </div>
               </div>
-              <div style={{ display:"flex",gap:12 }}>
-                <button
-                  style={{ flex:1,background:"#92400e",color:"white",border:"none",borderRadius:8,padding:"10px 0",fontWeight:700,fontSize:14,cursor:"pointer" }}
-                  onClick={() => {
-                    pushHistory(); // ← snapshot before scoop
-                    const grams = selectedScoopGrams;
-                    const volRemoved = grams / (src.data?.density ?? 0.847);
-                    setApparatus((prev) => prev.map((a) => {
-                      if (a.id === showScoopModal.sourceId)
-                        return { ...a, data: { ...a.data, currentVolume: Math.max(0, (a.data?.currentVolume ?? 0) - volRemoved) } };
-                      if (a.id === showScoopModal.spatulaId)
-                        return { ...a, data: { ...a.data, spatulaLoad: grams, spatulaLoadSourceId: showScoopModal.sourceId } };
-                      return a;
-                    }));
-                    setShowScoopModal(null);
-                  }}
-                >
-                  Scoop {selectedScoopGrams} g
-                </button>
-                <button
-                  style={{ padding:"10px 20px",background:"#e2e8f0",border:"none",borderRadius:8,cursor:"pointer",fontWeight:600 }}
-                  onClick={() => setShowScoopModal(null)}
-                >Cancel</button>
+
+              {/* ── Body ── */}
+              <div style={{ padding:"22px 24px" }}>
+
+                {/* Big gram display */}
+                <div style={{ textAlign:"center", marginBottom:18 }}>
+                  <div style={{ fontSize:48, fontWeight:900, fontFamily:"monospace", lineHeight:1,
+                    background:"linear-gradient(135deg,#f59e0b,#fcd34d)",
+                    WebkitBackgroundClip:"text", WebkitTextFillColor:"transparent" }}>
+                    {curG}
+                  </div>
+                  <div style={{ color:"#9aa6b6", fontSize:14, fontWeight:600, marginTop:2 }}>grams selected</div>
+                </div>
+
+                {/* Info row */}
+                <div style={{ display:"flex", gap:10, marginBottom:18 }}>
+                  <div style={{ flex:1, background:"#0b1322", border:"1px solid #1e293b",
+                    borderRadius:10, padding:"8px 12px" }}>
+                    <div style={{ color:"#64748b", fontSize:10, textTransform:"uppercase", letterSpacing:0.6 }}>Available</div>
+                    <div style={{ color:"#e2e8f0", fontWeight:700, fontSize:14 }}>{available} g</div>
+                  </div>
+                  <div style={{ flex:1, background:"#0b1322", border:"1px solid #1e293b",
+                    borderRadius:10, padding:"8px 12px" }}>
+                    <div style={{ color:"#64748b", fontSize:10, textTransform:"uppercase", letterSpacing:0.6 }}>Spatula max</div>
+                    <div style={{ color:"#e2e8f0", fontWeight:700, fontSize:14 }}>{maxG} g</div>
+                  </div>
+                  {assignment && (
+                    <div style={{ flex:1, background:"#10210f", border:"1px solid #1e3a1e",
+                      borderRadius:10, padding:"8px 12px" }}>
+                      <div style={{ color:"#65a30d", fontSize:10, textTransform:"uppercase", letterSpacing:0.6 }}>🎯 Target</div>
+                      <div style={{ color:"#bef264", fontWeight:700, fontSize:14 }}>{targetGrams} g</div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Custom slider */}
+                <div style={{ position:"relative", marginBottom:8 }}>
+                  <div style={{ height:8, borderRadius:4, background:"#1e293b", position:"relative", overflow:"hidden" }}>
+                    <div style={{ height:"100%", borderRadius:4, width:`${pct}%`,
+                      background:"linear-gradient(90deg,#b45309,#f59e0b)" }} />
+                  </div>
+                  <input type="range" min={1} max={maxG} step={1} value={curG}
+                    onChange={(e) => setSelectedScoopGrams(Math.min(maxG, Number(e.target.value)))}
+                    style={{ position:"absolute", top:0, left:0, width:"100%", height:"100%",
+                      opacity:0, cursor:"pointer", margin:0, padding:0 }} />
+                  <div style={{ position:"absolute", top:"50%", transform:"translate(-50%,-50%)",
+                    left:`calc(${pct}% - ${pct * 0.16}px)`, width:20, height:20, borderRadius:"50%",
+                    background:"linear-gradient(135deg,#f59e0b,#fbbf24)", border:"3px solid #0f172a",
+                    boxShadow:"0 0 0 2px #f59e0b", pointerEvents:"none" }} />
+                </div>
+                <div style={{ display:"flex", justifyContent:"space-between", fontSize:11, color:"#334155", marginBottom:18 }}>
+                  <span>1 g</span><span>{maxG} g (max)</span>
+                </div>
+
+                {/* Preset buttons */}
+                <div style={{ display:"flex", gap:8, marginBottom:20 }}>
+                  {presets.map(p => {
+                    const active = curG === p.val;
+                    return (
+                      <button key={p.label}
+                        onClick={() => setSelectedScoopGrams(p.val)}
+                        style={{ flex:1, padding:"8px 0", borderRadius:8, border:"none", cursor:"pointer",
+                          background: active ? "linear-gradient(135deg,#b45309,#f59e0b)" : "#1e293b",
+                          color: active ? "white" : "#94a3b8", fontWeight:700, fontSize:12,
+                          boxShadow: active ? "0 2px 10px rgba(245,158,11,0.4)" : "none",
+                          transition:"all 0.15s" }}>
+                        {p.label}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Action buttons */}
+                <div style={{ display:"flex", gap:10 }}>
+                  <button
+                    style={{ flex:1, padding:"13px 0", borderRadius:12, border:"none", cursor:"pointer",
+                      background:"linear-gradient(135deg,#b45309,#f59e0b)", color:"white",
+                      fontWeight:800, fontSize:15, letterSpacing:0.5,
+                      boxShadow:"0 4px 18px rgba(180,83,9,0.45)" }}
+                    onClick={() => {
+                      pushHistory(); // ← snapshot before scoop
+                      const grams = curG;
+                      const volRemoved = grams / (src.data?.density ?? 0.847);
+                      setApparatus((prev) => prev.map((a) => {
+                        if (a.id === showScoopModal.sourceId)
+                          return { ...a, data: { ...a.data, currentVolume: Math.max(0, (a.data?.currentVolume ?? 0) - volRemoved) } };
+                        if (a.id === showScoopModal.spatulaId)
+                          return { ...a, data: { ...a.data, spatulaLoad: grams, spatulaLoadSourceId: showScoopModal.sourceId } };
+                        return a;
+                      }));
+                      setShowScoopModal(null);
+                    }}
+                  >
+                    Chop {curG} g
+                  </button>
+                  <button
+                    style={{ padding:"13px 22px", background:"#1e293b", border:"none", borderRadius:12,
+                      cursor:"pointer", fontWeight:700, fontSize:14, color:"#94a3b8" }}
+                    onClick={() => setShowScoopModal(null)}
+                  >Cancel</button>
+                </div>
               </div>
             </div>
           </div>
