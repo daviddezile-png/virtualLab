@@ -89,6 +89,24 @@ connectDB().then(() => {
     console.log(`🔗 API:     http://localhost:${PORT}/api\n`);
   });
 
+  // If the port is already in use, kill the occupant and retry once
+  server.on('error', (err) => {
+    if (err.code === 'EADDRINUSE') {
+      console.warn(`⚠️  Port ${PORT} busy — killing occupant and retrying in 1s…`);
+      const { execSync } = require('child_process');
+      try { execSync(`lsof -ti:${PORT} | xargs kill -9`); } catch (_) { /* nothing to kill */ }
+      setTimeout(() => {
+        server.close();
+        app.listen(PORT, () => {
+          console.log(`\n🚀 Server running on http://localhost:${PORT} (retry)\n`);
+        });
+      }, 1000);
+    } else {
+      console.error('❌ Server error:', err.message);
+      process.exit(1);
+    }
+  });
+
   // ── Graceful shutdown ──────────────────────────────────────────────────────
   const shutdown = async (signal) => {
     console.log(`\n${signal} received — shutting down gracefully`);

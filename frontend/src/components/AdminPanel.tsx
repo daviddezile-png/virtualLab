@@ -1327,40 +1327,55 @@ const AdminPanel: React.FC<Props> = ({ onLogout }) => {
           }),
         }}>
           {/* Logo */}
-          <div style={{ padding:"16px 18px", borderBottom:`1px solid ${C.border}`,
-            display:"flex", alignItems:"center", justifyContent:"space-between", minHeight:60, gap:8 }}>
+          <div style={{
+            padding: sbOpen ? "16px 18px" : "16px 0",
+            borderBottom:`1px solid ${C.border}`,
+            display:"flex", alignItems:"center",
+            justifyContent: sbOpen ? "space-between" : "center",
+            minHeight:60, gap:8,
+          }}>
             <div style={{ width:34, height:34, borderRadius:10, flexShrink:0,
               background:C.accent, display:"flex", alignItems:"center", justifyContent:"center" }}>
               <Shield size={18} color="white" strokeWidth={2.4} />
             </div>
-            <div style={{ flex:1, overflow:"hidden" }}>
-              <div style={{ color:C.txtPri, fontWeight:800, fontSize:13, whiteSpace:"nowrap" }}>VirtualLab</div>
-              <div style={{ color:C.txtMut, fontSize:10, whiteSpace:"nowrap", fontWeight:600,
-                textTransform:"uppercase", letterSpacing:0.8 }}>Super Admin</div>
-            </div>
-            <button onClick={() => setSbOpen(false)} style={{
-              background:"transparent", border:"none", color:C.txtMut,
-              cursor:"pointer", padding:4, display:"flex", alignItems:"center", flexShrink:0 }}>
-              <Menu size={16} strokeWidth={2} />
-            </button>
+            {sbOpen && (
+              <>
+                <div style={{ flex:1, overflow:"hidden" }}>
+                  <div style={{ color:C.txtPri, fontWeight:800, fontSize:13, whiteSpace:"nowrap" }}>VirtualLab</div>
+                  <div style={{ color:C.txtMut, fontSize:10, whiteSpace:"nowrap", fontWeight:600,
+                    textTransform:"uppercase", letterSpacing:0.8 }}>Super Admin</div>
+                </div>
+                <button onClick={() => setSbOpen(false)} title="Collapse sidebar" style={{
+                  background:"transparent", border:"none", color:C.txtMut,
+                  cursor:"pointer", padding:4, display:"flex", alignItems:"center", flexShrink:0 }}>
+                  <Menu size={16} strokeWidth={2} />
+                </button>
+              </>
+            )}
           </div>
 
           {/* Nav */}
           <nav style={{ flex:1, padding:"10px 8px", overflowY:"auto" }}>
             {NAV.map(item => {
-              const active  = section === item.id;
-              const badgeN  = item.id === "approvals" ? pendingCount : 0;
+              const active = section === item.id;
+              const badgeN = item.id === "approvals" ? pendingCount : 0;
               return (
-                <button key={item.id} onClick={() => navTo(item.id)} style={{
-                  width:"100%", display:"flex", alignItems:"center", gap:10,
-                  padding:"10px 12px",
-                  borderRadius:9, border:"none", cursor:"pointer", marginBottom:3,
-                  background: active ? `${C.accent}18` : "transparent",
-                  color: active ? C.accent : C.txtSec,
-                  fontWeight: active ? 700 : 500, fontSize:13, transition:"background .15s,color .15s",
-                }}>
+                <button key={item.id} onClick={() => navTo(item.id)}
+                  title={!sbOpen ? item.label : undefined}
+                  style={{
+                    width:"100%", display:"flex", alignItems:"center",
+                    justifyContent: sbOpen ? "flex-start" : "center",
+                    gap: sbOpen ? 10 : 0,
+                    padding: sbOpen ? "10px 12px" : "10px 0",
+                    borderRadius:9, border:"none", cursor:"pointer", marginBottom:3,
+                    background: active ? `${C.accent}18` : "transparent",
+                    color: active ? C.accent : C.txtSec,
+                    fontWeight: active ? 700 : 500, fontSize:13,
+                    transition:"background .15s,color .15s",
+                  }}>
+                  {/* Icon with badge dot */}
                   <div style={{ position:"relative", flexShrink:0 }}>
-                    <item.Icon size={17} strokeWidth={active?2.2:1.8} />
+                    <item.Icon size={17} strokeWidth={active ? 2.2 : 1.8} />
                     {badgeN > 0 && (
                       <span style={{
                         position:"absolute", top:-5, right:-6,
@@ -1372,16 +1387,22 @@ const AdminPanel: React.FC<Props> = ({ onLogout }) => {
                       }}>{badgeN}</span>
                     )}
                   </div>
-                  <span style={{ whiteSpace:"nowrap", flex:1, textAlign:"left" }}>{item.label}</span>
-                  {badgeN > 0 && (
-                    <span style={{
-                      background:"#dc2626", color:"white", borderRadius:10,
-                      padding:"1px 7px", fontSize:10, fontWeight:800, flexShrink:0,
-                    }}>{badgeN}</span>
-                  )}
-                  {active && badgeN === 0 && (
-                    <span style={{ width:6, height:6, borderRadius:"50%",
-                      background:C.accent, flexShrink:0 }} />
+
+                  {/* Label + trailing elements — hidden when collapsed */}
+                  {sbOpen && (
+                    <>
+                      <span style={{ whiteSpace:"nowrap", flex:1, textAlign:"left" }}>{item.label}</span>
+                      {badgeN > 0 && (
+                        <span style={{
+                          background:"#dc2626", color:"white", borderRadius:10,
+                          padding:"1px 7px", fontSize:10, fontWeight:800, flexShrink:0,
+                        }}>{badgeN}</span>
+                      )}
+                      {active && badgeN === 0 && (
+                        <span style={{ width:6, height:6, borderRadius:"50%",
+                          background:C.accent, flexShrink:0 }} />
+                      )}
+                    </>
                   )}
                 </button>
               );
@@ -1391,15 +1412,17 @@ const AdminPanel: React.FC<Props> = ({ onLogout }) => {
           {/* Logout */}
           <div style={{ padding:"10px 8px", borderTop:`1px solid ${C.border}` }}>
             <button onClick={onLogout} title="Logout" style={{
-              width:"100%", display:"flex", alignItems:"center", gap:10,
-              padding:"11px 14px",
+              width:"100%", display:"flex", alignItems:"center",
+              justifyContent: sbOpen ? "flex-start" : "center",
+              gap: sbOpen ? 10 : 0,
+              padding: sbOpen ? "11px 14px" : "11px 0",
               borderRadius:9, border:`1px solid ${C.red}33`,
               background:`${C.red}10`, color:C.red, fontSize:13, fontWeight:700, cursor:"pointer",
             }}
             onMouseEnter={e => (e.currentTarget.style.background=`${C.red}20`)}
             onMouseLeave={e => (e.currentTarget.style.background=`${C.red}10`)}>
               <LogOut size={16} strokeWidth={2} />
-              <span>Logout</span>
+              {sbOpen && <span>Logout</span>}
             </button>
           </div>
         </aside>

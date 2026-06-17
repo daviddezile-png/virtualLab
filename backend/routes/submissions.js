@@ -2,6 +2,7 @@ const express    = require('express');
 const { body, validationResult } = require('express-validator');
 const Submission = require('../models/Submission');
 const Assignment = require('../models/Assignment');
+const User       = require('../models/User');
 const { authenticate, requireRole } = require('../middleware/auth');
 
 const router = express.Router();
@@ -22,13 +23,21 @@ router.get('/', async (req, res) => {
     } else if (req.user.role === 'teacher') {
       // Teachers see only student submissions — never teacher/admin rows
       query.submitterRole = { $ne: 'teacher' };
-      // For assignment-mode submissions: only show those created with this teacher's codes.
-      // Practice-mode submissions have no token, so all teachers see those.
+
+      // Collect this teacher's assignment tokens
       const teacherAssignments = await Assignment.find({ teacherId: req.user.id }).select('token');
       const teacherTokens = teacherAssignments.map(a => a.token).filter(Boolean);
+
+      // Collect student IDs enrolled in this teacher's class
+      const enrolledStudents = await User.find({ assignedTeacherId: req.user.id }).select('clientId');
+      const enrolledIds = enrolledStudents.map(u => u.clientId);
+
+      // Only show:
+      //  - assignment submissions that used THIS teacher's codes
+      //  - practice submissions from students enrolled in THIS teacher's class
       query.$or = [
-        { mode: 'practice' },
         { mode: 'assignment', token: { $in: teacherTokens } },
+        { mode: 'practice',   studentId: { $in: enrolledIds } },
       ];
       if (studentId) query.studentId = studentId;
     } else if (studentId) {
