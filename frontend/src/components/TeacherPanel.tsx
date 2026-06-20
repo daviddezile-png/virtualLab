@@ -7,6 +7,7 @@ import {
   FlaskConical, FlaskRound, Beaker, User, BookOpen, Shield,
   LogOut, CheckCircle, AlertCircle, Activity, UserPlus, Filter,
   Save, RefreshCw, LucideIcon, Key, Hash, Calculator, Zap,
+  UserCheck, UserX, ListChecks,
 } from "lucide-react";
 import {
   Assignment, PracticalId, BASE_RECIPES,
@@ -87,7 +88,7 @@ const useTheme = () => useContext(ThemeCtx);
 // ─────────────────────────────────────────────────────────────────────────────
 
 type Section =
-  | "dashboard" | "questions" | "students"
+  | "dashboard" | "questions" | "students" | "tracking"
   | "analytics" | "submissions" | "settings";
 
 interface Student {
@@ -182,7 +183,7 @@ const StatusBadge: React.FC<{ status: BadgeStatus }> = ({ status }) => {
   const [color, bg] = map[status];
   return (
     <span style={{ background:bg, color, borderRadius:20,
-      padding:"2px 10px", fontSize:11, fontWeight:700, letterSpacing:0.3 }}>
+      padding:"2px 10px", fontSize:13, fontWeight:700, letterSpacing:0.3 }}>
       {status.charAt(0).toUpperCase() + status.slice(1)}
     </span>
   );
@@ -196,7 +197,7 @@ const ScoreBar: React.FC<{ score: number }> = ({ score }) => {
       <div style={{ flex:1, height:6, background:C.border, borderRadius:3, overflow:"hidden" }}>
         <div style={{ width:`${score}%`, height:"100%", background:bar, borderRadius:3 }} />
       </div>
-      <span style={{ color:C.txtSec, fontSize:12, minWidth:32, textAlign:"right" }}>{score}%</span>
+      <span style={{ color:C.txtSec, fontSize:14, minWidth:32, textAlign:"right" }}>{score}%</span>
     </div>
   );
 };
@@ -215,10 +216,10 @@ const StatCard: React.FC<{
         <Icon size={22} color={accent} strokeWidth={1.8} />
       </div>
       <div>
-        <div style={{ color:C.txtMut, fontSize:11, fontWeight:600, textTransform:"uppercase",
+        <div style={{ color:C.txtMut, fontSize:13, fontWeight:600, textTransform:"uppercase",
           letterSpacing:0.8, marginBottom:4 }}>{label}</div>
-        <div style={{ color:C.txtPri, fontSize:26, fontWeight:800, lineHeight:1 }}>{value}</div>
-        {sub && <div style={{ color:C.txtSec, fontSize:12, marginTop:4 }}>{sub}</div>}
+        <div style={{ color:C.txtPri, fontSize:30, fontWeight:800, lineHeight:1 }}>{value}</div>
+        {sub && <div style={{ color:C.txtSec, fontSize:14, marginTop:4 }}>{sub}</div>}
       </div>
     </div>
   );
@@ -230,8 +231,8 @@ const SectionHeading: React.FC<{ title:string; sub?:string; action?:React.ReactN
     <div style={{ display:"flex", alignItems:"flex-start", justifyContent:"space-between",
       marginBottom:24, flexWrap:"wrap", gap:12 }}>
       <div>
-        <h2 style={{ color:C.txtPri, fontSize:20, fontWeight:800, margin:0 }}>{title}</h2>
-        {sub && <p style={{ color:C.txtSec, fontSize:13, margin:"4px 0 0" }}>{sub}</p>}
+        <h2 style={{ color:C.txtPri, fontSize:23, fontWeight:800, margin:0 }}>{title}</h2>
+        {sub && <p style={{ color:C.txtSec, fontSize:15, margin:"4px 0 0" }}>{sub}</p>}
       </div>
       {action}
     </div>
@@ -252,7 +253,7 @@ const Btn: React.FC<{
     <button onClick={onClick} style={{
       ...map[variant], borderRadius:8,
       padding: small ? "6px 12px" : "9px 18px",
-      fontSize: small ? 12 : 13, fontWeight:600, cursor:"pointer",
+      fontSize: small ? 14 : 15, fontWeight:600, cursor:"pointer",
       display:"flex", alignItems:"center", gap:6, whiteSpace:"nowrap",
     }}>
       {IconComp && <IconComp size={small ? 13 : 15} strokeWidth={2} />}
@@ -267,7 +268,7 @@ const TableHead: React.FC<{ cols:string[] }> = ({ cols }) => {
     <thead>
       <tr>
         {cols.map(c => (
-          <th key={c} style={{ color:C.txtMut, fontSize:11, fontWeight:700, textAlign:"left",
+          <th key={c} style={{ color:C.txtMut, fontSize:13, fontWeight:700, textAlign:"left",
             padding:"10px 14px", textTransform:"uppercase", letterSpacing:0.8,
             borderBottom:`1px solid ${C.border}`, background:C.surface, whiteSpace:"nowrap" }}>
             {c}
@@ -283,7 +284,7 @@ const TInput: React.FC<React.InputHTMLAttributes<HTMLInputElement>> = (props) =>
   return (
     <input {...props} style={{
       width:"100%", background:C.surface, border:`1px solid ${C.border2}`,
-      color:C.txtPri, borderRadius:8, padding:"9px 12px", fontSize:13,
+      color:C.txtPri, borderRadius:8, padding:"9px 12px", fontSize:15,
       boxSizing:"border-box", outline:"none", fontFamily:"inherit",
       ...props.style,
     }} />
@@ -295,7 +296,7 @@ const TTextarea: React.FC<React.TextareaHTMLAttributes<HTMLTextAreaElement>> = (
   return (
     <textarea {...props} style={{
       width:"100%", background:C.surface, border:`1px solid ${C.border2}`,
-      color:C.txtPri, borderRadius:8, padding:"10px 12px", fontSize:13,
+      color:C.txtPri, borderRadius:8, padding:"10px 12px", fontSize:15,
       boxSizing:"border-box", outline:"none", resize:"vertical",
       fontFamily:"inherit", ...props.style,
     }} />
@@ -325,7 +326,7 @@ const resultBadge = (r: "PASS"|"AVERAGE"|"FAIL", C: ReturnType<typeof useTheme>[
   const [color, bg] = map[r] ?? [C.txtSec, C.surface];
   return (
     <span style={{ background:bg, color, borderRadius:20,
-      padding:"2px 10px", fontSize:11, fontWeight:700 }}>{r}</span>
+      padding:"2px 10px", fontSize:13, fontWeight:700 }}>{r}</span>
   );
 };
 
@@ -370,13 +371,13 @@ const Dashboard: React.FC = () => {
           overflow:"hidden", boxShadow:`0 1px 4px ${C.shadow}` }}>
           <div style={{ padding:"14px 20px", borderBottom:`1px solid ${C.border}`,
             display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-            <span style={{ color:C.txtPri, fontWeight:700, fontSize:14 }}>Recent Submissions</span>
-            <span style={{ color:C.txtMut, fontSize:12 }}>{allSubs.length} total</span>
+            <span style={{ color:C.txtPri, fontWeight:700, fontSize:16 }}>Recent Submissions</span>
+            <span style={{ color:C.txtMut, fontSize:14 }}>{allSubs.length} total</span>
           </div>
           {allSubs.length === 0 ? (
             <div style={{ padding:"32px 20px", textAlign:"center", color:C.txtMut }}>
               <ClipboardCheck size={28} style={{ marginBottom:8, opacity:0.3 }} />
-              <div style={{ fontSize:13 }}>No submissions yet. Students will appear here after evaluating a practical.</div>
+              <div style={{ fontSize:15 }}>No submissions yet. Students will appear here after evaluating a practical.</div>
             </div>
           ) : (
             <div className="tp-table-wrap">
@@ -389,17 +390,17 @@ const Dashboard: React.FC = () => {
                       <div style={{ display:"flex", alignItems:"center", gap:8 }}>
                         <Avatar name={s.studentName} size={26} />
                         <div>
-                          <div style={{ color:C.txtPri, fontSize:13 }}>{s.studentName}</div>
-                          {s.studentReg && <div style={{ color:C.txtMut, fontSize:10 }}>{s.studentReg}</div>}
+                          <div style={{ color:C.txtPri, fontSize:15 }}>{s.studentName}</div>
+                          {s.studentReg && <div style={{ color:C.txtMut, fontSize:12 }}>{s.studentReg}</div>}
                         </div>
                       </div>
                     </td>
-                    <td style={{ padding:"10px 14px", color:C.txtSec, fontSize:12 }}>
+                    <td style={{ padding:"10px 14px", color:C.txtSec, fontSize:14 }}>
                       {s.practicalId === "vanishing-cream" ? "Vanishing Cream" : "Cold Cream"}
                     </td>
                     <td style={{ padding:"10px 14px", minWidth:110 }}><ScoreBar score={s.scorePct} /></td>
                     <td style={{ padding:"10px 14px" }}>{resultBadge(s.result, C)}</td>
-                    <td style={{ padding:"10px 14px", color:C.txtMut, fontSize:12 }}>
+                    <td style={{ padding:"10px 14px", color:C.txtMut, fontSize:14 }}>
                       {s.durationSec > 0 ? `${Math.round(s.durationSec/60)} min` : "—"}
                     </td>
                   </tr>
@@ -413,12 +414,12 @@ const Dashboard: React.FC = () => {
         {/* Quick actions */}
         <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:14,
           padding:18, boxShadow:`0 1px 4px ${C.shadow}` }}>
-          <div style={{ color:C.txtPri, fontWeight:700, fontSize:14, marginBottom:14 }}>Quick Actions</div>
+          <div style={{ color:C.txtPri, fontWeight:700, fontSize:16, marginBottom:14 }}>Quick Actions</div>
           {quickActions.map(({ Icon:Ic, label, color }) => (
             <button key={label} style={{ width:"100%", display:"flex", alignItems:"center", gap:10,
               background:"transparent", border:`1px solid ${C.border}`, borderRadius:8,
               padding:"10px 12px", marginBottom:8, cursor:"pointer", color:C.txtSec,
-              fontSize:13, fontWeight:600 }}>
+              fontSize:15, fontWeight:600 }}>
               <span style={{ width:30, height:30, borderRadius:8, background:`${color}18`,
                 display:"flex", alignItems:"center", justifyContent:"center" }}>
                 <Ic size={16} color={color} strokeWidth={2} />
@@ -430,7 +431,7 @@ const Dashboard: React.FC = () => {
           {/* Pass/Average/Fail breakdown */}
           {stats.total > 0 && (
             <div style={{ marginTop:16, paddingTop:16, borderTop:`1px solid ${C.border}` }}>
-              <div style={{ color:C.txtMut, fontSize:11, fontWeight:700, textTransform:"uppercase",
+              <div style={{ color:C.txtMut, fontSize:13, fontWeight:700, textTransform:"uppercase",
                 letterSpacing:0.8, marginBottom:10 }}>Result Breakdown</div>
               {([
                 { label:"Pass",    count:stats.passed,  color:C.green },
@@ -439,8 +440,8 @@ const Dashboard: React.FC = () => {
               ]).map(r => (
                 <div key={r.label} style={{ marginBottom:8 }}>
                   <div style={{ display:"flex", justifyContent:"space-between", marginBottom:3 }}>
-                    <span style={{ color:C.txtSec, fontSize:12 }}>{r.label}</span>
-                    <span style={{ color:r.color, fontWeight:700, fontSize:12 }}>{r.count}</span>
+                    <span style={{ color:C.txtSec, fontSize:14 }}>{r.label}</span>
+                    <span style={{ color:r.color, fontWeight:700, fontSize:14 }}>{r.count}</span>
                   </div>
                   <div style={{ height:5, background:C.surface, borderRadius:3, overflow:"hidden" }}>
                     <div style={{ width:`${stats.total>0?(r.count/stats.total)*100:0}%`,
@@ -485,8 +486,8 @@ const Practicals: React.FC = () => {
                     <p.Icon size={24} color={p.color} strokeWidth={1.6} />
                   </div>
                   <div>
-                    <div style={{ color:C.txtPri, fontWeight:700, fontSize:15 }}>{p.name}</div>
-                    <div style={{ color:C.txtMut, fontSize:12 }}>{p.type}</div>
+                    <div style={{ color:C.txtPri, fontWeight:700, fontSize:17 }}>{p.name}</div>
+                    <div style={{ color:C.txtMut, fontSize:14 }}>{p.type}</div>
                   </div>
                 </div>
                 <StatusBadge status={p.status} />
@@ -500,13 +501,13 @@ const Practicals: React.FC = () => {
                 ].map(({ label, val }) => (
                   <div key={label} style={{ background:C.surface, borderRadius:8, padding:"8px 10px",
                     textAlign:"center", border:`1px solid ${C.border}` }}>
-                    <div style={{ color:C.txtPri, fontWeight:700, fontSize:16 }}>{val}</div>
-                    <div style={{ color:C.txtMut, fontSize:10, marginTop:2, textTransform:"uppercase", letterSpacing:0.5 }}>{label}</div>
+                    <div style={{ color:C.txtPri, fontWeight:700, fontSize:18 }}>{val}</div>
+                    <div style={{ color:C.txtMut, fontSize:12, marginTop:2, textTransform:"uppercase", letterSpacing:0.5 }}>{label}</div>
                   </div>
                 ))}
               </div>
 
-              <div style={{ color:C.txtMut, fontSize:11, marginBottom:16, display:"flex", alignItems:"center", gap:5 }}>
+              <div style={{ color:C.txtMut, fontSize:13, marginBottom:16, display:"flex", alignItems:"center", gap:5 }}>
                 <Activity size={12} color={C.txtMut} />
                 Last activity: {p.lastActivity}
               </div>
@@ -519,7 +520,7 @@ const Practicals: React.FC = () => {
                   background: p.status==="active" ? `${C.red}10` : `${C.green}10`,
                   color:      p.status==="active" ? C.red : C.green,
                   border:    `1px solid ${p.status==="active" ? `${C.red}44` : `${C.green}44`}`,
-                  borderRadius:8, padding:"6px 12px", cursor:"pointer", fontSize:12, fontWeight:600,
+                  borderRadius:8, padding:"6px 12px", cursor:"pointer", fontSize:14, fontWeight:600,
                   display:"flex", alignItems:"center", gap:5,
                 }}>
                   {p.status==="active"
@@ -539,8 +540,8 @@ const Practicals: React.FC = () => {
             border:`1px solid ${C.border}`, display:"flex", alignItems:"center", justifyContent:"center" }}>
             <Plus size={24} color={C.txtMut} strokeWidth={1.8} />
           </div>
-          <div style={{ fontSize:14, fontWeight:600 }}>New Practical</div>
-          <div style={{ fontSize:12 }}>Click to create</div>
+          <div style={{ fontSize:16, fontWeight:600 }}>New Practical</div>
+          <div style={{ fontSize:14 }}>Click to create</div>
         </div>
       </div>
     </div>
@@ -611,7 +612,7 @@ const AssignmentsTab: React.FC = () => {
   };
 
   const lbl: React.CSSProperties = {
-    color: C.txtMut, fontSize: 11, display: "block",
+    color: C.txtMut, fontSize: 13, display: "block",
     marginBottom: 5, textTransform: "uppercase", letterSpacing: 0.7,
   };
 
@@ -624,7 +625,7 @@ const AssignmentsTab: React.FC = () => {
       <div style={{ background: C.card, border: `1px solid ${C.border}`,
         borderRadius: 14, padding: 22, boxShadow: `0 1px 4px ${C.shadow}` }}>
 
-        <div style={{ color: C.txtPri, fontWeight: 800, fontSize: 15, marginBottom: 18,
+        <div style={{ color: C.txtPri, fontWeight: 800, fontSize: 17, marginBottom: 18,
           display: "flex", alignItems: "center", gap: 8 }}>
           <Zap size={16} color={C.accent} strokeWidth={2} /> Create Volume Assignment
         </div>
@@ -635,7 +636,7 @@ const AssignmentsTab: React.FC = () => {
           {(["vanishing-cream","cold-cream"] as PracticalId[]).map(id => (
             <button key={id} onClick={() => setPracticalId(id)} style={{
               flex: 1, padding: "9px 12px", borderRadius: 8, cursor: "pointer",
-              fontWeight: 600, fontSize: 12, border: "none",
+              fontWeight: 600, fontSize: 14, border: "none",
               background: practicalId === id ? C.accent : C.surface,
               color:      practicalId === id ? "white" : C.txtSec,
               display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
@@ -655,10 +656,10 @@ const AssignmentsTab: React.FC = () => {
             type="number" min={1} max={500} value={targetGrams}
             onChange={e => setTargetGrams(e.target.value)}
             style={{ flex: 1, background: C.surface, border: `1px solid ${C.border2}`,
-              color: C.txtPri, borderRadius: 8, padding: "9px 12px", fontSize: 18,
+              color: C.txtPri, borderRadius: 8, padding: "9px 12px", fontSize: 20,
               fontWeight: 700, fontFamily: "monospace", outline: "none", boxSizing: "border-box" }}
           />
-          <span style={{ color: C.txtMut, fontSize: 14 }}>g</span>
+          <span style={{ color: C.txtMut, fontSize: 16 }}>g</span>
         </div>
 
         {/* Live multiplier preview */}
@@ -667,7 +668,7 @@ const AssignmentsTab: React.FC = () => {
             borderRadius: 8, padding: "8px 12px", marginBottom: 16,
             display: "flex", alignItems: "center", gap: 8 }}>
             <Calculator size={14} color={C.accent} />
-            <span style={{ color: C.txtSec, fontSize: 12 }}>
+            <span style={{ color: C.txtSec, fontSize: 14 }}>
               Multiplier =
               <strong style={{ color: C.accent, fontFamily: "monospace", marginLeft: 6 }}>
                 {grams} ÷ {recipe.totalGrams} = {multiplier}
@@ -680,13 +681,13 @@ const AssignmentsTab: React.FC = () => {
         {grams > 0 && (
           <div style={{ background: C.surface, border: `1px solid ${C.border}`,
             borderRadius: 8, padding: "10px 12px", marginBottom: 16 }}>
-            <div style={{ color: C.txtMut, fontSize: 10, textTransform: "uppercase",
+            <div style={{ color: C.txtMut, fontSize: 12, textTransform: "uppercase",
               letterSpacing: 0.8, marginBottom: 8, fontWeight: 700 }}>Scaled Reagent Amounts</div>
             {recipe.reagents.map((r, i) => (
               <div key={i} style={{ display: "flex", justifyContent: "space-between",
                 padding: "4px 0", borderBottom: i < recipe.reagents.length-1 ? `1px solid ${C.border}` : "none" }}>
-                <span style={{ color: C.txtSec, fontSize: 12 }}>{r.name}</span>
-                <span style={{ color: C.green, fontFamily: "monospace", fontSize: 12, fontWeight: 600 }}>
+                <span style={{ color: C.txtSec, fontSize: 14 }}>{r.name}</span>
+                <span style={{ color: C.green, fontFamily: "monospace", fontSize: 14, fontWeight: 600 }}>
                   {+(r.amount * multiplier).toFixed(2)} {r.unit}
                 </span>
               </div>
@@ -701,18 +702,18 @@ const AssignmentsTab: React.FC = () => {
             type="number" min={0} max={300} value={timeLimitMinutes}
             onChange={e => setTimeLimitMinutes(e.target.value)}
             style={{ width: 100, background: C.surface, border: `1px solid ${C.border2}`,
-              color: C.txtPri, borderRadius: 8, padding: "9px 12px", fontSize: 18,
+              color: C.txtPri, borderRadius: 8, padding: "9px 12px", fontSize: 20,
               fontWeight: 700, fontFamily: "monospace", outline: "none", boxSizing: "border-box" }}
           />
-          <span style={{ color: C.txtMut, fontSize: 14 }}>minutes</span>
-          <span style={{ color: C.txtMut, fontSize: 12 }}>(0 = no limit)</span>
+          <span style={{ color: C.txtMut, fontSize: 16 }}>minutes</span>
+          <span style={{ color: C.txtMut, fontSize: 14 }}>(0 = no limit)</span>
         </div>
         {timeLimit > 0 && (
           <div style={{ background: `${C.amber}10`, border: `1px solid ${C.amber}44`,
             borderRadius: 8, padding: "8px 12px", marginBottom: 16,
             display: "flex", alignItems: "center", gap: 8 }}>
             <Clock size={14} color={C.amber} />
-            <span style={{ color: C.txtSec, fontSize: 12 }}>
+            <span style={{ color: C.txtSec, fontSize: 14 }}>
               Students will have <strong style={{ color: C.amber }}>{timeLimit} minutes</strong> from
               the moment they enter the lab. Timer starts automatically on entry.
             </span>
@@ -728,7 +729,7 @@ const AssignmentsTab: React.FC = () => {
             onChange={e => setCodeExpiresAt(e.target.value)}
             min={new Date().toISOString().slice(0, 16)}
             style={{ width: "100%", background: C.surface, border: `1px solid ${C.border2}`,
-              color: C.txtPri, borderRadius: 8, padding: "9px 12px", fontSize: 13,
+              color: C.txtPri, borderRadius: 8, padding: "9px 12px", fontSize: 15,
               outline: "none", boxSizing: "border-box", fontFamily: "inherit",
               colorScheme: "dark" }}
           />
@@ -738,7 +739,7 @@ const AssignmentsTab: React.FC = () => {
             borderRadius: 8, padding: "8px 12px", marginBottom: 16,
             display: "flex", alignItems: "center", gap: 8 }}>
             <AlertCircle size={14} color={C.red} />
-            <span style={{ color: C.txtSec, fontSize: 12 }}>
+            <span style={{ color: C.txtSec, fontSize: 14 }}>
               Code will stop working after{" "}
               <strong style={{ color: C.red }}>
                 {new Date(codeExpiresAt).toLocaleString()}
@@ -747,7 +748,7 @@ const AssignmentsTab: React.FC = () => {
           </div>
         )}
         {!codeExpiresAt && (
-          <div style={{ color: C.txtMut, fontSize: 11, marginBottom: 16 }}>
+          <div style={{ color: C.txtMut, fontSize: 13, marginBottom: 16 }}>
             Leave blank for a permanent code (no expiry).
           </div>
         )}
@@ -772,17 +773,17 @@ const AssignmentsTab: React.FC = () => {
         {generated && (
           <div style={{ marginTop: 16, background: `${C.green}10`,
             border: `1px solid ${C.green}44`, borderRadius: 12, padding: 16 }}>
-            <div style={{ color: C.green, fontWeight: 700, fontSize: 13, marginBottom: 10,
+            <div style={{ color: C.green, fontWeight: 700, fontSize: 15, marginBottom: 10,
               display: "flex", alignItems: "center", gap: 6 }}>
               <CheckCircle size={15} strokeWidth={2.5} /> Assignment Created!
             </div>
-            <div style={{ color: C.txtSec, fontSize: 12, marginBottom: 6 }}>
+            <div style={{ color: C.txtSec, fontSize: 14, marginBottom: 6 }}>
               Share this code with your students:
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <code style={{ flex: 1, background: C.surface, border: `1px solid ${C.border2}`,
                 color: C.accent, borderRadius: 8, padding: "10px 14px",
-                fontSize: 20, fontWeight: 800, letterSpacing: 3, textAlign: "center",
+                fontSize: 23, fontWeight: 800, letterSpacing: 3, textAlign: "center",
                 display: "block" }}>
                 {generated.token}
               </code>
@@ -791,14 +792,14 @@ const AssignmentsTab: React.FC = () => {
                 border: `1px solid ${copiedToken === generated.token ? C.green : C.border2}`,
                 color: copiedToken === generated.token ? C.green : C.txtSec,
                 borderRadius: 8, padding: "10px 12px", cursor: "pointer",
-                display: "flex", alignItems: "center", gap: 5, fontSize: 12, fontWeight: 600,
+                display: "flex", alignItems: "center", gap: 5, fontSize: 14, fontWeight: 600,
               }}>
                 {copiedToken === generated.token
                   ? <><CheckCircle size={13} strokeWidth={2.5} /> Copied</>
                   : <><Copy size={13} strokeWidth={2} /> Copy</>}
               </button>
             </div>
-            <div style={{ color: C.txtMut, fontSize: 11, marginTop: 8 }}>
+            <div style={{ color: C.txtMut, fontSize: 13, marginTop: 8 }}>
               Students enter this code on the home screen to start the assignment.
             </div>
           </div>
@@ -807,7 +808,7 @@ const AssignmentsTab: React.FC = () => {
 
       {/* ── Assignment list ── */}
       <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-        <div style={{ color: C.txtPri, fontWeight: 700, fontSize: 14,
+        <div style={{ color: C.txtPri, fontWeight: 700, fontSize: 16,
           display: "flex", alignItems: "center", gap: 8 }}>
           <Hash size={15} color={C.accent} strokeWidth={2} />
           Active Assignments ({assignments.length})
@@ -817,8 +818,8 @@ const AssignmentsTab: React.FC = () => {
           <div style={{ background: C.card, border: `2px dashed ${C.border2}`,
             borderRadius: 12, padding: "32px 20px", textAlign: "center", color: C.txtMut }}>
             <Key size={28} style={{ marginBottom: 8, opacity: 0.4 }} />
-            <div style={{ fontSize: 14, fontWeight: 600 }}>No assignments yet</div>
-            <div style={{ fontSize: 12, marginTop: 4 }}>Generate a code on the left to get started.</div>
+            <div style={{ fontSize: 16, fontWeight: 600 }}>No assignments yet</div>
+            <div style={{ fontSize: 14, marginTop: 4 }}>Generate a code on the left to get started.</div>
           </div>
         ) : (
           assignments.slice().reverse().map(a => {
@@ -839,9 +840,9 @@ const AssignmentsTab: React.FC = () => {
                       <PIcon size={18} color={pColor} strokeWidth={1.8} />
                     </div>
                     <div>
-                      <code style={{ color: C.accent, fontWeight: 800, fontSize: 15,
+                      <code style={{ color: C.accent, fontWeight: 800, fontSize: 17,
                         letterSpacing: 2 }}>{a.token}</code>
-                      <div style={{ color: C.txtMut, fontSize: 11, marginTop: 1 }}>
+                      <div style={{ color: C.txtMut, fontSize: 13, marginTop: 1 }}>
                         {a.practicalId === "vanishing-cream" ? "Vanishing Cream" : "Cold Cream"}
                         &nbsp;· Created {new Date(a.createdAt ?? "").toLocaleDateString()}
                         &nbsp;· {a.uses} use{a.uses !== 1 ? "s" : ""}
@@ -854,7 +855,7 @@ const AssignmentsTab: React.FC = () => {
                       border: `1px solid ${copiedToken === a.token ? C.green : C.border}`,
                       color: copiedToken === a.token ? C.green : C.txtMut,
                       borderRadius: 6, padding: "5px 8px", cursor: "pointer",
-                      display: "flex", alignItems: "center", gap: 4, fontSize: 12,
+                      display: "flex", alignItems: "center", gap: 4, fontSize: 14,
                     }}>
                       {copiedToken === a.token
                         ? <><CheckCircle size={12} strokeWidth={2.5} /> Copied</>
@@ -871,7 +872,7 @@ const AssignmentsTab: React.FC = () => {
                 </div>
 
                 {/* Task text */}
-                <div style={{ color: C.txtSec, fontSize: 13, lineHeight: 1.6,
+                <div style={{ color: C.txtSec, fontSize: 15, lineHeight: 1.6,
                   marginBottom: 10, borderLeft: `3px solid ${pColor}`,
                   paddingLeft: 10 }}>{a.title}</div>
 
@@ -879,16 +880,16 @@ const AssignmentsTab: React.FC = () => {
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                   <span style={{ background: `${C.green}12`, border: `1px solid ${C.green}44`,
                     color: C.green, borderRadius: 6, padding: "3px 10px",
-                    fontSize: 11, fontWeight: 700 }}>
+                    fontSize: 13, fontWeight: 700 }}>
                     Target: {a.targetGrams} g
                   </span>
                   <span style={{ background: `${C.accent}12`, border: `1px solid ${C.accent}44`,
                     color: C.accent, borderRadius: 6, padding: "3px 10px",
-                    fontSize: 11, fontWeight: 700, fontFamily: "monospace" }}>
+                    fontSize: 13, fontWeight: 700, fontFamily: "monospace" }}>
                     × {mult}
                   </span>
                   <span style={{ background: C.surface, border: `1px solid ${C.border}`,
-                    color: C.txtMut, borderRadius: 6, padding: "3px 10px", fontSize: 11 }}>
+                    color: C.txtMut, borderRadius: 6, padding: "3px 10px", fontSize: 13 }}>
                     Base: {rec.totalGrams} g
                   </span>
                   {/* Session time limit */}
@@ -896,7 +897,7 @@ const AssignmentsTab: React.FC = () => {
                     background: a.timeLimitMinutes > 0 ? `${C.amber}12` : C.surface,
                     border: `1px solid ${a.timeLimitMinutes > 0 ? `${C.amber}44` : C.border}`,
                     color: a.timeLimitMinutes > 0 ? C.amber : C.txtMut,
-                    borderRadius: 6, padding: "3px 10px", fontSize: 11, fontWeight: 700,
+                    borderRadius: 6, padding: "3px 10px", fontSize: 13, fontWeight: 700,
                     display: "flex", alignItems: "center", gap: 4,
                   }}>
                     <Clock size={11} strokeWidth={2.5} />
@@ -908,7 +909,7 @@ const AssignmentsTab: React.FC = () => {
                       background: isCodeExpired(a) ? `${C.red}12` : `${C.purple}12`,
                       border: `1px solid ${isCodeExpired(a) ? `${C.red}44` : `${C.purple}44`}`,
                       color: isCodeExpired(a) ? C.red : C.purple,
-                      borderRadius: 6, padding: "3px 10px", fontSize: 11, fontWeight: 700,
+                      borderRadius: 6, padding: "3px 10px", fontSize: 13, fontWeight: 700,
                       display: "flex", alignItems: "center", gap: 4,
                     }}>
                       <AlertCircle size={11} strokeWidth={2.5} />
@@ -918,7 +919,7 @@ const AssignmentsTab: React.FC = () => {
                     </span>
                   ) : (
                     <span style={{ background: C.surface, border: `1px solid ${C.border}`,
-                      color: C.txtMut, borderRadius: 6, padding: "3px 10px", fontSize: 11,
+                      color: C.txtMut, borderRadius: 6, padding: "3px 10px", fontSize: 13,
                       display: "flex", alignItems: "center", gap: 4 }}>
                       <CheckCircle size={11} strokeWidth={2.5} color={C.green} />
                       Permanent code
@@ -1014,7 +1015,7 @@ const Questions: React.FC = () => {
         ] as const).map(t => (
           <button key={t.id} onClick={() => setTab(t.id)} style={{
             padding:"8px 16px", borderRadius:8, cursor:"pointer", border:"none",
-            fontWeight:600, fontSize:13,
+            fontWeight:600, fontSize:15,
             background: tab===t.id ? C.accent : "transparent",
             color:      tab===t.id ? "white"  : C.txtSec,
             display:"flex", alignItems:"center", gap:6, transition:"background .15s",
@@ -1037,7 +1038,7 @@ const Questions: React.FC = () => {
             ] as {id:QAPractical;label:string;Icon:LucideIcon;color:string}[]).map(p => (
               <button key={p.id} onClick={() => { setBankPractical(p.id); setRefresh(r=>r+1); }}
                 style={{ padding:"8px 16px", borderRadius:8, cursor:"pointer",
-                  fontWeight:600, fontSize:12, border:"none",
+                  fontWeight:600, fontSize:14, border:"none",
                   background: bankPractical===p.id ? p.color : C.card,
                   color: bankPractical===p.id ? "white" : C.txtSec,
                   display:"flex", alignItems:"center", gap:6 }}>
@@ -1048,7 +1049,7 @@ const Questions: React.FC = () => {
 
           {/* Question list */}
           <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:12 }}>
-            <span style={{ color:C.txtSec, fontSize:13 }}>
+            <span style={{ color:C.txtSec, fontSize:15 }}>
               {questions.length} question{questions.length!==1?"s":""} · {totalPts} total pts
             </span>
           </div>
@@ -1057,7 +1058,7 @@ const Questions: React.FC = () => {
             <div style={{ background:C.card, border:`2px dashed ${C.border2}`, borderRadius:12,
               padding:"32px 20px", textAlign:"center", color:C.txtMut, marginBottom:14 }}>
               <ClipboardList size={30} style={{ marginBottom:8, opacity:0.3 }} />
-              <div style={{ fontSize:13 }}>No questions yet. Click "Add Question" to create one.</div>
+              <div style={{ fontSize:15 }}>No questions yet. Click "Add Question" to create one.</div>
             </div>
           )}
 
@@ -1079,20 +1080,20 @@ const Questions: React.FC = () => {
                   </div>
                   <div style={{ flex:1 }}>
                     <div style={{ display:"flex", gap:8, alignItems:"center", marginBottom:6 }}>
-                      <span style={{ color:C.txtMut, fontSize:12 }}>Q{i+1}</span>
+                      <span style={{ color:C.txtMut, fontSize:14 }}>Q{i+1}</span>
                       <span style={{ background:`${typeColor[q.type]}18`, color:typeColor[q.type],
-                        borderRadius:20, padding:"2px 10px", fontSize:11, fontWeight:700 }}>
+                        borderRadius:20, padding:"2px 10px", fontSize:13, fontWeight:700 }}>
                         {q.type === "mcq" ? "Multiple Choice" : "Short Answer"}
                       </span>
-                      <span style={{ color:C.txtMut, fontSize:12 }}>{q.points} pt{q.points>1?"s":""}</span>
+                      <span style={{ color:C.txtMut, fontSize:14 }}>{q.points} pt{q.points>1?"s":""}</span>
                       {/* Stats */}
                       {ac > 0 && (
-                        <span style={{ color:C.txtMut, fontSize:11, marginLeft:"auto" }}>
+                        <span style={{ color:C.txtMut, fontSize:13, marginLeft:"auto" }}>
                           {ac} answered · {q.type==="mcq" ? `${cc}/${ac} correct` : "pending review"}
                         </span>
                       )}
                     </div>
-                    <div style={{ color:C.txtPri, fontSize:13, lineHeight:1.6, marginBottom:8 }}>{q.text}</div>
+                    <div style={{ color:C.txtPri, fontSize:15, lineHeight:1.6, marginBottom:8 }}>{q.text}</div>
 
                     {/* MCQ options with correct highlighted */}
                     {q.type === "mcq" && q.options.length > 0 && (
@@ -1113,16 +1114,16 @@ const Questions: React.FC = () => {
                               }}>
                                 {isCorrect
                                   ? <CheckCircle size={13} color="white" strokeWidth={3} />
-                                  : <span style={{ color:C.txtMut, fontSize:10, fontWeight:700 }}>
+                                  : <span style={{ color:C.txtMut, fontSize:12, fontWeight:700 }}>
                                       {String.fromCharCode(65+oi)}
                                     </span>}
                               </span>
-                              <span style={{ color: isCorrect ? C.green : C.txtSec, fontSize:12,
+                              <span style={{ color: isCorrect ? C.green : C.txtSec, fontSize:14,
                                 fontWeight: isCorrect ? 700 : 400 }}>
                                 {opt}
                               </span>
                               {isCorrect && (
-                                <span style={{ marginLeft:"auto", color:C.green, fontSize:10,
+                                <span style={{ marginLeft:"auto", color:C.green, fontSize:12,
                                   fontWeight:700, textTransform:"uppercase", letterSpacing:0.5 }}>
                                   Correct
                                 </span>
@@ -1136,7 +1137,7 @@ const Questions: React.FC = () => {
                     {/* Short answer model */}
                     {q.type === "short" && q.correctAnswer && (
                       <div style={{ background:`${C.purple}10`, border:`1px solid ${C.purple}44`,
-                        borderRadius:8, padding:"7px 12px", fontSize:12, color:C.purple, marginTop:4 }}>
+                        borderRadius:8, padding:"7px 12px", fontSize:14, color:C.purple, marginTop:4 }}>
                         <strong>Model answer:</strong> {q.correctAnswer}
                       </div>
                     )}
@@ -1156,7 +1157,7 @@ const Questions: React.FC = () => {
           {addingNew && (
             <div style={{ marginTop:14, background:C.card, border:`1px solid ${C.accent}55`,
               borderRadius:14, padding:22, boxShadow:`0 2px 8px ${C.shadow}` }}>
-              <div style={{ color:C.txtPri, fontWeight:800, fontSize:15, marginBottom:16 }}>
+              <div style={{ color:C.txtPri, fontWeight:800, fontSize:17, marginBottom:16 }}>
                 New Question
               </div>
 
@@ -1165,31 +1166,31 @@ const Questions: React.FC = () => {
                 {(["mcq","short"] as const).map(t => (
                   <button key={t} type="button" onClick={() => setNewQ(p => ({ ...p, type:t, correctAnswer:"" }))}
                     style={{ padding:"7px 16px", borderRadius:8, cursor:"pointer",
-                      fontSize:12, fontWeight:600, border:"none",
+                      fontSize:14, fontWeight:600, border:"none",
                       background: newQ.type===t ? C.accent : C.surface,
                       color: newQ.type===t ? "white" : C.txtSec }}>
                     {t === "mcq" ? "Multiple Choice" : "Short Answer"}
                   </button>
                 ))}
                 <div style={{ marginLeft:"auto", display:"flex", alignItems:"center", gap:8 }}>
-                  <label style={{ color:C.txtMut, fontSize:12 }}>Points</label>
+                  <label style={{ color:C.txtMut, fontSize:14 }}>Points</label>
                   <input type="number" min={1} value={newQ.points}
                     onChange={e => setNewQ(p => ({ ...p, points:+e.target.value }))}
                     style={{ width:60, background:C.surface, border:`1px solid ${C.border2}`,
-                      color:C.txtPri, borderRadius:6, padding:"5px 8px", fontSize:13, textAlign:"center" }} />
+                      color:C.txtPri, borderRadius:6, padding:"5px 8px", fontSize:15, textAlign:"center" }} />
                 </div>
               </div>
 
               {/* Practical scope */}
               <div style={{ marginBottom:14 }}>
-                <label style={{ color:C.txtMut, fontSize:11, fontWeight:700, display:"block",
+                <label style={{ color:C.txtMut, fontSize:13, fontWeight:700, display:"block",
                   marginBottom:6, textTransform:"uppercase", letterSpacing:0.7 }}>Practical</label>
                 <div style={{ display:"flex", gap:6 }}>
                   {(["vanishing-cream","cold-cream","all"] as QAPractical[]).map(p => (
                     <button key={p} type="button"
                       onClick={() => setNewQ(prev => ({ ...prev, practicalId:p }))}
                       style={{ padding:"6px 12px", borderRadius:7, cursor:"pointer",
-                        fontSize:11, fontWeight:600, border:"none",
+                        fontSize:13, fontWeight:600, border:"none",
                         background: newQ.practicalId===p ? C.accent : C.surface,
                         color: newQ.practicalId===p ? "white" : C.txtSec }}>
                       {p === "vanishing-cream" ? "Vanishing" : p === "cold-cream" ? "Cold Cream" : "All"}
@@ -1199,7 +1200,7 @@ const Questions: React.FC = () => {
               </div>
 
               {/* Question text */}
-              <label style={{ color:C.txtMut, fontSize:11, fontWeight:700, display:"block",
+              <label style={{ color:C.txtMut, fontSize:13, fontWeight:700, display:"block",
                 marginBottom:6, textTransform:"uppercase", letterSpacing:0.7 }}>Question</label>
               <TTextarea placeholder="Enter your question…" value={newQ.text} rows={3}
                 onChange={e => setNewQ(p => ({ ...p, text:e.target.value }))}
@@ -1208,7 +1209,7 @@ const Questions: React.FC = () => {
               {/* MCQ options + correct answer */}
               {newQ.type === "mcq" && (
                 <div style={{ marginBottom:14 }}>
-                  <label style={{ color:C.txtMut, fontSize:11, fontWeight:700, display:"block",
+                  <label style={{ color:C.txtMut, fontSize:13, fontWeight:700, display:"block",
                     marginBottom:8, textTransform:"uppercase", letterSpacing:0.7 }}>
                     Options — click the circle to mark the correct answer
                   </label>
@@ -1229,7 +1230,7 @@ const Questions: React.FC = () => {
                             }}>
                             {isCorrect
                               ? <CheckCircle size={15} color="white" strokeWidth={3} />
-                              : <span style={{ color:C.txtPri, fontSize:11, fontWeight:700 }}>
+                              : <span style={{ color:C.txtPri, fontSize:13, fontWeight:700 }}>
                                   {String.fromCharCode(65+oi)}
                                 </span>}
                           </button>
@@ -1251,13 +1252,13 @@ const Questions: React.FC = () => {
                     })}
                   </div>
                   {!newQ.correctAnswer && newQ.options.some(Boolean) && (
-                    <div style={{ color:C.amber, fontSize:12, marginTop:8,
+                    <div style={{ color:C.amber, fontSize:14, marginTop:8,
                       display:"flex", alignItems:"center", gap:5 }}>
                       <AlertCircle size={13} /> Click the circle next to the correct option to mark it.
                     </div>
                   )}
                   {newQ.correctAnswer && (
-                    <div style={{ color:C.green, fontSize:12, marginTop:8,
+                    <div style={{ color:C.green, fontSize:14, marginTop:8,
                       display:"flex", alignItems:"center", gap:5 }}>
                       <CheckCircle size={13} strokeWidth={2.5} /> Correct answer: <strong>{newQ.correctAnswer}</strong>
                     </div>
@@ -1268,7 +1269,7 @@ const Questions: React.FC = () => {
               {/* Short answer: model answer (optional) */}
               {newQ.type === "short" && (
                 <div style={{ marginBottom:14 }}>
-                  <label style={{ color:C.txtMut, fontSize:11, fontWeight:700, display:"block",
+                  <label style={{ color:C.txtMut, fontSize:13, fontWeight:700, display:"block",
                     marginBottom:6, textTransform:"uppercase", letterSpacing:0.7 }}>
                     Model / Expected Answer <span style={{ color:C.txtMut, fontWeight:400 }}>(optional — shown to student after submit)</span>
                   </label>
@@ -1342,11 +1343,11 @@ const Students: React.FC = () => {
 
   const inp: React.CSSProperties = {
     width:"100%", background:C.surface, border:`1px solid ${C.border2}`,
-    color:C.txtPri, borderRadius:8, padding:"9px 12px", fontSize:13,
+    color:C.txtPri, borderRadius:8, padding:"9px 12px", fontSize:15,
     boxSizing:"border-box", outline:"none",
   };
   const lbl: React.CSSProperties = {
-    color:C.txtMut, fontSize:11, fontWeight:700, display:"block",
+    color:C.txtMut, fontSize:13, fontWeight:700, display:"block",
     marginBottom:5, textTransform:"uppercase", letterSpacing:0.7,
   };
 
@@ -1371,7 +1372,7 @@ const Students: React.FC = () => {
         <div style={{ background:C.card, border:`1px solid ${C.accent}55`,
           borderRadius:12, padding:"18px 20px", marginBottom:20,
           boxShadow:`0 2px 10px ${C.shadow}` }}>
-          <div style={{ color:C.txtPri, fontWeight:800, fontSize:14, marginBottom:14,
+          <div style={{ color:C.txtPri, fontWeight:800, fontSize:16, marginBottom:14,
             display:"flex", alignItems:"center", gap:8 }}>
             <UserPlus size={15} color={C.accent} strokeWidth={2} />
             Register New Student
@@ -1399,13 +1400,13 @@ const Students: React.FC = () => {
             </div>
           </div>
           {addError && (
-            <div style={{ color:"#f87171", fontSize:12, marginBottom:10,
+            <div style={{ color:"#f87171", fontSize:14, marginBottom:10,
               display:"flex", alignItems:"center", gap:6 }}>
               <AlertCircle size={13} /> {addError}
             </div>
           )}
           {addOk && (
-            <div style={{ color:C.green, fontSize:12, marginBottom:10,
+            <div style={{ color:C.green, fontSize:14, marginBottom:10,
               display:"flex", alignItems:"center", gap:6 }}>
               <CheckCircle size={13} strokeWidth={2.5} /> Student account created successfully!
             </div>
@@ -1415,7 +1416,7 @@ const Students: React.FC = () => {
             <Btn label="Cancel" variant="ghost" small Icon={RefreshCw}
               onClick={() => { setShowAdd(false); resetForm(); }} />
           </div>
-          <div style={{ color:C.txtMut, fontSize:11, marginTop:10 }}>
+          <div style={{ color:C.txtMut, fontSize:13, marginTop:10 }}>
             The student will log in with the email and password you set. Share their credentials with them directly.
           </div>
         </div>
@@ -1432,7 +1433,7 @@ const Students: React.FC = () => {
             placeholder="Search by name, email, or reg number…"
             style={{ width:"100%", background:C.card, border:`1px solid ${C.border}`,
               color:C.txtPri, borderRadius:8, padding:"9px 12px 9px 34px",
-              fontSize:13, boxSizing:"border-box", outline:"none" }} />
+              fontSize:15, boxSizing:"border-box", outline:"none" }} />
         </div>
       </div>
 
@@ -1440,10 +1441,10 @@ const Students: React.FC = () => {
         <div style={{ background:C.card, border:`2px dashed ${C.border2}`, borderRadius:14,
           padding:"48px 20px", textAlign:"center" }}>
           <Users size={36} color={C.txtMut} style={{ marginBottom:12, opacity:0.4 }} />
-          <div style={{ color:C.txtPri, fontWeight:700, fontSize:15, marginBottom:6 }}>
+          <div style={{ color:C.txtPri, fontWeight:700, fontSize:17, marginBottom:6 }}>
             No students in your class yet
           </div>
-          <div style={{ color:C.txtMut, fontSize:13, lineHeight:1.6 }}>
+          <div style={{ color:C.txtMut, fontSize:15, lineHeight:1.6 }}>
             Go to <strong>Settings</strong> → generate a class invitation code (CLS-XXXXXX)
             and share it with your students. They appear here once they enter the code.
           </div>
@@ -1461,26 +1462,26 @@ const Students: React.FC = () => {
                   <td style={{ padding:"12px 14px" }}>
                     <div style={{ display:"flex", alignItems:"center", gap:10 }}>
                       <Avatar name={u.fullName} />
-                      <span style={{ color:C.txtPri, fontSize:13, fontWeight:600 }}>{u.fullName}</span>
+                      <span style={{ color:C.txtPri, fontSize:15, fontWeight:600 }}>{u.fullName}</span>
                     </div>
                   </td>
-                  <td style={{ padding:"12px 14px", color:C.txtSec, fontSize:12 }}>{u.email}</td>
+                  <td style={{ padding:"12px 14px", color:C.txtSec, fontSize:14 }}>{u.email}</td>
                   <td style={{ padding:"12px 14px" }}>
                     {u.regNumber
                       ? <code style={{ background:`${C.green}12`, color:C.green,
                           border:`1px solid ${C.green}44`, borderRadius:5,
-                          padding:"2px 8px", fontSize:12, fontWeight:700 }}>
+                          padding:"2px 8px", fontSize:14, fontWeight:700 }}>
                           {u.regNumber}
                         </code>
-                      : <span style={{ color:C.txtMut, fontSize:12 }}>—</span>}
+                      : <span style={{ color:C.txtMut, fontSize:14 }}>—</span>}
                   </td>
-                  <td style={{ padding:"12px 14px", color:C.txtMut, fontSize:12 }}>
+                  <td style={{ padding:"12px 14px", color:C.txtMut, fontSize:14 }}>
                     {new Date(u.createdAt ?? "").toLocaleDateString()}
                   </td>
                   <td style={{ padding:"12px 14px" }}>
                     <span style={{ background:`${C.green}12`, border:`1px solid ${C.green}44`,
                       color:C.green, borderRadius:20, padding:"2px 10px",
-                      fontSize:11, fontWeight:700 }}>Active</span>
+                      fontSize:13, fontWeight:700 }}>Active</span>
                   </td>
                 </tr>
               ))}
@@ -1494,7 +1495,7 @@ const Students: React.FC = () => {
           )}
         </div>
       )}
-      <div style={{ color:C.txtMut, fontSize:12, marginTop:10 }}>
+      <div style={{ color:C.txtMut, fontSize:14, marginTop:10 }}>
         Showing {filtered.length} of {allStudents.length} students in your class
       </div>
     </div>
@@ -1561,7 +1562,7 @@ const Analytics: React.FC = () => {
         {["all","vanishing-cream","cold-cream"].map(f => (
           <button key={f} onClick={() => setPFilter(f)} style={{
             padding:"7px 16px", borderRadius:8, cursor:"pointer", fontWeight:600,
-            fontSize:12, border:"none",
+            fontSize:14, border:"none",
             background: pFilter===f ? C.accent : C.card,
             color: pFilter===f ? "white" : C.txtSec,
           }}>{f==="all"?"All Practicals":f.replace("-"," ").replace(/\b\w/g,(c:string)=>c.toUpperCase())}</button>
@@ -1579,8 +1580,8 @@ const Analytics: React.FC = () => {
         <div style={{ background:C.card, border:`2px dashed ${C.border2}`, borderRadius:14,
           padding:"48px 20px", textAlign:"center" }}>
           <BarChart2 size={36} color={C.txtMut} style={{ marginBottom:12, opacity:0.3 }} />
-          <div style={{ color:C.txtPri, fontWeight:700, fontSize:15, marginBottom:6 }}>No data yet</div>
-          <div style={{ color:C.txtMut, fontSize:13 }}>Analytics will populate as students evaluate their practicals.</div>
+          <div style={{ color:C.txtPri, fontWeight:700, fontSize:17, marginBottom:6 }}>No data yet</div>
+          <div style={{ color:C.txtMut, fontSize:15 }}>Analytics will populate as students evaluate their practicals.</div>
         </div>
       ) : (
         <>
@@ -1588,7 +1589,7 @@ const Analytics: React.FC = () => {
             {/* Score by practical */}
             <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:14,
               padding:20, boxShadow:`0 1px 4px ${C.shadow}` }}>
-              <div style={{ color:C.txtPri, fontWeight:700, fontSize:14, marginBottom:18,
+              <div style={{ color:C.txtPri, fontWeight:700, fontSize:16, marginBottom:18,
                 display:"flex", alignItems:"center", gap:8 }}>
                 <BarChart2 size={16} color={C.accent} strokeWidth={2} /> Average Score by Practical
               </div>
@@ -1598,8 +1599,8 @@ const Analytics: React.FC = () => {
               ].map(d => (
                 <div key={d.label} style={{ marginBottom:16 }}>
                   <div style={{ display:"flex", justifyContent:"space-between", marginBottom:6 }}>
-                    <span style={{ color:C.txtSec, fontSize:13 }}>{d.label}</span>
-                    <span style={{ color:C.txtPri, fontWeight:700, fontSize:13 }}>
+                    <span style={{ color:C.txtSec, fontSize:15 }}>{d.label}</span>
+                    <span style={{ color:C.txtPri, fontWeight:700, fontSize:15 }}>
                       {d.count > 0 ? `${d.score}%` : "No data"}
                     </span>
                   </div>
@@ -1607,7 +1608,7 @@ const Analytics: React.FC = () => {
                     border:`1px solid ${C.border}` }}>
                     <div style={{ width:`${d.score}%`, height:"100%", background:d.color, borderRadius:5 }} />
                   </div>
-                  <div style={{ color:C.txtMut, fontSize:11, marginTop:4 }}>{d.count} submission{d.count!==1?"s":""}</div>
+                  <div style={{ color:C.txtMut, fontSize:13, marginTop:4 }}>{d.count} submission{d.count!==1?"s":""}</div>
                 </div>
               ))}
             </div>
@@ -1615,7 +1616,7 @@ const Analytics: React.FC = () => {
             {/* Score distribution */}
             <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:14,
               padding:20, boxShadow:`0 1px 4px ${C.shadow}` }}>
-              <div style={{ color:C.txtPri, fontWeight:700, fontSize:14, marginBottom:18,
+              <div style={{ color:C.txtPri, fontWeight:700, fontSize:16, marginBottom:18,
                 display:"flex", alignItems:"center", gap:8 }}>
                 <Activity size={16} color={C.accent} strokeWidth={2} /> Score Distribution
               </div>
@@ -1623,12 +1624,12 @@ const Analytics: React.FC = () => {
                 {ranges.map(d => (
                   <div key={d.range} style={{ flex:1, display:"flex", flexDirection:"column",
                     alignItems:"center", gap:4 }}>
-                    <span style={{ color:C.txtSec, fontSize:11 }}>{d.count}</span>
+                    <span style={{ color:C.txtSec, fontSize:13 }}>{d.count}</span>
                     <div style={{ width:"100%", borderRadius:"4px 4px 0 0",
                       background: d.count>0 ? d.color : C.border,
                       height: `${(d.count/maxC)*90}px`,
                       minHeight: d.count>0 ? 8 : 4 }} />
-                    <span style={{ color:C.txtMut, fontSize:10, textAlign:"center", lineHeight:1.2 }}>{d.range}</span>
+                    <span style={{ color:C.txtMut, fontSize:12, textAlign:"center", lineHeight:1.2 }}>{d.range}</span>
                   </div>
                 ))}
               </div>
@@ -1643,23 +1644,23 @@ const Analytics: React.FC = () => {
             ].map(({ title, list, color, Icon:Ic }) => (
               <div key={title} style={{ background:C.card, border:`1px solid ${C.border}`,
                 borderRadius:14, padding:18, boxShadow:`0 1px 4px ${C.shadow}` }}>
-                <div style={{ color:C.txtPri, fontWeight:700, fontSize:14, marginBottom:14,
+                <div style={{ color:C.txtPri, fontWeight:700, fontSize:16, marginBottom:14,
                   display:"flex", alignItems:"center", gap:8 }}>
                   <Ic size={15} color={color} strokeWidth={2} /> {title}
                 </div>
                 {list.length===0
-                  ? <div style={{ color:C.txtMut, fontSize:13 }}>None at this time.</div>
+                  ? <div style={{ color:C.txtMut, fontSize:15 }}>None at this time.</div>
                   : list.map(s => (
                     <div key={s.id} style={{ display:"flex", justifyContent:"space-between",
                       alignItems:"center", padding:"8px 0", borderBottom:`1px solid ${C.border}` }}>
                       <div style={{ display:"flex", alignItems:"center", gap:8 }}>
                         <Avatar name={s.name} size={28} />
                         <div>
-                          <div style={{ color:C.txtSec, fontSize:13 }}>{s.name}</div>
-                          {s.reg && <div style={{ color:C.txtMut, fontSize:10 }}>{s.reg} · {s.count} eval{s.count!==1?"s":""}</div>}
+                          <div style={{ color:C.txtSec, fontSize:15 }}>{s.name}</div>
+                          {s.reg && <div style={{ color:C.txtMut, fontSize:12 }}>{s.reg} · {s.count} eval{s.count!==1?"s":""}</div>}
                         </div>
                       </div>
-                      <span style={{ color, fontWeight:700, fontSize:14 }}>{s.avg}%</span>
+                      <span style={{ color, fontWeight:700, fontSize:16 }}>{s.avg}%</span>
                     </div>
                   ))
                 }
@@ -1762,13 +1763,13 @@ const Submissions: React.FC = () => {
           <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search by name or reg number…"
             style={{ width:"100%", background:C.card, border:`1px solid ${C.border}`,
               color:C.txtPri, borderRadius:8, padding:"8px 12px 8px 34px",
-              fontSize:13, boxSizing:"border-box", outline:"none" }} />
+              fontSize:15, boxSizing:"border-box", outline:"none" }} />
         </div>
 
         {/* Practical dropdown */}
         <select value={practicalFilter} onChange={e => setPracticalFilter(e.target.value)}
           style={{ background:C.card, border:`1px solid ${C.border}`, color:C.txtSec,
-            borderRadius:8, padding:"8px 12px", fontSize:13, cursor:"pointer", outline:"none" }}>
+            borderRadius:8, padding:"8px 12px", fontSize:15, cursor:"pointer", outline:"none" }}>
           <option value="all">All Practicals</option>
           <option value="vanishing-cream">Vanishing Cream</option>
           <option value="cold-cream">Cold Cream</option>
@@ -1777,7 +1778,7 @@ const Submissions: React.FC = () => {
         {/* Assignment code dropdown */}
         <select value={tokenFilter} onChange={e => setTokenFilter(e.target.value)}
           style={{ background:C.card, border:`1px solid ${C.border}`, color:C.txtSec,
-            borderRadius:8, padding:"8px 12px", fontSize:13, cursor:"pointer", outline:"none",
+            borderRadius:8, padding:"8px 12px", fontSize:15, cursor:"pointer", outline:"none",
             fontFamily:"monospace" }}>
           <option value="all">All Codes</option>
           {assignments.map(a => (
@@ -1791,7 +1792,7 @@ const Submissions: React.FC = () => {
         {(["all","PASS","AVERAGE","FAIL"] as const).map(f => (
           <button key={f} onClick={() => setResultFilter(f)} style={{
             padding:"7px 12px", borderRadius:8, cursor:"pointer", fontWeight:600,
-            fontSize:12, border:"none",
+            fontSize:14, border:"none",
             background: resultFilter===f ? C.accent : C.card,
             color: resultFilter===f ? "white" : C.txtSec,
           }}>{f === "all" ? "All Results" : f}</button>
@@ -1801,7 +1802,7 @@ const Submissions: React.FC = () => {
         {(["all","assignment","practice"] as const).map(f => (
           <button key={f} onClick={() => setModeFilter(f)} style={{
             padding:"7px 12px", borderRadius:8, cursor:"pointer", fontWeight:600,
-            fontSize:12, border:"none", textTransform:"capitalize",
+            fontSize:14, border:"none", textTransform:"capitalize",
             background: modeFilter===f ? `${C.purple}55` : C.card,
             color: modeFilter===f ? "white" : C.txtSec,
           }}>{f === "all" ? "All Modes" : f}</button>
@@ -1812,8 +1813,8 @@ const Submissions: React.FC = () => {
         <div style={{ background:C.card, border:`2px dashed ${C.border2}`, borderRadius:14,
           padding:"48px 20px", textAlign:"center" }}>
           <ClipboardCheck size={36} color={C.txtMut} style={{ marginBottom:12, opacity:0.3 }} />
-          <div style={{ color:C.txtPri, fontWeight:700, fontSize:15, marginBottom:6 }}>No submissions yet</div>
-          <div style={{ color:C.txtMut, fontSize:13 }}>
+          <div style={{ color:C.txtPri, fontWeight:700, fontSize:17, marginBottom:6 }}>No submissions yet</div>
+          <div style={{ color:C.txtMut, fontSize:15 }}>
             Submissions appear here automatically when a student clicks "Evaluate Result" in the lab.
           </div>
         </div>
@@ -1832,44 +1833,44 @@ const Submissions: React.FC = () => {
                       <div style={{ display:"flex", alignItems:"center", gap:8 }}>
                         <Avatar name={s.studentName} size={28} />
                         <div>
-                          <div style={{ color:C.txtPri, fontSize:13 }}>{s.studentName}</div>
-                          {s.studentReg && <div style={{ color:C.txtMut, fontSize:10 }}>{s.studentReg}</div>}
+                          <div style={{ color:C.txtPri, fontSize:15 }}>{s.studentName}</div>
+                          {s.studentReg && <div style={{ color:C.txtMut, fontSize:12 }}>{s.studentReg}</div>}
                         </div>
                       </div>
                     </td>
-                    <td style={{ padding:"11px 14px", color:C.txtSec, fontSize:12 }}>
+                    <td style={{ padding:"11px 14px", color:C.txtSec, fontSize:14 }}>
                       {s.practicalId === "vanishing-cream" ? "Vanishing Cream" : "Cold Cream"}
                     </td>
                     <td style={{ padding:"11px 14px" }}>
                       <span style={{ background: s.mode==="assignment" ? `${C.accent}18` : C.surface,
                         color: s.mode==="assignment" ? C.accent : C.txtMut,
                         border:`1px solid ${s.mode==="assignment" ? `${C.accent}44` : C.border}`,
-                        borderRadius:20, padding:"2px 8px", fontSize:11, fontWeight:700,
+                        borderRadius:20, padding:"2px 8px", fontSize:13, fontWeight:700,
                         textTransform:"capitalize" }}>{s.mode}</span>
                     </td>
                     <td style={{ padding:"11px 14px" }}>
                       {s.mode === "assignment" && s.token ? (
                         <code style={{ background:`${C.accent}12`, color:C.accent,
                           border:`1px solid ${C.accent}44`, borderRadius:6,
-                          padding:"2px 8px", fontSize:12, fontWeight:700, letterSpacing:1 }}>
+                          padding:"2px 8px", fontSize:14, fontWeight:700, letterSpacing:1 }}>
                           {s.token}
                         </code>
                       ) : (
-                        <span style={{ color:C.txtMut, fontSize:12 }}>—</span>
+                        <span style={{ color:C.txtMut, fontSize:14 }}>—</span>
                       )}
                     </td>
                     <td style={{ padding:"11px 14px", minWidth:120 }}><ScoreBar score={s.scorePct} /></td>
                     <td style={{ padding:"11px 14px" }}>{resultBadge(s.result, C)}</td>
-                    <td style={{ padding:"11px 14px", color:C.txtSec, fontSize:12, fontFamily:"monospace" }}>
+                    <td style={{ padding:"11px 14px", color:C.txtSec, fontSize:14, fontFamily:"monospace" }}>
                       {s.ph.toFixed(2)}
                     </td>
-                    <td style={{ padding:"11px 14px", color:C.txtSec, fontSize:12, fontFamily:"monospace" }}>
+                    <td style={{ padding:"11px 14px", color:C.txtSec, fontSize:14, fontFamily:"monospace" }}>
                       {s.viscosity} cP
                     </td>
-                    <td style={{ padding:"11px 14px", color:C.txtMut, fontSize:12 }}>
+                    <td style={{ padding:"11px 14px", color:C.txtMut, fontSize:14 }}>
                       {s.durationSec > 0 ? `${Math.round(s.durationSec/60)} min` : "—"}
                     </td>
-                    <td style={{ padding:"11px 14px", color:C.txtMut, fontSize:11 }}>
+                    <td style={{ padding:"11px 14px", color:C.txtMut, fontSize:13 }}>
                       {new Date(s.submittedAt).toLocaleDateString()}
                     </td>
                   </tr>
@@ -1881,10 +1882,279 @@ const Submissions: React.FC = () => {
               <div style={{ padding:32, textAlign:"center", color:C.txtMut }}>No submissions match the filters.</div>
             )}
           </div>
-          <div style={{ color:C.txtMut, fontSize:12, marginTop:10 }}>
+          <div style={{ color:C.txtMut, fontSize:14, marginTop:10 }}>
             {filtered.length} of {allSubs.length} submissions
           </div>
         </>
+      )}
+    </div>
+  );
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Assignment Tracking — per-assignment "who did / who didn't" view
+// ─────────────────────────────────────────────────────────────────────────────
+
+const AssignmentTracking: React.FC = () => {
+  const { C } = useTheme();
+  const [assignments, setAssignments] = useState<Assignment[]>([]);
+  const [allSubs,     setAllSubs]     = useState<LabSubmission[]>([]);
+  const [students,    setStudents]    = useState<StoreUser[]>([]);
+  const [search,      setSearch]      = useState("");
+  const [refresh,     setRefresh]     = useState(0);
+  const [loading,     setLoading]     = useState(true);
+
+  useEffect(() => {
+    setLoading(true);
+    Promise.all([
+      getAllAssignments(),
+      getAllSubmissions(),
+      getStudents().then(users => users.filter(u => u.role === "student")),
+    ]).then(([asg, subs, studs]) => {
+      setAssignments(asg);
+      setAllSubs(subs);
+      setStudents(studs);
+    }).finally(() => setLoading(false));
+  }, [refresh]);
+
+  // Newest assignment first
+  const ordered = assignments.slice().sort((a, b) =>
+    new Date(b.createdAt ?? 0).getTime() - new Date(a.createdAt ?? 0).getTime()
+  );
+
+  const matchSearch = (u: StoreUser) =>
+    !search ||
+    u.fullName.toLowerCase().includes(search.toLowerCase()) ||
+    (u.regNumber ?? "").toLowerCase().includes(search.toLowerCase());
+
+  return (
+    <div>
+      <SectionHeading
+        title="Assignment Tracking"
+        sub="See who completed each assignment and who hasn't — grouped per assignment code."
+        action={
+          <Btn label="Refresh" Icon={RefreshCw} variant="ghost" small
+            onClick={() => setRefresh(r => r + 1)} />
+        }
+      />
+
+      {/* Search */}
+      <div style={{ display:"flex", gap:10, marginBottom:18 }}>
+        <div style={{ flex:1, position:"relative", maxWidth:360 }}>
+          <span style={{ position:"absolute", left:11, top:"50%", transform:"translateY(-50%)",
+            pointerEvents:"none", display:"flex" }}>
+            <Search size={15} color={C.txtMut} />
+          </span>
+          <input value={search} onChange={e => setSearch(e.target.value)}
+            placeholder="Search a student by name or reg number…"
+            style={{ width:"100%", background:C.card, border:`1px solid ${C.border}`,
+              color:C.txtPri, borderRadius:8, padding:"9px 12px 9px 34px",
+              fontSize:15, boxSizing:"border-box", outline:"none" }} />
+        </div>
+      </div>
+
+      {loading ? (
+        <div style={{ padding:32, textAlign:"center", color:C.txtMut }}>Loading…</div>
+      ) : ordered.length === 0 ? (
+        <div style={{ background:C.card, border:`2px dashed ${C.border2}`, borderRadius:14,
+          padding:"48px 20px", textAlign:"center" }}>
+          <ListChecks size={36} color={C.txtMut} style={{ marginBottom:12, opacity:0.4 }} />
+          <div style={{ color:C.txtPri, fontWeight:700, fontSize:17, marginBottom:6 }}>
+            No assignments yet
+          </div>
+          <div style={{ color:C.txtMut, fontSize:15 }}>
+            Create an assignment in the <strong>Assignments</strong> tab. Tracking appears here once you do.
+          </div>
+        </div>
+      ) : students.length === 0 ? (
+        <div style={{ background:C.card, border:`2px dashed ${C.border2}`, borderRadius:14,
+          padding:"48px 20px", textAlign:"center" }}>
+          <Users size={36} color={C.txtMut} style={{ marginBottom:12, opacity:0.4 }} />
+          <div style={{ color:C.txtPri, fontWeight:700, fontSize:17, marginBottom:6 }}>
+            No students in your class yet
+          </div>
+          <div style={{ color:C.txtMut, fontSize:15 }}>
+            Students must join your class (Settings → invitation code) before tracking can show
+            who completed each assignment.
+          </div>
+        </div>
+      ) : (
+        <div style={{ display:"flex", flexDirection:"column", gap:18 }}>
+          {ordered.map(a => {
+            // Best submission per student for THIS assignment code (highest score wins)
+            const subsForToken = allSubs.filter(s => s.mode === "assignment" && s.token === a.token);
+            const bestByStudent = new Map<string, LabSubmission>();
+            for (const s of subsForToken) {
+              const prev = bestByStudent.get(s.studentId);
+              if (!prev || s.scorePct > prev.scorePct) bestByStudent.set(s.studentId, s);
+            }
+
+            const completed = students.filter(u => bestByStudent.has(u.clientId));
+            const pending   = students.filter(u => !bestByStudent.has(u.clientId));
+
+            const total   = students.length;
+            const doneN   = completed.length;
+            const pct     = total > 0 ? Math.round((doneN / total) * 100) : 0;
+            const expired = isCodeExpired(a);
+
+            const PIcon  = a.practicalId === "vanishing-cream" ? FlaskConical : FlaskRound;
+            const pColor = a.practicalId === "vanishing-cream" ? "#2563eb" : "#7c3aed";
+            const pName  = a.practicalId === "vanishing-cream" ? "Vanishing Cream" : "Cold Cream";
+
+            const visibleCompleted = completed.filter(matchSearch);
+            const visiblePending   = pending.filter(matchSearch);
+
+            return (
+              <div key={a.token} style={{ background:C.card, border:`1px solid ${C.border}`,
+                borderRadius:14, overflow:"hidden", boxShadow:`0 1px 4px ${C.shadow}` }}>
+
+                {/* ── Assignment header ── */}
+                <div style={{ padding:"16px 20px", borderBottom:`1px solid ${C.border}`,
+                  display:"flex", flexWrap:"wrap", gap:14, alignItems:"center",
+                  justifyContent:"space-between" }}>
+                  <div style={{ display:"flex", gap:12, alignItems:"center", minWidth:0 }}>
+                    <div style={{ width:40, height:40, borderRadius:10, flexShrink:0,
+                      background:`${pColor}18`, display:"flex",
+                      alignItems:"center", justifyContent:"center" }}>
+                      <PIcon size={20} color={pColor} strokeWidth={1.8} />
+                    </div>
+                    <div style={{ minWidth:0 }}>
+                      <div style={{ display:"flex", alignItems:"center", gap:8, flexWrap:"wrap" }}>
+                        <code style={{ color:C.accent, fontWeight:800, fontSize:17, letterSpacing:2 }}>
+                          {a.token}
+                        </code>
+                        {expired ? (
+                          <span style={{ background:`${C.red}12`, border:`1px solid ${C.red}44`,
+                            color:C.red, borderRadius:6, padding:"2px 8px", fontSize:13,
+                            fontWeight:700, display:"flex", alignItems:"center", gap:4 }}>
+                            <AlertCircle size={11} strokeWidth={2.5} /> Expired
+                          </span>
+                        ) : a.codeExpiresAt ? (
+                          <span style={{ background:`${C.purple}12`, border:`1px solid ${C.purple}44`,
+                            color:C.purple, borderRadius:6, padding:"2px 8px", fontSize:13,
+                            fontWeight:700, display:"flex", alignItems:"center", gap:4 }}>
+                            <Clock size={11} strokeWidth={2.5} />
+                            Due {new Date(a.codeExpiresAt).toLocaleDateString()}
+                          </span>
+                        ) : (
+                          <span style={{ background:`${C.green}12`, border:`1px solid ${C.green}44`,
+                            color:C.green, borderRadius:6, padding:"2px 8px", fontSize:13,
+                            fontWeight:700, display:"flex", alignItems:"center", gap:4 }}>
+                            <CheckCircle size={11} strokeWidth={2.5} /> Open
+                          </span>
+                        )}
+                      </div>
+                      <div style={{ color:C.txtMut, fontSize:13, marginTop:2 }}>
+                        {pName} · Target {a.targetGrams} g
+                        {a.title ? ` · ${a.title}` : ""}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Progress summary */}
+                  <div style={{ minWidth:200 }}>
+                    <div style={{ display:"flex", justifyContent:"space-between", marginBottom:5 }}>
+                      <span style={{ color:C.txtSec, fontSize:14, fontWeight:600 }}>
+                        {doneN} of {total} completed
+                      </span>
+                      <span style={{ color: pct>=80 ? C.green : pct>=50 ? C.amber : C.red,
+                        fontSize:14, fontWeight:700 }}>{pct}%</span>
+                    </div>
+                    <div style={{ height:6, background:C.surface, borderRadius:3, overflow:"hidden" }}>
+                      <div style={{ width:`${pct}%`, height:"100%", borderRadius:3,
+                        background: pct>=80 ? C.green : pct>=50 ? C.amber : C.red }} />
+                    </div>
+                  </div>
+                </div>
+
+                {/* ── Two columns: completed / not submitted ── */}
+                <div className="tp-grid-2col" style={{ display:"grid",
+                  gridTemplateColumns:"1fr 1fr", gap:0 }}>
+
+                  {/* Completed */}
+                  <div style={{ borderRight:`1px solid ${C.border}` }}>
+                    <div style={{ padding:"10px 16px", background:`${C.green}0c`,
+                      borderBottom:`1px solid ${C.border}`, display:"flex",
+                      alignItems:"center", gap:7 }}>
+                      <UserCheck size={14} color={C.green} strokeWidth={2.2} />
+                      <span style={{ color:C.green, fontWeight:700, fontSize:14 }}>
+                        Completed ({completed.length})
+                      </span>
+                    </div>
+                    {visibleCompleted.length === 0 ? (
+                      <div style={{ padding:"20px 16px", color:C.txtMut, fontSize:14, textAlign:"center" }}>
+                        {completed.length === 0 ? "No one has submitted yet." : "No matches."}
+                      </div>
+                    ) : (
+                      visibleCompleted.map((u, i) => {
+                        const sub = bestByStudent.get(u.clientId)!;
+                        return (
+                          <div key={u.clientId} style={{ display:"flex", alignItems:"center",
+                            gap:10, padding:"9px 16px",
+                            background: i%2===0 ? "transparent" : `${C.surface}66`,
+                            borderBottom:`1px solid ${C.border}` }}>
+                            <Avatar name={u.fullName} size={28} />
+                            <div style={{ flex:1, minWidth:0 }}>
+                              <div style={{ color:C.txtPri, fontSize:15, whiteSpace:"nowrap",
+                                overflow:"hidden", textOverflow:"ellipsis" }}>{u.fullName}</div>
+                              <div style={{ color:C.txtMut, fontSize:12 }}>
+                                {u.regNumber ? `${u.regNumber} · ` : ""}
+                                {new Date(sub.submittedAt).toLocaleDateString()}
+                              </div>
+                            </div>
+                            <span style={{ color: sub.scorePct>=80 ? C.green : sub.scorePct>=60 ? C.amber : C.red,
+                              fontWeight:700, fontSize:14, fontFamily:"monospace" }}>
+                              {sub.scorePct}%
+                            </span>
+                            {resultBadge(sub.result, C)}
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+
+                  {/* Not submitted */}
+                  <div>
+                    <div style={{ padding:"10px 16px", background:`${C.red}0c`,
+                      borderBottom:`1px solid ${C.border}`, display:"flex",
+                      alignItems:"center", gap:7 }}>
+                      <UserX size={14} color={C.red} strokeWidth={2.2} />
+                      <span style={{ color:C.red, fontWeight:700, fontSize:14 }}>
+                        Not Submitted ({pending.length})
+                      </span>
+                    </div>
+                    {visiblePending.length === 0 ? (
+                      <div style={{ padding:"20px 16px", color:C.txtMut, fontSize:14, textAlign:"center" }}>
+                        {pending.length === 0 ? "Everyone has submitted 🎉" : "No matches."}
+                      </div>
+                    ) : (
+                      visiblePending.map((u, i) => (
+                        <div key={u.clientId} style={{ display:"flex", alignItems:"center",
+                          gap:10, padding:"9px 16px",
+                          background: i%2===0 ? "transparent" : `${C.surface}66`,
+                          borderBottom:`1px solid ${C.border}` }}>
+                          <Avatar name={u.fullName} size={28} />
+                          <div style={{ flex:1, minWidth:0 }}>
+                            <div style={{ color:C.txtPri, fontSize:15, whiteSpace:"nowrap",
+                              overflow:"hidden", textOverflow:"ellipsis" }}>{u.fullName}</div>
+                            {u.regNumber && <div style={{ color:C.txtMut, fontSize:12 }}>{u.regNumber}</div>}
+                          </div>
+                          <span style={{
+                            background: expired ? `${C.red}12` : `${C.amber}12`,
+                            border: `1px solid ${expired ? `${C.red}44` : `${C.amber}44`}`,
+                            color: expired ? C.red : C.amber,
+                            borderRadius:20, padding:"2px 10px", fontSize:13, fontWeight:700 }}>
+                            {expired ? "Missed" : "Pending"}
+                          </span>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
       )}
     </div>
   );
@@ -1960,8 +2230,8 @@ const SettingsPanel: React.FC = () => {
     <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center",
       padding:"14px 0", borderBottom:`1px solid ${C.border}`, gap:16 }}>
       <div>
-        <div style={{ color:C.txtPri, fontSize:13, fontWeight:600 }}>{label}</div>
-        {sub && <div style={{ color:C.txtMut, fontSize:12, marginTop:2 }}>{sub}</div>}
+        <div style={{ color:C.txtPri, fontSize:15, fontWeight:600 }}>{label}</div>
+        {sub && <div style={{ color:C.txtMut, fontSize:14, marginTop:2 }}>{sub}</div>}
       </div>
       {children}
     </div>
@@ -1970,8 +2240,9 @@ const SettingsPanel: React.FC = () => {
   const Block: React.FC<{ TitleIcon:LucideIcon; title:string; children:React.ReactNode }> =
     ({ TitleIcon, title, children }) => (
     <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:14,
-      padding:20, marginBottom:18, boxShadow:`0 1px 4px ${C.shadow}` }}>
-      <div style={{ color:C.txtPri, fontWeight:700, fontSize:14, marginBottom:4,
+      padding:20, boxShadow:`0 1px 4px ${C.shadow}`,
+      flex:"1 1 300px", minWidth:0, alignSelf:"stretch" }}>
+      <div style={{ color:C.txtPri, fontWeight:700, fontSize:16, marginBottom:4,
         display:"flex", alignItems:"center", gap:8 }}>
         <TitleIcon size={16} color={C.accent} strokeWidth={2} />{title}
       </div>
@@ -1982,22 +2253,25 @@ const SettingsPanel: React.FC = () => {
   const numInput = (val:number, set:(v:number)=>void) => (
     <input type="number" value={val} onChange={e => set(+e.target.value)}
       style={{ width:64, background:C.surface, border:`1px solid ${C.border2}`,
-        color:C.txtPri, borderRadius:7, padding:"6px 10px", fontSize:13, textAlign:"center" }} />
+        color:C.txtPri, borderRadius:7, padding:"6px 10px", fontSize:15, textAlign:"center" }} />
   );
 
   return (
-    <div style={{ maxWidth:700 }}>
+    <div style={{ maxWidth:1200 }}>
       <SectionHeading title="Settings" sub="Configure lab behaviour, grading, and class invitation codes." />
+
+      {/* Cards flow horizontally on laptop screens and wrap/stack on narrow screens */}
+      <div style={{ display:"flex", flexWrap:"wrap", gap:18, alignItems:"stretch", marginBottom:18 }}>
 
       {/* ── Class Invitation Codes ── */}
       <div style={{ background:C.card, border:`1px solid ${C.accent}44`, borderRadius:14,
-        padding:20, marginBottom:18, boxShadow:`0 1px 4px ${C.shadow}` }}>
+        padding:20, boxShadow:`0 1px 4px ${C.shadow}`, flex:"1 1 100%", minWidth:0 }}>
 
-        <div style={{ color:C.txtPri, fontWeight:700, fontSize:14, marginBottom:6,
+        <div style={{ color:C.txtPri, fontWeight:700, fontSize:16, marginBottom:6,
           display:"flex", alignItems:"center", gap:8 }}>
           <UserPlus size={16} color={C.accent} strokeWidth={2} /> Class Invitation Codes
         </div>
-        <p style={{ color:C.txtSec, fontSize:12, lineHeight:1.6, margin:"0 0 16px" }}>
+        <p style={{ color:C.txtSec, fontSize:14, lineHeight:1.6, margin:"0 0 16px" }}>
           Generate a code and share it with students. When they enter it on the lab page they will be
           assigned to your class and can then use your assignment codes.
         </p>
@@ -2010,7 +2284,7 @@ const SettingsPanel: React.FC = () => {
             display:"flex", alignItems:"center", gap:8,
             marginBottom: generateErr ? 8 : 16,
             background: generating ? C.surface : C.accent, color:"white", border:"none",
-            borderRadius:9, padding:"10px 18px", fontSize:13, fontWeight:700,
+            borderRadius:9, padding:"10px 18px", fontSize:15, fontWeight:700,
             cursor: generating ? "not-allowed" : "pointer",
           }}>
           <Key size={15} strokeWidth={2} />
@@ -2018,7 +2292,7 @@ const SettingsPanel: React.FC = () => {
         </button>
         {generateErr && (
           <div style={{ display:"flex", alignItems:"center", gap:6, marginBottom:16,
-            color:C.red, fontSize:12, fontWeight:600 }}>
+            color:C.red, fontSize:14, fontWeight:600 }}>
             <AlertCircle size={13} strokeWidth={2} /> {generateErr}
           </div>
         )}
@@ -2026,7 +2300,7 @@ const SettingsPanel: React.FC = () => {
         {/* Invite list */}
         {invites.length === 0 ? (
           <div style={{ background:C.surface, border:`2px dashed ${C.border2}`, borderRadius:10,
-            padding:"20px 16px", textAlign:"center", color:C.txtMut, fontSize:13 }}>
+            padding:"20px 16px", textAlign:"center", color:C.txtMut, fontSize:15 }}>
             <UserPlus size={24} style={{ marginBottom:8, opacity:0.3 }} />
             <div>No invitation codes yet. Generate one above and share it with your students.</div>
           </div>
@@ -2038,18 +2312,18 @@ const SettingsPanel: React.FC = () => {
                 display:"flex", alignItems:"center", gap:12, flexWrap:"wrap" }}>
 
                 {/* Token */}
-                <code style={{ flex:1, color:C.accent, fontWeight:800, fontSize:17,
+                <code style={{ flex:1, color:C.accent, fontWeight:800, fontSize:19,
                   letterSpacing:2, fontFamily:"monospace" }}>
                   {inv.token}
                 </code>
 
                 {/* Use count */}
-                <span style={{ color:C.txtMut, fontSize:11, whiteSpace:"nowrap" }}>
+                <span style={{ color:C.txtMut, fontSize:13, whiteSpace:"nowrap" }}>
                   {inv.useCount} student{inv.useCount !== 1 ? "s" : ""} joined
                 </span>
 
                 {/* Created date */}
-                <span style={{ color:C.txtMut, fontSize:11, whiteSpace:"nowrap" }}>
+                <span style={{ color:C.txtMut, fontSize:13, whiteSpace:"nowrap" }}>
                   {new Date(inv.createdAt ?? "").toLocaleDateString()}
                 </span>
 
@@ -2059,7 +2333,7 @@ const SettingsPanel: React.FC = () => {
                   border:`1px solid ${copiedInvite === inv.token ? C.green : C.border2}`,
                   color: copiedInvite === inv.token ? C.green : C.txtMut,
                   borderRadius:7, padding:"5px 10px", cursor:"pointer",
-                  display:"flex", alignItems:"center", gap:5, fontSize:12, fontWeight:600,
+                  display:"flex", alignItems:"center", gap:5, fontSize:14, fontWeight:600,
                 }}>
                   {copiedInvite === inv.token
                     ? <><CheckCircle size={12} strokeWidth={2.5} /> Copied</>
@@ -2079,7 +2353,7 @@ const SettingsPanel: React.FC = () => {
           </div>
         )}
 
-        <div style={{ color:C.txtMut, fontSize:11, marginTop:12, lineHeight:1.6 }}>
+        <div style={{ color:C.txtMut, fontSize:13, marginTop:12, lineHeight:1.6 }}>
           Students enter the code <strong style={{ color:C.txtSec }}>CLS-XXXXXX</strong> on the lab
           page code field. Once joined, they can access your assignment codes.
         </div>
@@ -2089,7 +2363,7 @@ const SettingsPanel: React.FC = () => {
         <Row label="Time Limit per Practical" sub="Students are auto-submitted when time expires">
           <div style={{ display:"flex", alignItems:"center", gap:8 }}>
             {numInput(timeLimit, setTimeLimit)}
-            <span style={{ color:C.txtMut, fontSize:12 }}>min</span>
+            <span style={{ color:C.txtMut, fontSize:14 }}>min</span>
           </div>
         </Row>
         <Row label="Maximum Attempts" sub="How many times a student may attempt each practical">
@@ -2104,7 +2378,7 @@ const SettingsPanel: React.FC = () => {
         <Row label="Passing Score" sub="Minimum score required to pass a practical">
           <div style={{ display:"flex", alignItems:"center", gap:8 }}>
             {numInput(passScore, setPassScore)}
-            <span style={{ color:C.txtMut, fontSize:12 }}>%</span>
+            <span style={{ color:C.txtMut, fontSize:14 }}>%</span>
           </div>
         </Row>
       </Block>
@@ -2118,16 +2392,18 @@ const SettingsPanel: React.FC = () => {
             value={teacherEmail}
             onChange={e => setTeacherEmail(e.target.value)}
             style={{ background:C.surface, border:`1px solid ${C.border2}`,
-              color:C.txtPri, borderRadius:8, padding:"7px 12px", fontSize:13,
+              color:C.txtPri, borderRadius:8, padding:"7px 12px", fontSize:15,
               width:220, outline:"none" }}
           />
         </Row>
       </Block>
 
+      </div>{/* end cards flex */}
+
       <div style={{ display:"flex", gap:10, alignItems:"center" }}>
         <Btn label="Save Changes" Icon={Save} onClick={save} />
         {saved && (
-          <span style={{ color:C.green, fontSize:13, fontWeight:600,
+          <span style={{ color:C.green, fontSize:15, fontWeight:600,
             display:"flex", alignItems:"center", gap:5 }}>
             <CheckCircle size={14} strokeWidth={2.5} /> Saved
           </span>
@@ -2144,6 +2420,7 @@ const SettingsPanel: React.FC = () => {
 const NAV: { id:Section; label:string; Icon:LucideIcon }[] = [
   { id:"dashboard",   label:"Dashboard",   Icon:LayoutDashboard },
   { id:"questions",   label:"Assignments", Icon:ClipboardList   },
+  { id:"tracking",    label:"Tracking",    Icon:ListChecks      },
   { id:"students",    label:"Students",    Icon:Users           },
   { id:"analytics",   label:"Analytics",   Icon:BarChart2       },
   { id:"submissions", label:"Submissions", Icon:ClipboardCheck  },
@@ -2152,7 +2429,7 @@ const NAV: { id:Section; label:string; Icon:LucideIcon }[] = [
 
 const LABELS: Record<Section,string> = {
   dashboard:"Dashboard", questions:"Assignments",
-  students:"Students", analytics:"Analytics",
+  tracking:"Tracking", students:"Students", analytics:"Analytics",
   submissions:"Submissions", settings:"Settings",
 };
 
@@ -2190,6 +2467,7 @@ const TeacherPanel: React.FC<Props> = ({ onBack }) => {
     switch (section) {
       case "dashboard":     return <Dashboard />;
       case "questions":     return <Questions />;
+      case "tracking":      return <AssignmentTracking />;
       case "students":      return <Students />;
       case "analytics":     return <Analytics />;
       case "submissions":   return <Submissions />;
@@ -2238,8 +2516,8 @@ const TeacherPanel: React.FC<Props> = ({ onBack }) => {
               <FlaskConical size={18} color="white" strokeWidth={2} />
             </div>
             <div style={{ flex:1, overflow:"hidden" }}>
-              <div style={{ color:C.txtPri, fontWeight:800, fontSize:13, whiteSpace:"nowrap" }}>VirtualLab</div>
-              <div style={{ color:C.txtMut, fontSize:10, whiteSpace:"nowrap" }}>Teacher Panel</div>
+              <div style={{ color:C.txtPri, fontWeight:800, fontSize:15, whiteSpace:"nowrap" }}>VirtualLab</div>
+              <div style={{ color:C.txtMut, fontSize:12, whiteSpace:"nowrap" }}>Teacher Panel</div>
             </div>
             <button onClick={() => setSbOpen(false)}
               style={{ background:"transparent", border:"none", color:C.txtMut,
@@ -2259,7 +2537,7 @@ const TeacherPanel: React.FC<Props> = ({ onBack }) => {
                   borderRadius:9, border:"none", cursor:"pointer", marginBottom:3,
                   background: active ? `${C.accent}20` : "transparent",
                   color: active ? C.accent : C.txtSec,
-                  fontWeight: active ? 700 : 500, fontSize:13,
+                  fontWeight: active ? 700 : 500, fontSize:15,
                   transition:"background .15s,color .15s",
                 }}>
                   <item.Icon size={17} strokeWidth={active ? 2.2 : 1.8} />
@@ -2282,7 +2560,7 @@ const TeacherPanel: React.FC<Props> = ({ onBack }) => {
               justifyContent: sbOpen ? "flex-start" : "center",
               gap:10, padding: sbOpen ? "11px 14px" : "11px 0",
               borderRadius:9, border:`1px solid ${C.red}33`, cursor:"pointer",
-              background:`${C.red}10`, color:C.red, fontSize:13, fontWeight:700,
+              background:`${C.red}10`, color:C.red, fontSize:15, fontWeight:700,
             }}
             onMouseEnter={e => (e.currentTarget.style.background = `${C.red}20`)}
             onMouseLeave={e => (e.currentTarget.style.background = `${C.red}10`)}
@@ -2309,17 +2587,17 @@ const TeacherPanel: React.FC<Props> = ({ onBack }) => {
                   cursor:"pointer", display:"flex", alignItems:"center", padding:4 }}>
                 <Menu size={20} strokeWidth={2} />
               </button>
-              <span style={{ color:C.txtMut, fontSize:12, display: isMobile ? "none" : undefined }}>
+              <span style={{ color:C.txtMut, fontSize:14, display: isMobile ? "none" : undefined }}>
                 Teacher Panel
               </span>
-              {!isMobile && <span style={{ color:C.txtMut, fontSize:14 }}>›</span>}
-              <span style={{ color:C.txtPri, fontWeight:700, fontSize:14 }}>{LABELS[section]}</span>
+              {!isMobile && <span style={{ color:C.txtMut, fontSize:16 }}>›</span>}
+              <span style={{ color:C.txtPri, fontWeight:700, fontSize:16 }}>{LABELS[section]}</span>
             </div>
 
             <div style={{ display:"flex", alignItems:"center", gap:8 }}>
               {!isMobile && (
                 <div style={{ background:`${C.green}15`, border:`1px solid ${C.green}40`,
-                  borderRadius:20, padding:"3px 12px", color:C.green, fontSize:11,
+                  borderRadius:20, padding:"3px 12px", color:C.green, fontSize:13,
                   fontWeight:700, display:"flex", alignItems:"center", gap:5 }}>
                   <Activity size={10} strokeWidth={2.5} /> Live
                 </div>

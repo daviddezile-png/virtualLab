@@ -6,6 +6,7 @@ import EvaluationPanel from "./EvaluationPanel";
 import { getInitialApparatus, getInitialApparatusColdCream, Apparatus } from "./apparatusData";
 import { Assignment, BASE_RECIPES } from "../utils/assignmentStore";
 import { logLabMilestone } from "../utils/auditStore";
+import { fetchAmbientWeather, DEFAULT_AMBIENT, AmbientWeather } from "../simulation/weather";
 
 // Maps source bottle ID → composition key
 const BOTTLE_INGREDIENT: Record<string, string> = {
@@ -95,6 +96,11 @@ const drawBeaker = (
   solidStearicGrams: number = 0,
   tiltAngle: number = 0,
   emulsificationProgress: number = 0,
+  // Side the pouring spout/lip is drawn on. While pouring we move it to the
+  // leading (low) edge so the liquid is seen leaving through the spout tip.
+  spoutSide: "left" | "right" = "right",
+  // 0..1 quality of the finished emulsion — 1 = clean white cream, lower = dull.
+  creamQuality: number = 1,
 ) => {
   ctx.save();
   if (tiltAngle !== 0) {
@@ -107,9 +113,24 @@ const drawBeaker = (
   const bottomPadding = h * 0.15;
   const solidFloorY = y + h - bottomPadding; // bottom of usable area
 
+  // ── Combined apparent fill level ──
+  // Any solid stearic acid sitting in the beaker displaces/adds to the visible
+  // level, so the surface rises above the solid when liquid is present. Without
+  // this, adding water to solid stearic acid showed no level change because the
+  // thin liquid layer was drawn behind the taller (opaque) solid chunk.
+  const solidVolMl     = solidStearicGrams > 0 ? solidStearicGrams / 0.85 : 0; // ≈ mL of solid
+  const hasLiquid      = currentVol > 0;
+  const effVol         = Math.min(maxVol, currentVol + (hasLiquid ? solidVolMl : 0));
+  const fillPercentage = hasLiquid ? Math.min(effVol / maxVol, 1) : 0;
+  const liquidHeight   = usableHeight * fillPercentage;
+  const liquidY        = solidFloorY - liquidHeight;
+
   // 0. Draw solid stearic acid chunks (before liquid so liquid renders on top)
   if (solidStearicGrams > 0) {
-    const chunkH = Math.min(h * 0.28, 4 + solidStearicGrams * 0.6);
+    let chunkH = Math.min(h * 0.28, 4 + solidStearicGrams * 0.6);
+    // Keep the solid below the liquid surface when liquid is present, so the
+    // water level visibly rises above it (the solid shows through, submerged).
+    if (hasLiquid) chunkH = Math.min(chunkH, Math.max(2, liquidHeight - 3));
     const chunkY = solidFloorY - chunkH;
 
     ctx.save();
@@ -143,10 +164,7 @@ const drawBeaker = (
   }
 
   // 1. Draw Liquid First (so glass is on top)
-  if (currentVol > 0) {
-    const fillPercentage = Math.min(currentVol / maxVol, 1);
-    const liquidHeight = usableHeight * fillPercentage;
-    const liquidY = y + h - bottomPadding - liquidHeight;
+  if (hasLiquid) {
     const [lr, lg, lb, la] = parseRgba(liquidColor);
 
     // Depth gradient — lighter at surface, richer/deeper at bottom
@@ -267,11 +285,11 @@ const drawBeaker = (
   }
 
   // 2. Cream formation overlay
-  if (emulsificationProgress > 0 && currentVol > 0) {
+  if (emulsificationProgress > 0 && hasLiquid) {
     const tE = Math.max(0, (emulsificationProgress - 20) / 80); // ease-in after 20%
 
-    const fillH2 = usableHeight * Math.min(currentVol / maxVol, 1);
-    const liqY2  = y + h - bottomPadding - fillH2;
+    const fillH2 = liquidHeight;
+    const liqY2  = liquidY;
 
     ctx.save();
     ctx.beginPath();
@@ -279,16 +297,21 @@ const drawBeaker = (
     ctx.clip();
 
     if (emulsificationProgress >= 100) {
-      // ── FULLY FORMED — opaque cream fill ──
+      // ── FULLY FORMED — cream fill, tinted by quality ──
+      // Good batch → clean glossy white; poor batch → dull greyish-tan and
+      // less opaque, so the colour honestly reflects a badly-made cream.
+      const q = Math.max(0, Math.min(1, creamQuality));
+      const mix = (good: number, poor: number) => Math.round(poor + (good - poor) * q);
+      const op  = (good: number, poor: number) => (poor + (good - poor) * q).toFixed(2);
       const cGrad = ctx.createLinearGradient(x, liqY2, x, y + h - radius);
-      cGrad.addColorStop(0, "rgba(255, 253, 250, 0.97)");
-      cGrad.addColorStop(0.3, "rgba(252, 249, 244, 0.95)");
-      cGrad.addColorStop(1, "rgba(245, 240, 232, 0.98)");
+      cGrad.addColorStop(0,   `rgba(${mix(255,198)}, ${mix(253,188)}, ${mix(250,168)}, ${op(0.97,0.80)})`);
+      cGrad.addColorStop(0.3, `rgba(${mix(252,192)}, ${mix(249,182)}, ${mix(244,160)}, ${op(0.95,0.78)})`);
+      cGrad.addColorStop(1,   `rgba(${mix(245,184)}, ${mix(240,174)}, ${mix(232,150)}, ${op(0.98,0.82)})`);
       ctx.fillStyle = cGrad;
       ctx.fillRect(x + 2, liqY2, w - 4, y + h - radius - liqY2);
 
-      // Glossy surface sheen
-      ctx.fillStyle = "rgba(255, 255, 255, 0.60)";
+      // Glossy surface sheen — only a well-made cream is glossy
+      ctx.fillStyle = `rgba(255, 255, 255, ${(0.18 + 0.42 * q).toFixed(2)})`;
       ctx.beginPath();
       ctx.ellipse(x + w / 2, liqY2 + 4, (w - 10) / 2, 5, 0, 0, Math.PI * 2);
       ctx.fill();
@@ -364,15 +387,22 @@ const drawBeaker = (
   ctx.lineTo(x + w - 1, y + 2.5);
   ctx.stroke();
 
-  // Pouring spout — small triangular lip at the top-right, as on a real beaker
+  // Pouring spout — small curved lip, drawn on `spoutSide`. A real beaker pours
+  // from this tip, so during a pour it sits on the leading (low) edge.
   ctx.fillStyle = glassGradient;
   ctx.strokeStyle = "rgba(255, 255, 255, 0.9)";
   ctx.lineWidth = 1.6;
   ctx.lineJoin = "round";
   ctx.beginPath();
-  ctx.moveTo(x + w - 2, y + 1);
-  ctx.quadraticCurveTo(x + w + 7, y - 3, x + w + 8, y + 4);
-  ctx.quadraticCurveTo(x + w + 4, y + 4, x + w - 2, y + 7);
+  if (spoutSide === "left") {
+    ctx.moveTo(x + 2, y + 1);
+    ctx.quadraticCurveTo(x - 7, y - 3, x - 8, y + 4);
+    ctx.quadraticCurveTo(x - 4, y + 4, x + 2, y + 7);
+  } else {
+    ctx.moveTo(x + w - 2, y + 1);
+    ctx.quadraticCurveTo(x + w + 7, y - 3, x + w + 8, y + 4);
+    ctx.quadraticCurveTo(x + w + 4, y + 4, x + w - 2, y + 7);
+  }
   ctx.closePath();
   ctx.fill();
   ctx.stroke();
@@ -565,6 +595,8 @@ const drawBottle = (
   liquidColor: string = "rgba(56, 189, 248, 0.5)",
   lidColor: string = "#0ea5e9",
   isSolid: boolean = false,
+  isPouring: boolean = false,
+  frame: number = 0,
 ) => {
   ctx.save();
   if (tiltAngle !== 0) {
@@ -661,6 +693,54 @@ const drawBottle = (
     ctx.restore();
   }
 
+  // 1b. Internal flow while pouring — liquid is seen rising from the bottom of
+  // the body, funnelling up through the shoulders & neck, and out the mouth
+  // (drawn in the bottle's own frame so it follows the tilt toward the target).
+  if (isPouring && !isSolid && currentVol > 0) {
+    ctx.save();
+    silhouette();
+    ctx.clip();
+    const [lr, lg, lb, la] = parseRgba(liquidColor);
+    const fc = (al: number) => `rgba(${lr},${lg},${lb},${al.toFixed(3)})`;
+
+    // Funnel-shaped flow channel: wide at the body bottom → narrow at the mouth
+    const chanTop = neckTopY;            // mouth
+    const chanBot = bodyBotY;            // bottom of the body
+    const botHalf = w * 0.34;
+    const topHalf = neckW * 0.45;
+    const chGrad = ctx.createLinearGradient(0, chanBot, 0, chanTop);
+    chGrad.addColorStop(0, fc(Math.min(1, la * 0.7)));
+    chGrad.addColorStop(1, fc(la * 0.38));
+    ctx.fillStyle = chGrad;
+    ctx.beginPath();
+    ctx.moveTo(cx - botHalf, chanBot);
+    ctx.lineTo(cx - topHalf, chanTop);
+    ctx.lineTo(cx + topHalf, chanTop);
+    ctx.lineTo(cx + botHalf, chanBot);
+    ctx.closePath();
+    ctx.fill();
+
+    // Rising blobs travelling bottom → mouth to show the direction of flow
+    const nBlobs = 8;
+    for (let i = 0; i < nBlobs; i++) {
+      const t   = (((i / nBlobs) + frame * 0.03) % 1);   // 0 bottom → 1 mouth
+      const by  = chanBot - t * (chanBot - chanTop);
+      const half = botHalf + (topHalf - botHalf) * t;     // channel narrows upward
+      const bx  = cx + Math.sin(t * 6.5 + i * 1.4) * half * 0.55;
+      const br  = 1.5 + Math.sin(t * Math.PI) * 1.3;
+      const ba  = 0.30 + 0.45 * Math.sin(t * Math.PI);
+      ctx.fillStyle = fc(ba);
+      ctx.beginPath();
+      ctx.arc(bx, by, br, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "rgba(255,255,255,0.4)";
+      ctx.beginPath();
+      ctx.arc(bx - br * 0.3, by - br * 0.3, br * 0.35, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
   // 2. Glass body
   const glassGrad = ctx.createLinearGradient(x, y, x + w, y);
   glassGrad.addColorStop(0,   isWater ? "rgba(220,238,252,0.30)" : "rgba(248,250,252,0.22)");
@@ -745,11 +825,14 @@ const DENSITY: Record<string, number> = {
   koh: 1.1,
 };
 
-const calcBeakerWeight = (a: { data?: { composition?: Record<string,number>; solidStearicGrams?: number } }): number => {
+const calcBeakerWeight = (a: { data?: { composition?: Record<string,number>; solidStearicGrams?: number; solidBeeswaxGrams?: number; emptyWeight?: number } }): number => {
   const comp = (a.data?.composition ?? {}) as Record<string, number>;
-  let w = 0;
+  // Start from the tare — the empty glass vessel itself — so the balance reports
+  // the REAL weight the student would read on a physical scale (beaker + contents).
+  let w = a.data?.emptyWeight ?? 0;
   for (const [k, v] of Object.entries(comp)) w += v * (DENSITY[k] ?? 1.0);
   w += a.data?.solidStearicGrams ?? 0;
+  w += a.data?.solidBeeswaxGrams ?? 0;
   return Math.round(w * 10) / 10;
 };
 
@@ -1925,6 +2008,21 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
   const [showScoopModal, setShowScoopModal] = useState<{ spatulaId: string; sourceId: string; maxGrams: number } | null>(null);
   const [selectedScoopGrams, setSelectedScoopGrams] = useState(5);
 
+  // ── Ambient (room) temperature, sourced from real-world weather ─────────────
+  // Drives realistic Newton's-law cooling: a hot beaker taken off the plate
+  // cools towards this value, and the size of the (T − roomTemp) gap sets how
+  // fast it falls.  Fetched once on mount; falls back to 25 °C if offline.
+  const [ambient, setAmbient] = useState<AmbientWeather>(DEFAULT_AMBIENT);
+  const roomTemp = ambient.roomTemp;
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchAmbientWeather().then((w) => {
+      if (!cancelled) setAmbient(w);
+    });
+    return () => { cancelled = true; };
+  }, []);
+
   const drawApparatus = useCallback(
     (ctx: CanvasRenderingContext2D) => {
       const benchTopY = TABLE_Y + LIP_HEIGHT;
@@ -2110,7 +2208,7 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
       // These show WHERE instruments belong when not in use.
       // Holders always fixed at original shelf positions
       const origHolderList = initialApparatusFor();
-      const HOLDER_IDS = ["thermometer-digital","glass-stirring-rod","spatula","ph-meter","viscosity-gauge"];
+      const HOLDER_IDS = ["thermometer-digital","thermometer-digital-2","glass-stirring-rod","spatula","ph-meter","viscosity-gauge"];
       origHolderList.forEach((item) => {
         if (!HOLDER_IDS.includes(item.id)) return;
         const cx  = item.x + item.width / 2;
@@ -2156,9 +2254,15 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
           if (kid.id !== dragId && !seen.has(kid.id)) { seen.add(kid.id); renderOrder.push(kid); }
         });
       };
+      // A container that is actively pouring is deferred so it draws AFTER its
+      // target — its liquid stream then lands on top of the target beaker rather
+      // than being hidden behind the target's glass.
+      const isPourSrc = (a: Apparatus) =>
+        !!(a.data?.isPouring && a.data?.pouringTargetId) && a.id !== dragId;
       apparatus.forEach((a) => {
         if (a.id === dragId) return;          // drawn last, on top
         if (a.data?.containedInId) return;     // drawn with its container
+        if (isPourSrc(a)) return;              // deferred → drawn after its target
         pushItem(a);
       });
       // Safety: any orphan whose container no longer exists still gets drawn.
@@ -2166,10 +2270,13 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
       // dragged container's contents stay layered on top of it, not behind.)
       apparatus.forEach((a) => {
         if (a.id === dragId || seen.has(a.id)) return;
+        if (isPourSrc(a)) return;              // still deferred (handled below)
         const pid = a.data?.containedInId;
         if (pid && apparatus.some((p) => p.id === pid)) return;
         pushItem(a);
       });
+      // Pouring sources (and their contents) draw above their target.
+      apparatus.forEach((a) => { if (isPourSrc(a)) pushItem(a); });
       // Dragged item (and its contents, if it is a container) on top
       if (dragId) { const d = apparatus.find((a) => a.id === dragId); if (d) pushItem(d); }
 
@@ -2284,7 +2391,11 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
           const currentVol = item.data?.currentVolume || 0;
           const liquidColor =
             item.data?.liquidColor || "rgba(56, 189, 248, 0.6)";
-          drawBeaker(ctx, x, y, width, height, maxVol, currentVol, liquidColor, item.data?.liquidTemperature ?? 25, hotPlateFrame, item.data?.isStirring ?? false, (item.data?.solidStearicGrams ?? 0) + (item.data?.solidBeeswaxGrams ?? 0), tiltAngle, item.data?.emulsificationProgress ?? 0);
+          // While pouring, the spout sits on the leading (low) edge: tilting to
+          // the right (tiltAngle < 0) drops the LEFT rim, so the spout goes left.
+          const spoutSide: "left" | "right" =
+            item.data?.isPouring && tiltAngle !== 0 ? (tiltAngle < 0 ? "left" : "right") : "right";
+          drawBeaker(ctx, x, y, width, height, maxVol, currentVol, liquidColor, item.data?.liquidTemperature ?? 25, hotPlateFrame, item.data?.isStirring ?? false, (item.data?.solidStearicGrams ?? 0) + (item.data?.solidBeeswaxGrams ?? 0), tiltAngle, item.data?.emulsificationProgress ?? 0, spoutSide, item.data?.creamQuality ?? 1);
         } else if (type === "cylinder") {
           const maxVol = item.data?.maxVolume || 100;
           const currentVol = item.data?.currentVolume || 0;
@@ -2297,10 +2408,14 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
           const liquidColor =
             item.data?.liquidColor || "rgba(56, 189, 248, 0.5)";
           const lidColor = item.data?.lidColor || "#0ea5e9";
+          // Drive the internal-flow animation from pour progress (which advances
+          // every step) so the rising blobs move even when the hot plate is off.
+          const bottleFrame = hotPlateFrame + (item.data?.pouringProgress ?? 0) * 220;
           drawBottle(
             ctx, x, y, width, height, maxVol, name,
             item.data?.hasLid ?? false, currentVol, tiltAngle, liquidColor, lidColor,
             item.data?.isSolid ?? false,
+            item.data?.isPouring ?? false, bottleFrame,
           );
         } else if (type === "thermometer") {
           // Show display only when probe tip is inside a beaker
@@ -2343,7 +2458,9 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
           // incline.  Stay upright while the blade is inside a container so it
           // never pokes through the wall.
           const carrying  = load > 0 && !overSolid && !overBeaker;
-          const tiltAngle = carrying ? 0.2 : 0;
+          // Hold the blade well inclined (≥80°) while carrying so the scoop is
+          // tipped up and the solid is cradled against the blade, not spilled.
+          const tiltAngle = carrying ? (80 * Math.PI) / 180 : 0;
           drawSpatula(ctx, x, y, width, height, load, action, tiltAngle);
         } else if (type === "weightbalance") {
           // Platform top matches drawWeightBalance: y + h*0.60 - 8
@@ -2390,131 +2507,137 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
             const [sr, sg, sb] = parseRgba(sourceColor);
             const sc = (a: number) => `rgba(${sr}, ${sg}, ${sb}, ${a.toFixed(3)})`;
 
-            // startX/Y = rotated spout exit (already computed above)
-            const startX = streamExitX;
-            const startY = streamExitY;
-            // endX/Y = the lip / "head" of the target's mouth nearest the source,
-            // so the liquid runs in at the edge of the opening (not the centre).
+            // startX/Y = anchored INSIDE the liquid body (not at the bare rim),
+            // so the flow is seen leaving the MAIN liquid. We step from the spout
+            // lip back into the container interior — which, once the source is
+            // tilted, lies along its rotated "downward" axis.
+            const bodyDirX  = -Math.sin(tiltAngle);
+            const bodyDirY  =  Math.cos(tiltAngle);
+            const intoLiquid = Math.min(width, height) * 0.30;
+            const startX = streamExitX + bodyDirX * intoLiquid;
+            const startY = streamExitY + bodyDirY * intoLiquid;
+            // endX/Y = the point INSIDE the target where the stream lands. It
+            // enters at the lip nearest the source, then runs continuously down
+            // to the rising liquid surface — so the flow looks like one unbroken
+            // column from the source spout to the bottom of the target, instead
+            // of stopping (discontinuously) at the mouth.
             const pourFromLeft = streamExitX <= target.x + target.width / 2;
             const endX = pourFromLeft
-              ? target.x + target.width * 0.22
-              : target.x + target.width * 0.78;
-            const endY = target.y + 3;
+              ? target.x + target.width * 0.30
+              : target.x + target.width * 0.70;
+            // Liquid surface inside the target (matches drawBeaker / drawCylinder
+            // geometry) so the stream meets the liquid as the target fills.
+            const tIsCyl     = target.type === "cylinder";
+            const tUsableH   = target.height * (tIsCyl ? 0.8 : 0.7);
+            const tBottomPad = target.height * (tIsCyl ? 0.1 : 0.15);
+            const tFloorY    = target.y + target.height - tBottomPad;
+            const tMaxVol    = target.data?.maxVolume || 250;
+            const tCurVol    = target.data?.currentVolume || 0;
+            const tSurfaceY  = tFloorY - tUsableH * Math.min(tCurVol / tMaxVol, 1);
+            // Clamp inside the beaker: below the rim, above the floor.
+            const endY = Math.max(target.y + 8, Math.min(tFloorY - 2, tSurfaceY - 2));
             const progress = item.data?.pouringProgress || 0;
 
-            // Control point: stream exits the spout roughly vertically then
-            // curves smoothly to the target centre — creates the natural arc
-            // seen when pouring a liquid from a tilted container.
-            const sDy = endY - startY;
-            const ctrlX = startX + (endX - startX) * 0.55;
-            const ctrlY = startY + sDy * 0.22;
+            // Control point sits AT the spout tip, so the stream arcs out of the
+            // liquid, through the lip (the real pour point), and down to target.
+            const ctrlX = streamExitX;
+            const ctrlY = streamExitY + 2;
 
-            const arc = () => {
-              ctx.beginPath();
-              ctx.moveTo(startX, startY);
-              ctx.quadraticCurveTo(ctrlX, ctrlY, endX, endY);
-              ctx.stroke();
+            // ── Continuous gravity stream ─────────────────────────────────────
+            // A real pour is one unbroken column of liquid that leaves the
+            // spout and FALLS, getting thinner as it speeds up (the same volume
+            // per second is stretched over a faster-moving column → narrower).
+            // We sample the spout→surface bezier and build a tapering filled
+            // ribbon so the liquid visibly runs from the source straight onto
+            // the surface of the liquid already in the target.
+            const bezPt = (t: number): [number, number] => [
+              (1-t)*(1-t)*startX + 2*(1-t)*t*ctrlX + t*t*endX,
+              (1-t)*(1-t)*startY + 2*(1-t)*t*ctrlY + t*t*endY,
+            ];
+            const bezPerp = (t: number): [number, number] => {
+              const tx = 2*(1-t)*(ctrlX-startX) + 2*t*(endX-ctrlX);
+              const ty = 2*(1-t)*(ctrlY-startY) + 2*t*(endY-ctrlY);
+              const tl = Math.hypot(tx, ty) || 1;
+              return [-ty / tl, tx / tl];
+            };
+            // Half-width profile along the column: full where it leaves the
+            // body, a slight bulge at the spout lip, then steadily thinning as
+            // it falls to the surface. Tiny animated shimmer keeps it alive.
+            const SEG = 28;
+            const halfW = (t: number) => {
+              const taper = 3.6 * (1 - t) + 1.3;                 // 4.9 → 1.3 px
+              const lip   = Math.exp(-Math.pow((t - 0.5) / 0.16, 2)) * 1.1; // bulge at spout
+              const ripple = Math.sin(t * 22 - progress * Math.PI * 8) * 0.35 * t;
+              return taper + lip + ripple;
             };
 
-            // Layer 1 — wide soft glow
-            ctx.strokeStyle = sc(0.25);
-            ctx.lineWidth = 18;
-            ctx.lineCap = "round";
-            ctx.lineJoin = "round";
-            arc();
-
-            // Layer 2 — mid translucent body
-            ctx.strokeStyle = sc(0.62);
-            ctx.lineWidth = 9;
-            arc();
-
-            // Layer 3 — opaque core
-            ctx.strokeStyle = sc(0.95);
-            ctx.lineWidth = 4;
-            arc();
-
-            // Layer 4 — specular gleam on one side
-            ctx.strokeStyle = "rgba(255, 255, 255, 0.45)";
-            ctx.lineWidth = 1.5;
-            ctx.beginPath();
-            ctx.moveTo(startX - 1, startY);
-            ctx.quadraticCurveTo(ctrlX - 1, ctrlY, endX - 1, endY);
-            ctx.stroke();
-
-            // Animated blobs that travel from spout to target
-            for (let i = 0; i < 14; i++) {
-              const t = ((i / 14) + progress * 1.4) % 1;
-              const bx = (1-t)*(1-t)*startX + 2*(1-t)*t*ctrlX + t*t*endX;
-              const by = (1-t)*(1-t)*startY + 2*(1-t)*t*ctrlY + t*t*endY;
-
-              // Perpendicular wobble
-              const tx2 = 2*(1-t)*(ctrlX-startX) + 2*t*(endX-ctrlX);
-              const ty2 = 2*(1-t)*(ctrlY-startY) + 2*t*(endY-ctrlY);
-              const tl  = Math.sqrt(tx2*tx2 + ty2*ty2) || 1;
-              const px  = -ty2 / tl;
-              const py  =  tx2 / tl;
-              const wob = Math.sin(t * 10 + progress * Math.PI * 6) * 1.8;
-
-              const br = 2.5 + Math.sin(t * Math.PI) * 1.5;
-              const ba = 0.5  + Math.sin(t * Math.PI) * 0.35;
-
-              ctx.fillStyle = sc(ba);
+            const buildRibbon = (scale: number, dx: number) => {
               ctx.beginPath();
-              ctx.arc(bx + px*wob, by + py*wob, br, 0, Math.PI * 2);
-              ctx.fill();
+              for (let i = 0; i <= SEG; i++) {           // left edge, top → bottom
+                const t = i / SEG;
+                const [bx, by] = bezPt(t);
+                const [px, py] = bezPerp(t);
+                const hw = halfW(t) * scale;
+                if (i === 0) ctx.moveTo(bx + dx - px*hw, by - py*hw);
+                else         ctx.lineTo(bx + dx - px*hw, by - py*hw);
+              }
+              for (let i = SEG; i >= 0; i--) {           // right edge, bottom → top
+                const t = i / SEG;
+                const [bx, by] = bezPt(t);
+                const [px, py] = bezPerp(t);
+                const hw = halfW(t) * scale;
+                ctx.lineTo(bx + dx + px*hw, by + py*hw);
+              }
+              ctx.closePath();
+            };
 
-              // Tiny specular dot per blob
-              ctx.fillStyle = "rgba(255, 255, 255, 0.3)";
-              ctx.beginPath();
-              ctx.arc(bx + px*wob - br*0.3, by + py*wob - br*0.3, br*0.38, 0, Math.PI * 2);
-              ctx.fill();
-            }
-
-            // ── Impact / splash at target opening ──
-            const splashP = Math.sin(progress * Math.PI);
-
-            // Expanding ripple rings
-            for (let ring = 0; ring < 3; ring++) {
-              const rt = ((progress * 3.5 + ring * 0.33) % 1);
-              ctx.strokeStyle = sc((1 - rt) * 0.45);
-              ctx.lineWidth = 1.5;
-              ctx.beginPath();
-              ctx.arc(endX, endY, rt * 22 + 2, 0, Math.PI * 2);
-              ctx.stroke();
-            }
-
-            // Radial splash pool
-            const poolR = splashP * 14 + 4;
-            const pg = ctx.createRadialGradient(endX, endY, 0, endX, endY, poolR);
-            pg.addColorStop(0, sc(0.9));
-            pg.addColorStop(1, sc(0));
-            ctx.fillStyle = pg;
-            ctx.beginPath();
-            ctx.arc(endX, endY, poolR, 0, Math.PI * 2);
+            // Soft outer glow
+            ctx.fillStyle = sc(0.22);
+            buildRibbon(2.2, 0);
+            ctx.fill();
+            // Translucent body
+            ctx.fillStyle = sc(0.6);
+            buildRibbon(1.35, 0);
+            ctx.fill();
+            // Opaque core
+            ctx.fillStyle = sc(0.95);
+            buildRibbon(1.0, 0);
+            ctx.fill();
+            // Specular highlight running down one side of the column
+            ctx.fillStyle = "rgba(255,255,255,0.4)";
+            buildRibbon(0.3, -1.1);
             ctx.fill();
 
-            // Scattered micro-droplets
-            for (let d = 0; d < 8; d++) {
-              const ang = (d / 8) * Math.PI * 2 + progress * 2.5;
-              const dist = splashP * 16 + 2;
-              ctx.fillStyle = sc(splashP * 0.65);
+            // ── Gentle surface contact where the stream meets the liquid ──────
+            // No violent splash — just a small bright dimple and a couple of
+            // soft ripple rings spreading on the surface, as in a real pour.
+            const splashP = 0.55 + 0.45 * Math.sin(progress * Math.PI * 2);
+            for (let ring = 0; ring < 2; ring++) {
+              const rt = ((progress * 2.2 + ring * 0.5) % 1);
+              ctx.strokeStyle = sc((1 - rt) * 0.4);
+              ctx.lineWidth = 1.2;
               ctx.beginPath();
-              ctx.arc(
-                endX + Math.cos(ang) * dist,
-                endY + Math.sin(ang) * dist * 0.5,
-                1.5, 0, Math.PI * 2,
-              );
-              ctx.fill();
+              ctx.ellipse(endX, endY + 1, rt * 13 + 2, (rt * 13 + 2) * 0.32, 0, 0, Math.PI * 2);
+              ctx.stroke();
             }
+            // Bright contact dimple at the point of entry
+            const dimpleR = 3 + splashP * 2.5;
+            const dg = ctx.createRadialGradient(endX, endY, 0, endX, endY, dimpleR);
+            dg.addColorStop(0, sc(0.95));
+            dg.addColorStop(1, sc(0));
+            ctx.fillStyle = dg;
+            ctx.beginPath();
+            ctx.ellipse(endX, endY, dimpleR, dimpleR * 0.6, 0, 0, Math.PI * 2);
+            ctx.fill();
 
-            // Bright glow dot at spout — confirms where the pour starts
+            // Bright glow dot at the spout tip — the visible pour point (lip)
             ctx.fillStyle = sc(0.92);
             ctx.beginPath();
-            ctx.arc(startX, startY, 5, 0, Math.PI * 2);
+            ctx.arc(streamExitX, streamExitY, 5, 0, Math.PI * 2);
             ctx.fill();
             ctx.fillStyle = "rgba(255, 255, 255, 0.65)";
             ctx.beginPath();
-            ctx.arc(startX - 1.5, startY - 1.5, 2.2, 0, Math.PI * 2);
+            ctx.arc(streamExitX - 1.5, streamExitY - 1.5, 2.2, 0, Math.PI * 2);
             ctx.fill();
 
             ctx.restore();
@@ -2623,7 +2746,8 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
                 };
               }
               // Within ±0.3°C of target → hold steady
-            // Temperature stays constant when not on hot plate — only ice bucket cools
+            // Off the plate, the ambient-cooling loop relaxes the sample toward
+            // room temperature (Newton's law); the ice bucket cools it further.
             }
           }
           return a;
@@ -2691,6 +2815,65 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
     return () => clearInterval(interval);
   }, []);
 
+  // Ambient cooling — Newton's law of cooling toward the live room temperature.
+  //
+  //     T(t+dt) = T_room + (T − T_room) · e^(−dt/τ)
+  //
+  // Applies to any beaker/cylinder that is NOT actively heated on the hot plate
+  // and NOT sitting in the ice bucket.  Still air cools a beaker slowly, so the
+  // time constant τ is deliberately large — and even larger once the sample
+  // drops near body/room warmth (≤50 °C), where natural convection almost
+  // stalls.  To pull a hot melt down quickly the student must use the ice bath.
+  //   • above 50 °C → τ ≈ 150 s  (gentle, realistic still-air cooling)
+  //   • at/below 50 °C → τ ≈ 600 s (crawls toward room temp)
+  // Because the sample relaxes toward roomTemp (from real weather), a cooler
+  // room cools samples a little faster, a warmer room slower.  A sample below
+  // room temperature (just lifted from the ice bath) warms back up the same way.
+  useEffect(() => {
+    const TICK_MS  = 150;
+    const TAU_HOT  = 150;   // s, while still hot (> 50 °C)
+    const TAU_COOL = 600;   // s, once near room warmth (≤ 50 °C)
+    const factorHot  = Math.exp(-(TICK_MS / 1000) / TAU_HOT);
+    const factorCool = Math.exp(-(TICK_MS / 1000) / TAU_COOL);
+    const interval = setInterval(() => {
+      setApparatus((prev) => {
+        const hp     = prev.find((a) => a.type === "hotplate");
+        const bucket = prev.find((a) => a.type === "icebucket");
+        let changed = false;
+
+        const next = prev.map((a) => {
+          if (a.type !== "beaker" && a.type !== "cylinder") return a;
+
+          const cx  = a.x + a.width / 2;
+          const bot = a.y + a.height;
+
+          // Skip while actively heated on a switched-on hot plate
+          if (hp && hp.data?.isOn) {
+            const onHP = Math.abs(bot - hp.y) < 8 && cx >= hp.x && cx <= hp.x + hp.width;
+            if (onHP) return a;
+          }
+          // Skip while in the ice bucket (handled by the ice-cooling loop)
+          if (bucket) {
+            const inBucket =
+              cx  >= bucket.x + 10 && cx  <= bucket.x + bucket.width - 10 &&
+              bot >= bucket.y + 20  && bot <= bucket.y + bucket.height + 10;
+            if (inBucket) return a;
+          }
+
+          const curT = a.data?.liquidTemperature ?? roomTemp;
+          if (Math.abs(curT - roomTemp) < 0.15) return a;   // already at room temp
+          const factor = curT > 50 ? factorHot : factorCool;
+          const newT = roomTemp + (curT - roomTemp) * factor;
+          changed = true;
+          return { ...a, data: { ...a.data, liquidTemperature: newT } };
+        });
+
+        return changed ? next : prev;
+      });
+    }, TICK_MS);
+    return () => clearInterval(interval);
+  }, [roomTemp]);
+
   // Stirring timer — count total seconds stirred in any beaker
   useEffect(() => {
     const interval = setInterval(() => {
@@ -2723,12 +2906,36 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
           const rate    = temp >= 60 ? 3.5 : 1.5; // faster at correct temperature
           const newProg = Math.min(100, progress + rate);
 
-          // Interpolate liquidColor from current toward cream white
-          const tC = Math.max(0, (newProg - 20) / 80);
-          const r  = Math.round(210 + 45 * tC);
-          const g  = Math.round(195 + 57 * tC);
-          const b  = Math.round(170 + 78 * tC);
-          const al = (0.62 + 0.33 * tC).toFixed(2);
+          // ── Product quality (0..1) — drives the FINAL cream colour ──
+          // A well-made batch (correct ratios + mixed warm) becomes a clean
+          // white vanishing-cream colour; a poorly-made one stays dull/off-white
+          // so the visual result honestly reflects what was produced.
+          const total = Object.values(comp).reduce((s, v) => s + (v || 0), 0) || 1;
+          const band  = (v: number, lo: number, hi: number) =>
+            v >= lo && v <= hi ? 1 : v >= lo - 5 && v <= hi + 5 ? 0.5 : 0;
+          let ratioQ: number;
+          if (isColdCream) {
+            ratioQ = (band((comp.beeswax ?? 0) / total * 100, 10, 16)
+                    + band((comp.liquidParaffin ?? 0) / total * 100, 34, 46)
+                    + band((comp.water ?? 0) / total * 100, 38, 52)) / 3;
+          } else {
+            ratioQ = (band((comp.stearicAcid ?? 0) / total * 100, 15, 20)
+                    + band((comp.liquidParaffin ?? 0) / total * 100, 5, 10)
+                    + band((comp.water ?? 0) / total * 100, 60, 75)) / 3;
+          }
+          const mixedWarm = (a.data?.mixedWarm ?? false) || temp >= 55;
+          const quality   = Math.max(0, Math.min(1, ratioQ * (mixedWarm ? 1 : 0.55)));
+
+          // Interpolate liquidColor from the mixed base toward a quality-dependent
+          // target: clean white when good, dull greyish-tan when poor.
+          const tC   = Math.max(0, (newProg - 20) / 80);
+          const tgtR = 200 + 55 * quality;   // poor 200 → good 255
+          const tgtG = 190 + 62 * quality;   // poor 190 → good 252
+          const tgtB = 170 + 78 * quality;   // poor 170 → good 248
+          const r  = Math.round(210 + (tgtR - 210) * tC);
+          const g  = Math.round(195 + (tgtG - 195) * tC);
+          const b  = Math.round(170 + (tgtB - 170) * tC);
+          const al = (0.62 + 0.33 * tC * (0.5 + 0.5 * quality)).toFixed(2);
           const newColor = `rgba(${r},${g},${b},${al})`;
 
           return {
@@ -2737,6 +2944,8 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
               ...a.data,
               emulsificationProgress: newProg,
               liquidColor: newColor,
+              mixedWarm,
+              creamQuality: quality,
             },
           };
         }),
@@ -2745,46 +2954,52 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
     return () => clearInterval(interval);
   }, []);
 
-  // Thermometer thermal lag — slowly drift readingTemperature toward the liquid it's dipped into
+  // Thermometer thermal lag — every thermometer independently drifts its reading
+  // toward the liquid it's dipped into, or back toward room temperature when
+  // lifted out.  Two thermometers let the student read both phases at once.
   useEffect(() => {
     const interval = setInterval(() => {
       setApparatus((prev) => {
-        const thermo = prev.find((a) => a.type === "thermometer");
-        if (!thermo) return prev;
+        const thermos = prev.filter((a) => a.type === "thermometer");
+        if (thermos.length === 0) return prev;
 
-        const probeBottom = thermo.y + thermo.height;
-        const probeCX = thermo.x + thermo.width / 2;
-        const beakerUnder = prev.find(
-          (a) =>
-            a.id !== thermo.id &&
-            (a.type === "beaker" || a.type === "cylinder") &&
-            probeCX >= a.x &&
-            probeCX <= a.x + a.width &&
-            probeBottom >= a.y &&
-            probeBottom <= a.y + a.height,
-        );
+        const updates: Record<string, number> = {};
+        let changed = false;
+        for (const thermo of thermos) {
+          const probeBottom = thermo.y + thermo.height;
+          const probeCX = thermo.x + thermo.width / 2;
+          const beakerUnder = prev.find(
+            (a) =>
+              a.id !== thermo.id &&
+              (a.type === "beaker" || a.type === "cylinder") &&
+              probeCX >= a.x &&
+              probeCX <= a.x + a.width &&
+              probeBottom >= a.y &&
+              probeBottom <= a.y + a.height,
+          );
 
-        // Probe in beaker → track liquid temperature quickly (max 2°C per tick)
-        // Probe outside → drift back to ambient 25°C
-        const targetTemp = beakerUnder?.data?.liquidTemperature ?? 25;
-        const current    = thermo.data?.readingTemperature ?? 25;
-        if (Math.abs(current - targetTemp) < 0.1) return prev;
+          // Probe in beaker → track liquid temperature quickly (max 2°C per tick)
+          // Probe outside → drift back to the live room temperature
+          const targetTemp = beakerUnder?.data?.liquidTemperature ?? roomTemp;
+          const current    = thermo.data?.readingTemperature ?? roomTemp;
+          if (Math.abs(current - targetTemp) < 0.1) continue;
 
-        const rate = beakerUnder ? 2.0 : 0.8;   // fast when dipped, slow when removed
-        const next =
-          current < targetTemp
-            ? Math.min(current + rate, targetTemp)
-            : Math.max(current - rate, targetTemp);
+          const rate = beakerUnder ? 2.0 : 0.8;   // fast when dipped, slow when removed
+          updates[thermo.id] =
+            current < targetTemp
+              ? Math.min(current + rate, targetTemp)
+              : Math.max(current - rate, targetTemp);
+          changed = true;
+        }
 
+        if (!changed) return prev;
         return prev.map((a) =>
-          a.id === thermo.id
-            ? { ...a, data: { ...a.data, readingTemperature: next } }
-            : a,
+          a.id in updates ? { ...a, data: { ...a.data, readingTemperature: updates[a.id] } } : a,
         );
       });
     }, 80);   // check every 80 ms
     return () => clearInterval(interval);
-  }, []);
+  }, [roomTemp]);
 
   // pH meter — slowly drift phReading toward the beaker's actual pH
   useEffect(() => {
@@ -3099,21 +3314,28 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
           (a.data?.currentVolume ?? 0) > 0,
       );
       if (beakerUnder) {
-        // Grab the LOWER half (near the mouth) to stir; grab the UPPER half to
-        // lift the rod back out of the beaker.
-        const grabUpperHandle = y < clicked.y + (beakerUnder.y - clicked.y) * 0.5;
-        if (!grabUpperHandle) {
-          holdStirRef.current = { rodId: clicked.id, targetId: beakerUnder.id };
-          setApparatus((prev) =>
-            prev.map((a) =>
-              a.id === clicked.id || a.id === beakerUnder.id
-                ? { ...a, data: { ...a.data, isStirring: true, stirringTargetId: beakerUnder.id } }
-                : a,
-            ),
-          );
-          if (kind === "mouse") window.addEventListener("mouseup", handleMouseUp);
-          return "stir"; // locked — no drag
+        // Pressing ANY part of the rod (top or bottom) stirs the beaker. We also
+        // arm a drag: if the pointer then moves clearly, the stir converts into a
+        // drag so the rod can still be lifted out / repositioned (handled in
+        // handleMouseMove). A press without movement is a pure stir.
+        holdStirRef.current = { rodId: clicked.id, targetId: beakerUnder.id };
+        setApparatus((prev) =>
+          prev.map((a) =>
+            a.id === clicked.id || a.id === beakerUnder.id
+              ? { ...a, data: { ...a.data, isStirring: true, stirringTargetId: beakerUnder.id } }
+              : a,
+          ),
+        );
+        const dragState = { id: clicked.id, offsetX: x - clicked.x, offsetY: y - clicked.y };
+        draggingRef.current = dragState;
+        dragStartRef.current = { x: clientX, y: clientY };
+        dragMovedRef.current = false;
+        setDragging(dragState);
+        if (kind === "mouse") {
+          window.addEventListener("mousemove", handleMouseMove);
+          window.addEventListener("mouseup", handleMouseUp);
         }
+        return "stir";
       }
     }
 
@@ -3150,6 +3372,9 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
   };
 
   const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    // Only the left button drags / stirs. Right-click is reserved for the
+    // context menu (handled by onContextMenu) so it must never start a stir.
+    if (e.button !== 0) return;
     e.preventDefault();
     pointerDownAt(e.clientX, e.clientY, "mouse");
   };
@@ -3166,6 +3391,20 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
         const dxm = e.clientX - dragStartRef.current.x;
         const dym = e.clientY - dragStartRef.current.y;
         if (Math.hypot(dxm, dym) > 4) dragMovedRef.current = true;
+      }
+      // While stirring, keep the rod still until the pointer clearly moves; once
+      // it does, stop the swirl and let the press become a drag (lift the rod).
+      if (holdStirRef.current) {
+        if (!dragMovedRef.current) return;
+        const { rodId, targetId } = holdStirRef.current;
+        holdStirRef.current = null;
+        setApparatus((prev) =>
+          prev.map((a) =>
+            a.id === rodId || a.id === targetId
+              ? { ...a, data: { ...a.data, isStirring: false } }
+              : a,
+          ),
+        );
       }
       const x = e.clientX - rect.left;
       const y = e.clientY - rect.top;
@@ -3227,8 +3466,10 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
             if (Math.abs(newY + app.height - shelfY) < snapDistance)
               newY = shelfY - app.height;
 
+            // Keep a clear gap below the top bar so apparatus never touches it.
+            const TOP_CLEARANCE = NAV_BAR_HEIGHT + 16;
             const boundedX = Math.max(0, Math.min(x - drag.offsetX, canvasSize.width - app.width));
-            const boundedY = Math.max(NAV_BAR_HEIGHT, Math.min(newY, canvasSize.height - app.height));
+            const boundedY = Math.max(TOP_CLEARANCE, Math.min(newY, canvasSize.height - app.height));
             carryDx = boundedX - app.x;
             carryDy = boundedY - app.y;
             return { ...app, x: boundedX, y: boundedY };
@@ -3255,7 +3496,7 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
   );
 
   const handleMouseUp = useCallback(() => {
-    // Release hold-to-stir
+    // Release hold-to-stir (a press with no real drag → pure stir).
     if (holdStirRef.current) {
       const { rodId, targetId } = holdStirRef.current;
       holdStirRef.current = null;
@@ -3266,6 +3507,13 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
             : a,
         ),
       );
+      // The stir also armed a drag (so it could convert on movement). Since no
+      // drag happened, tear that down too.
+      draggingRef.current = null;
+      dragStartRef.current = null;
+      dragMovedRef.current = false;
+      setDragging(null);
+      window.removeEventListener("mousemove", handleMouseMove);
       window.removeEventListener("mouseup", handleMouseUp);
       return;
     }
@@ -3679,7 +3927,7 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
             <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.65)",
               zIndex:100, display:"flex", alignItems:"center", justifyContent:"center" }}>
               <div style={{ background:"#0f172a", borderRadius:20,
-                width:"min(440px, 95vw)", boxShadow:"0 24px 80px rgba(0,0,0,0.8)",
+                width:"min(520px, 95vw)", boxShadow:"0 24px 80px rgba(0,0,0,0.8)",
                 border:"1px solid #1e293b", overflow:"hidden" }}>
 
                 {/* ── Header ── */}
@@ -3702,74 +3950,161 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
                 {/* ── Slider body ── */}
                 <div style={{ padding:"22px 24px" }}>
 
-                  {/* Big volume display */}
-                  <div style={{ textAlign:"center", marginBottom:20 }}>
-                    <div style={{ fontSize:48, fontWeight:900, fontFamily:"monospace", lineHeight:1,
-                      background:"linear-gradient(135deg,#60a5fa,#a78bfa)",
-                      WebkitBackgroundClip:"text", WebkitTextFillColor:"transparent" }}>
-                      {Math.round(currentAmount)}
-                    </div>
-                    <div style={{ color:"#475569", fontSize:14, fontWeight:600, marginTop:2 }}>
-                      mL selected
-                    </div>
-                  </div>
+                  {(() => {
+                    const fillFrac = maxPour > 0 ? Math.max(0, Math.min(1, currentAmount / maxPour)) : 0;
+                    // Pick a "nice" graduation step (1/2/5 × 10ⁿ) for the beaker scale
+                    const niceStep = (m: number) => {
+                      if (m <= 0) return 1;
+                      const raw = m / 5;
+                      const pow = Math.pow(10, Math.floor(Math.log10(raw)));
+                      const n   = raw / pow;
+                      const f   = n >= 5 ? 5 : n >= 2 ? 2 : 1;
+                      return f * pow;
+                    };
+                    const tickStep = niceStep(maxPour);
+                    const ticks: number[] = [];
+                    for (let v = 0; v <= maxPour + 1e-6; v += tickStep) ticks.push(+v.toFixed(2));
+                    if (ticks[ticks.length - 1] < maxPour - 1e-6) ticks.push(+maxPour.toFixed(2));
+                    const TOP = 20, BOT = 185, BODY = BOT - TOP;
+                    const fmtTick  = (n: number) => (Number.isInteger(n) ? String(n) : n.toFixed(1));
+                    const liquidY  = BOT - BODY * fillFrac;
+                    // Map a pointer position on the beaker to a pour amount (drag to fill)
+                    const setFromEvent = (e: React.PointerEvent<SVGSVGElement>) => {
+                      if (isAnimatingPour) return;
+                      const r = e.currentTarget.getBoundingClientRect();
+                      const yTop = r.top + (TOP / 200) * r.height;
+                      const yBot = r.top + (BOT / 200) * r.height;
+                      const frac = (yBot - e.clientY) / (yBot - yTop);
+                      const c    = Math.max(0, Math.min(1, frac));
+                      setSelectedPourAmount(Math.min(maxPour, Math.max(0.1, +(c * maxPour).toFixed(1))));
+                    };
+                    return (
+                      <div style={{ display:"flex", gap:18, marginBottom:18 }}>
+                        {/* Beaker visualization — doubles as the graduated scale / number line */}
+                        <svg viewBox="0 0 120 200" width={120} height={200}
+                          onPointerDown={e => { if (isAnimatingPour) return; e.currentTarget.setPointerCapture(e.pointerId); setFromEvent(e); }}
+                          onPointerMove={e => { if (e.buttons === 1) setFromEvent(e); }}
+                          style={{ flexShrink:0, touchAction:"none",
+                            cursor: isAnimatingPour ? "not-allowed" : "ns-resize" }}>
+                          <defs>
+                            <clipPath id="pourBeakerClip">
+                              <path d="M40 22 L40 180 Q40 184 44 184 L96 184 Q100 184 100 180 L100 22 Z" />
+                            </clipPath>
+                          </defs>
+                          {/* Liquid */}
+                          <g clipPath="url(#pourBeakerClip)">
+                            <rect x={40} y={liquidY} width={60} height={BOT - liquidY + 6} fill={liquidColor} />
+                            {fillFrac > 0.015 &&
+                              <rect x={40} y={liquidY} width={60} height={4} fill="rgba(255,255,255,0.35)" />}
+                          </g>
+                          {/* Beaker outline + pouring spout */}
+                          <path d="M40 22 L40 180 Q40 184 44 184 L96 184 Q100 184 100 180 L100 22"
+                            fill="none" stroke="#64748b" strokeWidth={2.5} strokeLinejoin="round" />
+                          <path d="M40 22 Q35 17 31 20"
+                            fill="none" stroke="#64748b" strokeWidth={2.5} strokeLinecap="round" />
+                          {/* Graduation marks (the scale) */}
+                          {ticks.map((v, i) => {
+                            const y = BOT - BODY * (maxPour > 0 ? v / maxPour : 0);
+                            return (
+                              <g key={i}>
+                                <line x1={40} y1={y} x2={50} y2={y}
+                                  stroke="rgba(226,232,240,0.55)" strokeWidth={1} />
+                                <text x={37} y={y + 3} textAnchor="end" fontSize={8}
+                                  fill="#94a3b8" fontFamily="monospace">{fmtTick(v)}</text>
+                              </g>
+                            );
+                          })}
+                        </svg>
 
-                  {/* Custom slider */}
-                  <div style={{ position:"relative", marginBottom:8 }}>
-                    {/* Track background */}
-                    <div style={{ height:8, borderRadius:4, background:"#1e293b",
-                      position:"relative", overflow:"hidden" }}>
-                      <div style={{ height:"100%", borderRadius:4, width:`${pct}%`,
-                        background:"linear-gradient(90deg,#3b82f6,#7c3aed)",
-                        transition: isAnimatingPour ? "none" : "width 0.1s" }} />
-                    </div>
-                    <input type="range" min={1} max={maxPour} step={0.5}
-                      value={currentAmount}
-                      disabled={isAnimatingPour}
-                      onChange={e => setSelectedPourAmount(Number(e.target.value))}
-                      style={{ position:"absolute", top:0, left:0, width:"100%", height:"100%",
-                        opacity:0, cursor: isAnimatingPour ? "not-allowed" : "pointer",
-                        margin:0, padding:0 }} />
-                    {/* Thumb indicator */}
-                    <div style={{ position:"absolute", top:"50%", transform:"translate(-50%,-50%)",
-                      left:`calc(${pct}% - ${pct * 0.16}px)`,
-                      width:20, height:20, borderRadius:"50%",
-                      background:"linear-gradient(135deg,#3b82f6,#7c3aed)",
-                      border:"3px solid #0f172a",
-                      boxShadow:"0 0 0 2px #3b82f6",
-                      pointerEvents:"none",
-                      transition: isAnimatingPour ? "none" : "left 0.1s" }} />
-                  </div>
-                  <div style={{ display:"flex", justifyContent:"space-between",
-                    fontSize:11, color:"#334155", marginBottom:18 }}>
-                    <span>1 mL</span>
-                    <span>{Math.round(maxPour)} mL (max)</span>
-                  </div>
+                        {/* Controls column */}
+                        <div style={{ flex:1, display:"flex", flexDirection:"column", justifyContent:"center" }}>
+                          {/* Volume display with ±0.1 steppers */}
+                          <div style={{ display:"flex", alignItems:"center", justifyContent:"center",
+                            gap:12, marginBottom:4 }}>
+                            <button
+                              disabled={isAnimatingPour || currentAmount <= 0.1}
+                              onClick={() => setSelectedPourAmount(Math.max(0.1, +(currentAmount - 0.1).toFixed(1)))}
+                              title="−0.1 mL"
+                              style={{ width:38, height:38, borderRadius:10, border:"none",
+                                cursor: (isAnimatingPour || currentAmount <= 0.1) ? "not-allowed" : "pointer",
+                                background:"#1e293b", color:"#cbd5e1", fontSize:22, fontWeight:800, lineHeight:1 }}>
+                              −
+                            </button>
+                            <div style={{ textAlign:"center", minWidth:96 }}>
+                              <div style={{ fontSize:40, fontWeight:900, fontFamily:"monospace", lineHeight:1,
+                                background:"linear-gradient(135deg,#60a5fa,#a78bfa)",
+                                WebkitBackgroundClip:"text", WebkitTextFillColor:"transparent" }}>
+                                {currentAmount.toFixed(1)}
+                              </div>
+                              <div style={{ color:"#475569", fontSize:13, fontWeight:600, marginTop:2 }}>mL selected</div>
+                            </div>
+                            <button
+                              disabled={isAnimatingPour || currentAmount >= maxPour}
+                              onClick={() => setSelectedPourAmount(Math.min(maxPour, +(currentAmount + 0.1).toFixed(1)))}
+                              title="+0.1 mL"
+                              style={{ width:38, height:38, borderRadius:10, border:"none",
+                                cursor: (isAnimatingPour || currentAmount >= maxPour) ? "not-allowed" : "pointer",
+                                background:"#1e293b", color:"#cbd5e1", fontSize:22, fontWeight:800, lineHeight:1 }}>
+                              +
+                            </button>
+                          </div>
 
-                  {/* Quick preset buttons */}
-                  <div style={{ display:"flex", gap:8, marginBottom:20 }}>
-                    {[25, 50, 75, 100].map(p => {
-                      // 100% uses exact available volume so nothing is left behind
-                      const val = p === 100 ? maxPour : Math.max(1, Math.round(maxPour * p / 100));
-                      const active = Math.round(currentAmount) === val;
-                      return (
-                        <button key={p}
-                          disabled={isAnimatingPour}
-                          onClick={() => setSelectedPourAmount(val)}
-                          style={{ flex:1, padding:"8px 0", borderRadius:8, border:"none",
-                            cursor: isAnimatingPour ? "not-allowed" : "pointer",
-                            background: active
-                              ? "linear-gradient(135deg,#1d4ed8,#7c3aed)"
-                              : "#1e293b",
-                            color: active ? "white" : "#64748b",
-                            fontWeight:700, fontSize:12,
-                            boxShadow: active ? "0 2px 10px rgba(59,130,246,0.4)" : "none",
-                            transition:"all 0.15s" }}>
-                          {p}%
-                        </button>
-                      );
-                    })}
-                  </div>
+                          {/* Custom slider (0.1 mL precision) */}
+                          <div style={{ position:"relative", marginTop:12, marginBottom:8 }}>
+                            <div style={{ height:8, borderRadius:4, background:"#1e293b",
+                              position:"relative", overflow:"hidden" }}>
+                              <div style={{ height:"100%", borderRadius:4, width:`${pct}%`,
+                                background:"linear-gradient(90deg,#3b82f6,#7c3aed)",
+                                transition: isAnimatingPour ? "none" : "width 0.1s" }} />
+                            </div>
+                            <input type="range" min={0.1} max={maxPour} step={0.1}
+                              value={currentAmount}
+                              disabled={isAnimatingPour}
+                              onChange={e => setSelectedPourAmount(Number(e.target.value))}
+                              style={{ position:"absolute", top:0, left:0, width:"100%", height:"100%",
+                                opacity:0, cursor: isAnimatingPour ? "not-allowed" : "pointer",
+                                margin:0, padding:0 }} />
+                            <div style={{ position:"absolute", top:"50%", transform:"translate(-50%,-50%)",
+                              left:`calc(${pct}% - ${pct * 0.16}px)`,
+                              width:20, height:20, borderRadius:"50%",
+                              background:"linear-gradient(135deg,#3b82f6,#7c3aed)",
+                              border:"3px solid #0f172a", boxShadow:"0 0 0 2px #3b82f6",
+                              pointerEvents:"none", transition: isAnimatingPour ? "none" : "left 0.1s" }} />
+                          </div>
+                          <div style={{ display:"flex", justifyContent:"space-between",
+                            fontSize:11, color:"#334155", marginBottom:14 }}>
+                            <span>0.1 mL</span>
+                            <span>{maxPour.toFixed(1)} mL (max)</span>
+                          </div>
+
+                          {/* Quick preset buttons */}
+                          <div style={{ display:"flex", gap:8 }}>
+                            {[25, 50, 75, 100].map(p => {
+                              // 100% uses exact available volume so nothing is left behind
+                              const val = p === 100 ? maxPour : Math.max(0.1, +(maxPour * p / 100).toFixed(1));
+                              const active = Math.abs(currentAmount - val) < 0.05;
+                              return (
+                                <button key={p}
+                                  disabled={isAnimatingPour}
+                                  onClick={() => setSelectedPourAmount(val)}
+                                  style={{ flex:1, padding:"8px 0", borderRadius:8, border:"none",
+                                    cursor: isAnimatingPour ? "not-allowed" : "pointer",
+                                    background: active
+                                      ? "linear-gradient(135deg,#1d4ed8,#7c3aed)"
+                                      : "#1e293b",
+                                    color: active ? "white" : "#64748b",
+                                    fontWeight:700, fontSize:12,
+                                    boxShadow: active ? "0 2px 10px rgba(59,130,246,0.4)" : "none",
+                                    transition:"all 0.15s" }}>
+                                  {p}%
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })()}
 
                   {/* Pour progress bar (visible during animation) */}
                   {isAnimatingPour && (
@@ -3906,6 +4241,14 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
                               // Floating-point residue from 60 animation steps can leave
                               // a tiny non-zero currentVolume that shows as "available" liquid.
                               const finalVol = keepFrac < 0.01 ? 0 : a.data?.currentVolume;
+                              // Melted/mixed stearic acid & beeswax pour out with the
+                              // liquid, so the suspended solids leave at the same rate.
+                              // Without this, a poured-out beaker still showed a stearic
+                              // acid chunk that isn't really there.
+                              const prevSolidS = a.data?.solidStearicGrams ?? 0;
+                              const prevSolidB = a.data?.solidBeeswaxGrams ?? 0;
+                              const sS = keepFrac < 0.01 ? 0 : prevSolidS * keepFrac;
+                              const sB = keepFrac < 0.01 ? 0 : prevSolidB * keepFrac;
                               return {
                                 ...a,
                                 data: {
@@ -3915,6 +4258,8 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
                                   pouringTargetId:  null,
                                   pouringProgress:  0,
                                   composition:      reducedComp,
+                                  solidStearicGrams: sS,
+                                  solidBeeswaxGrams: sB,
                                 },
                               };
                             }
@@ -3934,7 +4279,7 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
                     animate();
                   }}
                     >
-                      {isAnimatingPour ? "Pouring…" : `⬇ Pour ${Math.round(currentAmount)} mL`}
+                      {isAnimatingPour ? "Pouring…" : `⬇ Pour ${currentAmount.toFixed(1)} mL`}
                     </button>
                     <button
                       disabled={isAnimatingPour}
@@ -4212,6 +4557,12 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
           const item = apparatus.find((a) => a.id === lidContextMenu.id);
           if (!item) return null;
           const isOpen = !item.data?.hasLid;
+          // "Return to Shelf" is only offered when the container is NOT already
+          // on the shelf (e.g. it was dragged down to the table to pour).
+          const onShelf = Math.abs((item.y + item.height) - shelfY) < 25;
+          const origList = initialApparatusFor();
+          const orig = origList.find((a) => a.id === item.id);
+          const shelfPos = orig ? { x: orig.x, y: orig.y } : { x: item.x, y: shelfY - item.height };
           return (
             <>
               {/* Invisible backdrop to catch outside clicks */}
@@ -4244,6 +4595,27 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
                   <span style={{ fontSize:16 }}>{isOpen ? "🔒" : "🔓"}</span>
                   {isOpen ? "Close Lid" : "Open Lid"}
                 </button>
+                {/* Return to Shelf — only when the container is off the shelf */}
+                {!onShelf && (
+                  <button
+                    style={{ width:"100%", padding:"10px 14px", background:"transparent", border:"none",
+                      cursor:"pointer", textAlign:"left", display:"flex", alignItems:"center", gap:10,
+                      color:"#e2e8f0", fontSize:13, fontWeight:600, borderTop:"1px solid #1e293b" }}
+                    onMouseEnter={e => (e.currentTarget.style.background = "#1e293b")}
+                    onMouseLeave={e => (e.currentTarget.style.background = "transparent")}
+                    onClick={() => {
+                      setApparatus((prev) =>
+                        prev.map((a) => a.id === item.id
+                          ? { ...a, x: shelfPos.x, y: shelfPos.y, data: { ...a.data, containedInId: null } }
+                          : a)
+                      );
+                      setLidContextMenu(null);
+                    }}
+                  >
+                    <span style={{ fontSize:16 }}>📦</span>
+                    Return to Shelf
+                  </button>
+                )}
                 {/* Cancel */}
                 <button
                   style={{ width:"100%", padding:"10px 14px", background:"transparent", border:"none",
@@ -4705,76 +5077,118 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
         ) : null}
       />
 
-      {/* ── Large floating thermometer display ─────────────────────────────
-           Appears beside the thermometer only when its probe is in a beaker. */}
+      {/* ── Large floating thermometer displays ────────────────────────────
+           One readout beside each thermometer whose probe is in a beaker, so
+           both phase temperatures can be read at the same time. */}
       {(() => {
-        const thermo = apparatus.find(a => a.type === "thermometer");
-        if (!thermo) return null;
         const canvasRect = canvasRef.current?.getBoundingClientRect();
         if (!canvasRect) return null;
-        const probeBottom = thermo.y + thermo.height;
-        const probeCX     = thermo.x + thermo.width / 2;
-        const isMeasuring = apparatus.some(
-          a => (a.type === "beaker" || a.type === "cylinder") &&
-               probeCX    >= a.x && probeCX    <= a.x + a.width &&
-               probeBottom >= a.y && probeBottom <= a.y + a.height,
-        );
-        if (!isMeasuring) return null;
+        const thermos = apparatus.filter(a => a.type === "thermometer");
 
-        const temp = thermo.data?.readingTemperature ?? 25;
-        const tempStr = temp < 100 ? temp.toFixed(1) : `${Math.round(temp)}`;
-        const fluidColor =
-          temp > 120 ? "#ef4444"
-          : temp > 75 ? "#f97316"
-          : temp > 40 ? "#fbbf24"
-          : "#60a5fa";
+        // Track placed readouts so a second one never overlaps the first.
+        const DW = 104, DH = 96, PAD = 8;
+        const placed: { left: number; top: number }[] = [];
+        const overlaps = (l: number, t: number) =>
+          placed.some(p =>
+            l < p.left + DW + PAD && l + DW + PAD > p.left &&
+            t < p.top  + DH + PAD && t + DH + PAD > p.top);
 
-        // Position display to the right of the thermometer
-        const dispX = canvasRect.left + thermo.x + thermo.width + 8;
-        const dispY = canvasRect.top  + thermo.y;
+        return thermos.map((thermo) => {
+          const probeBottom = thermo.y + thermo.height;
+          const probeCX     = thermo.x + thermo.width / 2;
+          const isMeasuring = apparatus.some(
+            a => (a.type === "beaker" || a.type === "cylinder") &&
+                 probeCX    >= a.x && probeCX    <= a.x + a.width &&
+                 probeBottom >= a.y && probeBottom <= a.y + a.height,
+          );
+          if (!isMeasuring) return null;
 
-        return (
-          <div style={{
-            position: "fixed",
-            left: dispX,
-            top: dispY,
-            zIndex: 55,
-            background: "#020b12",
-            border: `2px solid ${fluidColor}`,
-            borderRadius: 12,
-            padding: "8px 14px",
-            minWidth: 90,
-            boxShadow: `0 4px 20px rgba(0,0,0,0.7), 0 0 12px ${fluidColor}44`,
-            pointerEvents: "none",
-          }}>
-            {/* °C unit */}
-            <div style={{ color: `${fluidColor}99`, fontSize: 10, fontWeight: 700,
-              textAlign: "right", letterSpacing: 0.5, marginBottom: 2 }}>°C</div>
-            {/* Main reading */}
-            <div style={{
-              color: fluidColor,
-              fontSize: 32,
-              fontWeight: 900,
-              fontFamily: "monospace",
-              lineHeight: 1,
-              textAlign: "center",
-              textShadow: `0 0 12px ${fluidColor}88`,
+          const temp = thermo.data?.readingTemperature ?? roomTemp;
+          const tempStr = temp < 100 ? temp.toFixed(1) : `${Math.round(temp)}`;
+          const fluidColor =
+            temp > 120 ? "#ef4444"
+            : temp > 75 ? "#f97316"
+            : temp > 40 ? "#fbbf24"
+            : "#60a5fa";
+
+          // Position display to the right of the thermometer, nudging it down
+          // until it clears any readout already placed this frame.
+          const dispX = canvasRect.left + thermo.x + thermo.width + 8;
+          let dispY = canvasRect.top  + thermo.y;
+          let guard = 0;
+          while (overlaps(dispX, dispY) && guard < 12) { dispY += DH + PAD; guard++; }
+          placed.push({ left: dispX, top: dispY });
+
+          return (
+            <div key={thermo.id} style={{
+              position: "fixed",
+              left: dispX,
+              top: dispY,
+              zIndex: 55,
+              background: "#020b12",
+              border: `2px solid ${fluidColor}`,
+              borderRadius: 12,
+              padding: "8px 14px",
+              minWidth: 90,
+              boxShadow: `0 4px 20px rgba(0,0,0,0.7), 0 0 12px ${fluidColor}44`,
+              pointerEvents: "none",
             }}>
-              {tempStr}
+              {/* °C unit */}
+              <div style={{ color: `${fluidColor}99`, fontSize: 10, fontWeight: 700,
+                textAlign: "right", letterSpacing: 0.5, marginBottom: 2 }}>°C</div>
+              {/* Main reading */}
+              <div style={{
+                color: fluidColor,
+                fontSize: 32,
+                fontWeight: 900,
+                fontFamily: "monospace",
+                lineHeight: 1,
+                textAlign: "center",
+                textShadow: `0 0 12px ${fluidColor}88`,
+              }}>
+                {tempStr}
+              </div>
+              {/* Status bar */}
+              <div style={{ marginTop: 6, height: 4, borderRadius: 2,
+                background: "#1e293b", overflow: "hidden" }}>
+                <div style={{ height: "100%", borderRadius: 2,
+                  width: `${Math.min(temp / 100 * 100, 100)}%`,
+                  background: `linear-gradient(90deg, #3b82f6, ${fluidColor})`,
+                  transition: "width 0.3s" }} />
+              </div>
+              <div style={{ color: "#334155", fontSize: 9, textAlign: "center",
+                marginTop: 4, fontWeight: 600, letterSpacing: 0.5 }}>MEASURING</div>
             </div>
-            {/* Status bar */}
-            <div style={{ marginTop: 6, height: 4, borderRadius: 2,
-              background: "#1e293b", overflow: "hidden" }}>
-              <div style={{ height: "100%", borderRadius: 2,
-                width: `${Math.min(temp / 100 * 100, 100)}%`,
-                background: `linear-gradient(90deg, #3b82f6, ${fluidColor})`,
-                transition: "width 0.3s" }} />
-            </div>
-            <div style={{ color: "#334155", fontSize: 9, textAlign: "center",
-              marginTop: 4, fontWeight: 600, letterSpacing: 0.5 }}>MEASURING</div>
-          </div>
-        );
+          );
+        });
       })()}
+
+      {/* ── Room-temperature badge (live weather → cooling rate) ─────────── */}
+      <div style={{
+        position: "fixed",
+        right: 14,
+        bottom: 14,
+        zIndex: 40,
+        background: "rgba(2,11,18,0.82)",
+        border: "1px solid #1e3a4d",
+        borderRadius: 10,
+        padding: "7px 12px",
+        display: "flex",
+        alignItems: "center",
+        gap: 8,
+        pointerEvents: "none",
+        boxShadow: "0 2px 12px rgba(0,0,0,0.5)",
+      }}>
+        <span style={{ fontSize: 16 }}>{ambient.live ? "🌡️" : "🏠"}</span>
+        <div style={{ lineHeight: 1.15 }}>
+          <div style={{ color: "#60a5fa", fontWeight: 800, fontFamily: "monospace", fontSize: 15 }}>
+            {ambient.roomTemp.toFixed(1)}°C
+          </div>
+          <div style={{ color: "#64748b", fontSize: 9, fontWeight: 600, letterSpacing: 0.3 }}>
+            room · {ambient.location}
+          </div>
+        </div>
+      </div>
 
       {/* ── Large floating pH meter display ── */}
       {(() => {

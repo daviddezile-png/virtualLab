@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cd /c/Users/Dav~Daz/Desktop/Lab/stack-Lab/frontend && cat package.json | grep -A20 '\"scripts\"')",
+      "Read(//c/c/Users/Dav~Daz/Desktop/Lab/stack-Lab/frontend/**)"
+    ]
+  }
+}

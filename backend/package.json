@@ -4,8 +4,8 @@
   "description": "Backend API for Virtual Vanishing Cream Simulation",
   "main": "server.js",
   "scripts": {
-    "start": "lsof -ti:3543 | xargs kill -9 2>/dev/null; sleep 1; node server.js",
-    "dev": "lsof -ti:3543 | xargs kill -9 2>/dev/null; sleep 1; nodemon server.js",
+    "start": "node scripts/free-port.js && node server.js",
+    "dev": "node scripts/free-port.js && nodemon server.js",
     "test": "jest",
     "test:watch": "jest --watch",
     "lint": "eslint .",

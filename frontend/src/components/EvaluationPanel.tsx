@@ -445,8 +445,16 @@ const EvaluationPanel: React.FC<Props> = ({
   const warnCount  = checklist.filter(i => i.status==="warn").length;
   const totalSteps = isColdCream ? 13 : 14;
 
+  // Wrong mixing order forms the WRONG emulsion type (cold cream instead of
+  // vanishing cream, or vice-versa). When that happens no valid product was
+  // made, so the attempt is a hard FAIL with zero marks regardless of the other
+  // steps — overrides the checklist-derived result below.
+  const detectedOrder = isColdCream ? ccForm.mixing_order : form.mixing_order;
+  const wrongOrder = !!activeResult && detectedOrder !== "aqueous_to_oil";
+
   const displayResult: "PASS" | "AVERAGE" | "FAIL" =
-    passCount === totalSteps               ? "PASS"
+    wrongOrder                             ? "FAIL"
+    : passCount === totalSteps             ? "PASS"
     : passCount + warnCount >= totalSteps  ? "AVERAGE"
     : passCount >= 10                      ? "AVERAGE"
     :                                        "FAIL";
@@ -619,7 +627,9 @@ const EvaluationPanel: React.FC<Props> = ({
 
                   <div style={{ flex:1 }}>
                     <div style={{ color:resultColor, fontSize:28, fontWeight:900, letterSpacing:1 }}>
-                      {isColdCream
+                      {wrongOrder
+                        ? (isColdCream ? "Cold Cream NOT Formed" : "Vanishing Cream NOT Formed")
+                        : isColdCream
                         ? displayResult === "PASS"    ? "Cold Cream Formed!"
                           : displayResult === "AVERAGE" ? "Cold Cream Formed — Unstable"
                           : "Cold Cream Formed with Watery Texture"
@@ -628,7 +638,9 @@ const EvaluationPanel: React.FC<Props> = ({
                           : "Vanishing Cream Formed with Grainy Texture"}
                     </div>
                     <div style={{ color:"#94a3b8", fontSize:13, marginTop:3 }}>
-                      {displayResult==="PASS"
+                      {wrongOrder
+                        ? `Wrong mixing order — the phases were combined in reverse, so a ${isColdCream ? "vanishing cream (O/W emulsion)" : "cold cream (W/O emulsion)"} formed instead of ${isColdCream ? "cold cream" : "vanishing cream"}. No valid product was made — 0 marks.`
+                        : displayResult==="PASS"
                         ? `Excellent! Correct procedure — a quality ${isColdCream ? "cold cream (W/O emulsion)" : "vanishing cream (O/W emulsion)"} was produced.`
                         : displayResult==="AVERAGE"
                         ? "A cream was formed but the emulsion is unstable — some steps need improvement."

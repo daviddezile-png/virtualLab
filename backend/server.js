@@ -93,8 +93,9 @@ connectDB().then(() => {
   server.on('error', (err) => {
     if (err.code === 'EADDRINUSE') {
       console.warn(`⚠️  Port ${PORT} busy — killing occupant and retrying in 1s…`);
-      const { execSync } = require('child_process');
-      try { execSync(`lsof -ti:${PORT} | xargs kill -9`); } catch (_) { /* nothing to kill */ }
+      const { execFileSync } = require('child_process');
+      // Cross-platform port-free helper (works on Windows, macOS, Linux)
+      try { execFileSync(process.execPath, [require('path').join(__dirname, 'scripts', 'free-port.js'), String(PORT)], { stdio: 'ignore' }); } catch (_) { /* nothing to kill */ }
       setTimeout(() => {
         server.close();
         app.listen(PORT, () => {

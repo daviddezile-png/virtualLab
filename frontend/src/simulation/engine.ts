@@ -130,7 +130,7 @@ export function evaluateFormulation(input: FormulationInput): EvaluationResult {
   }
 
   // Step 8 — Final score
-  const final_score =
+  let final_score =
     ingredient_score * 2 +
     temperature_score * 2 +
     emulsification_score * 3 +
@@ -156,16 +156,30 @@ export function evaluateFormulation(input: FormulationInput): EvaluationResult {
   }
 
   // Step 10 — Appearance
-  const appearance =
+  let appearance =
     result === "PASS"
       ? "Smooth white cream"
       : "Phase separation or grainy texture";
 
+  // Critical failure — wrong mixing order forms the WRONG emulsion type.
+  // For a vanishing cream (O/W) the aqueous phase must go INTO the oil phase.
+  // Reversing it yields a cold cream (W/O) instead, so no vanishing cream is
+  // produced → the whole attempt scores zero.
+  const wrong_order = input.mixing_order !== "aqueous_to_oil";
+  if (wrong_order) {
+    final_score = 0;
+    result = "FAIL";
+    stability = "separation";
+    appearance = "Cold cream (W/O) formed — not vanishing cream";
+  }
+
   // Step 11 — Feedback
   const feedback: string[] = [];
+  if (wrong_order)
+    feedback.push("Vanishing cream NOT formed — the phases were combined in the wrong order, producing a cold cream (W/O emulsion) instead. Add the aqueous phase INTO the oil phase. Score: 0.");
   if (temp_diff > 5)
     feedback.push("Temperature mismatch between phases may cause separation.");
-  if (input.mixing_order !== "aqueous_to_oil")
+  if (input.mixing_order !== "aqueous_to_oil" && !wrong_order)
     feedback.push("Incorrect mixing order. Add aqueous phase into oil phase.");
   if (input.mixing_time < 30)
     feedback.push("Increase mixing time to at least 30 s for full emulsification.");
@@ -312,6 +326,7 @@ export function evaluateColdCream(input: ColdCreamInput): ColdCreamResult {
     pH_score * 1 +
     viscosity_score * 1;
 
+  let final_score_out = final_score;
   let result: "PASS" | "AVERAGE" | "FAIL";
   if (final_score >= 8 && stability === "stable") {
     result = "PASS";
@@ -321,15 +336,28 @@ export function evaluateColdCream(input: ColdCreamInput): ColdCreamResult {
     result = "FAIL";
   }
 
-  const appearance =
+  let appearance =
     result === "PASS"    ? "Thick white cold cream"
     : result === "AVERAGE" ? "Soft but slightly greasy cream"
     : "Phase separation or watery texture";
 
+  // Critical failure — wrong mixing order forms the WRONG emulsion type.
+  // A cold cream (W/O) needs the aqueous phase added INTO the oil phase.
+  // Reversing it yields a vanishing cream (O/W) instead → scores zero.
+  const wrong_order = input.mixing_order !== "aqueous_to_oil";
+  if (wrong_order) {
+    final_score_out = 0;
+    result = "FAIL";
+    stability = "separation";
+    appearance = "Vanishing cream (O/W) formed — not cold cream";
+  }
+
   const feedback: string[] = [];
+  if (wrong_order)
+    feedback.push("Cold cream NOT formed — the phases were combined in the wrong order, producing a vanishing cream (O/W emulsion) instead. Add the aqueous (borax+water) phase INTO the oil phase. Score: 0.");
   if (temp_diff > 5)
     feedback.push("Temperature mismatch between phases — keep both at 65–75°C.");
-  if (input.mixing_order !== "aqueous_to_oil")
+  if (input.mixing_order !== "aqueous_to_oil" && !wrong_order)
     feedback.push("Incorrect mixing order. Add aqueous (borax+water) into the oil phase.");
   if (input.mixing_time < 20)
     feedback.push("Increase stirring time to at least 20 s for full emulsification.");
@@ -344,7 +372,7 @@ export function evaluateColdCream(input: ColdCreamInput): ColdCreamResult {
 
   return {
     result,
-    score: Math.round(final_score * 10) / 10,
+    score: Math.round(final_score_out * 10) / 10,
     stability,
     appearance,
     predicted_pH:       Math.round(predicted_pH * 100) / 100,

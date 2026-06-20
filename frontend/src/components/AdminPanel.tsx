@@ -62,10 +62,10 @@ const StatCard: React.FC<{ label:string; value:string|number; sub?:string; Icon:
         <Icon size={22} color={color} strokeWidth={1.8} />
       </div>
       <div>
-        <div style={{ color:C.txtMut, fontSize:11, fontWeight:600, textTransform:"uppercase",
+        <div style={{ color:C.txtMut, fontSize:13, fontWeight:600, textTransform:"uppercase",
           letterSpacing:0.8, marginBottom:4 }}>{label}</div>
-        <div style={{ color:C.txtPri, fontSize:26, fontWeight:800, lineHeight:1 }}>{value}</div>
-        {sub && <div style={{ color:C.txtSec, fontSize:12, marginTop:4 }}>{sub}</div>}
+        <div style={{ color:C.txtPri, fontSize:30, fontWeight:800, lineHeight:1 }}>{value}</div>
+        {sub && <div style={{ color:C.txtSec, fontSize:14, marginTop:4 }}>{sub}</div>}
       </div>
     </div>
   );
@@ -78,8 +78,8 @@ const SectionHeading: React.FC<{ title:string; sub?:string; action?:React.ReactN
     <div style={{ display:"flex", alignItems:"flex-start", justifyContent:"space-between",
       marginBottom:24, flexWrap:"wrap", gap:12 }}>
       <div>
-        <h2 style={{ color:C.txtPri, fontSize:20, fontWeight:800, margin:0 }}>{title}</h2>
-        {sub && <p style={{ color:C.txtSec, fontSize:13, margin:"4px 0 0" }}>{sub}</p>}
+        <h2 style={{ color:C.txtPri, fontSize:23, fontWeight:800, margin:0 }}>{title}</h2>
+        {sub && <p style={{ color:C.txtSec, fontSize:15, margin:"4px 0 0" }}>{sub}</p>}
       </div>
       {action}
     </div>
@@ -97,7 +97,7 @@ const Btn: React.FC<{ label:string; onClick?:()=>void; variant?:"primary"|"ghost
   return (
     <button onClick={onClick} style={{
       ...styles[variant], borderRadius:8, fontWeight:600, cursor:"pointer",
-      padding: small?"6px 12px":"9px 18px", fontSize: small?12:13,
+      padding: small?"6px 12px":"9px 18px", fontSize: small?14: 15,
       display:"flex", alignItems:"center", gap:6, whiteSpace:"nowrap",
     }}>
       {Ic && <Ic size={small?13:15} strokeWidth={2} />} {label}
@@ -111,7 +111,7 @@ const TableHead: React.FC<{ cols:string[] }> = ({ cols }) => {
     <thead>
       <tr>
         {cols.map(c => (
-          <th key={c} style={{ color:C.txtMut, fontSize:11, fontWeight:700, textAlign:"left",
+          <th key={c} style={{ color:C.txtMut, fontSize:13, fontWeight:700, textAlign:"left",
             padding:"10px 14px", textTransform:"uppercase", letterSpacing:0.8,
             borderBottom:`1px solid ${C.border}`, background:C.surface, whiteSpace:"nowrap" }}>
             {c}
@@ -141,7 +141,7 @@ const RoleBadge: React.FC<{ role:string }> = ({ role }) => {
   const [color,bg] = cfg[role] ?? [C.txtMut,C.surface];
   return (
     <span style={{ background:bg, color, borderRadius:20, padding:"2px 10px",
-      fontSize:11, fontWeight:700, textTransform:"capitalize", letterSpacing:0.3 }}>
+      fontSize:13, fontWeight:700, textTransform:"capitalize", letterSpacing:0.3 }}>
       {role}
     </span>
   );
@@ -184,11 +184,11 @@ const Dashboard: React.FC = () => {
           overflow:"hidden", boxShadow:`0 1px 4px ${C.shadow}` }}>
           <div style={{ padding:"14px 20px", borderBottom:`1px solid ${C.border}`,
             display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-            <span style={{ color:C.txtPri, fontWeight:700, fontSize:14 }}>Recent Submissions</span>
-            <span style={{ color:C.txtMut, fontSize:12 }}>{subs.length} total</span>
+            <span style={{ color:C.txtPri, fontWeight:700, fontSize:16 }}>Recent Submissions</span>
+            <span style={{ color:C.txtMut, fontSize:14 }}>{subs.length} total</span>
           </div>
           {recentSubs.length === 0 ? (
-            <div style={{ padding:"32px 20px", textAlign:"center", color:C.txtMut, fontSize:13 }}>
+            <div style={{ padding:"32px 20px", textAlign:"center", color:C.txtMut, fontSize:15 }}>
               No submissions yet.
             </div>
           ) : (
@@ -201,22 +201,22 @@ const Dashboard: React.FC = () => {
                       <div style={{ display:"flex", alignItems:"center", gap:8 }}>
                         <Avatar name={s.studentName} size={26} />
                         <div>
-                          <div style={{ color:C.txtPri, fontSize:13 }}>{s.studentName}</div>
-                          {s.studentReg && <div style={{ color:C.txtMut, fontSize:10 }}>{s.studentReg}</div>}
+                          <div style={{ color:C.txtPri, fontSize:15 }}>{s.studentName}</div>
+                          {s.studentReg && <div style={{ color:C.txtMut, fontSize:12 }}>{s.studentReg}</div>}
                         </div>
                       </div>
                     </td>
-                    <td style={{ padding:"10px 14px", color:C.txtSec, fontSize:12 }}>
+                    <td style={{ padding:"10px 14px", color:C.txtSec, fontSize:14 }}>
                       {s.practicalId === "vanishing-cream" ? "Vanishing Cream" : "Cold Cream"}
                     </td>
-                    <td style={{ padding:"10px 14px", color:C.txtPri, fontSize:13, fontWeight:700 }}>
+                    <td style={{ padding:"10px 14px", color:C.txtPri, fontSize:15, fontWeight:700 }}>
                       {s.scorePct}%
                     </td>
                     <td style={{ padding:"10px 14px" }}>
                       <span style={{
                         background: s.result==="PASS" ? `${C.accent}18` : s.result==="AVERAGE" ? `${C.amber}18` : `${C.red}18`,
                         color: s.result==="PASS" ? C.accent : s.result==="AVERAGE" ? C.amber : C.red,
-                        borderRadius:20, padding:"2px 10px", fontSize:11, fontWeight:700,
+                        borderRadius:20, padding:"2px 10px", fontSize:13, fontWeight:700,
                       }}>{s.result}</span>
                     </td>
                   </tr>
@@ -230,7 +230,7 @@ const Dashboard: React.FC = () => {
         <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
           <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:14,
             padding:18, boxShadow:`0 1px 4px ${C.shadow}` }}>
-            <div style={{ color:C.txtPri, fontWeight:700, fontSize:14, marginBottom:16 }}>User Breakdown</div>
+            <div style={{ color:C.txtPri, fontWeight:700, fontSize:16, marginBottom:16 }}>User Breakdown</div>
             {[
               { label:"Admins",   count:admins,   color:"#7c3aed", Icon:Shield },
               { label:"Teachers", count:teachers, color:C.accent,  Icon:GraduationCap },
@@ -243,8 +243,8 @@ const Dashboard: React.FC = () => {
                 </div>
                 <div style={{ flex:1 }}>
                   <div style={{ display:"flex", justifyContent:"space-between", marginBottom:3 }}>
-                    <span style={{ color:C.txtSec, fontSize:13 }}>{label}</span>
-                    <span style={{ color:C.txtPri, fontWeight:700, fontSize:13 }}>{count}</span>
+                    <span style={{ color:C.txtSec, fontSize:15 }}>{label}</span>
+                    <span style={{ color:C.txtPri, fontWeight:700, fontSize:15 }}>{count}</span>
                   </div>
                   <div style={{ height:5, background:C.surface, borderRadius:3, overflow:"hidden" }}>
                     <div style={{ width:`${users.length > 0 ? (count/users.length)*100 : 0}%`,
@@ -257,7 +257,7 @@ const Dashboard: React.FC = () => {
 
           <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:14,
             padding:18, boxShadow:`0 1px 4px ${C.shadow}` }}>
-            <div style={{ color:C.txtPri, fontWeight:700, fontSize:14, marginBottom:14 }}>Result Breakdown</div>
+            <div style={{ color:C.txtPri, fontWeight:700, fontSize:16, marginBottom:14 }}>Result Breakdown</div>
             {[
               { label:"Pass",    count:stats.passed,  color:C.accent },
               { label:"Average", count:stats.average, color:C.amber  },
@@ -265,14 +265,14 @@ const Dashboard: React.FC = () => {
             ].map(r => (
               <div key={r.label} style={{ display:"flex", justifyContent:"space-between",
                 alignItems:"center", padding:"6px 0", borderBottom:`1px solid ${C.border}` }}>
-                <span style={{ color:C.txtSec, fontSize:13 }}>{r.label}</span>
-                <span style={{ color:r.color, fontWeight:700, fontSize:14 }}>{r.count}</span>
+                <span style={{ color:C.txtSec, fontSize:15 }}>{r.label}</span>
+                <span style={{ color:r.color, fontWeight:700, fontSize:16 }}>{r.count}</span>
               </div>
             ))}
             <div style={{ borderBottom:"none", display:"flex", justifyContent:"space-between",
               alignItems:"center", padding:"8px 0 0" }}>
-              <span style={{ color:C.txtMut, fontSize:12 }}>Total</span>
-              <span style={{ color:C.txtPri, fontWeight:800, fontSize:14 }}>{stats.total}</span>
+              <span style={{ color:C.txtMut, fontSize:14 }}>Total</span>
+              <span style={{ color:C.txtPri, fontWeight:800, fontSize:16 }}>{stats.total}</span>
             </div>
           </div>
         </div>
@@ -347,13 +347,13 @@ const UserManager: React.FC = () => {
   };
 
   const lbl: React.CSSProperties = {
-    color:C.txtMut, fontSize:11, fontWeight:700, display:"block",
+    color:C.txtMut, fontSize:13, fontWeight:700, display:"block",
     marginBottom:5, textTransform:"uppercase", letterSpacing:0.7,
   };
 
   const inp: React.CSSProperties = {
     width:"100%", background:C.surface, border:`1px solid ${C.border2}`,
-    color:C.txtPri, borderRadius:8, padding:"9px 12px", fontSize:13,
+    color:C.txtPri, borderRadius:8, padding:"9px 12px", fontSize:15,
     boxSizing:"border-box", outline:"none",
   };
 
@@ -373,7 +373,7 @@ const UserManager: React.FC = () => {
         <div style={{ background:C.card, border:`1px solid ${roleAccent[newRole]}55`,
           borderRadius:12, padding:"18px 20px", marginBottom:20,
           boxShadow:`0 2px 10px ${C.shadow}` }}>
-          <div style={{ color:C.txtPri, fontWeight:800, fontSize:14, marginBottom:14,
+          <div style={{ color:C.txtPri, fontWeight:800, fontSize:16, marginBottom:14,
             display:"flex", alignItems:"center", gap:8 }}>
             <UserIcon size={15} color={roleAccent[newRole]} strokeWidth={2} />
             Create New Account
@@ -384,7 +384,7 @@ const UserManager: React.FC = () => {
             {(["student","teacher","admin"] as const).map(r => (
               <button key={r} onClick={() => { setNewRole(r); setAddError(null); }}
                 style={{ padding:"7px 18px", borderRadius:8, cursor:"pointer", fontWeight:700,
-                  fontSize:12, border:`1.5px solid ${newRole===r ? roleAccent[r] : C.border}`,
+                  fontSize:14, border:`1.5px solid ${newRole===r ? roleAccent[r] : C.border}`,
                   background: newRole===r ? `${roleAccent[r]}18` : "transparent",
                   color: newRole===r ? roleAccent[r] : C.txtMut,
                   textTransform:"capitalize" }}>
@@ -419,13 +419,13 @@ const UserManager: React.FC = () => {
           </div>
 
           {addError && (
-            <div style={{ color:C.red, fontSize:12, marginBottom:10,
+            <div style={{ color:C.red, fontSize:14, marginBottom:10,
               display:"flex", alignItems:"center", gap:6 }}>
               <AlertCircle size={13} /> {addError}
             </div>
           )}
           {addOk && (
-            <div style={{ color:C.accent, fontSize:12, marginBottom:10,
+            <div style={{ color:C.accent, fontSize:14, marginBottom:10,
               display:"flex", alignItems:"center", gap:6 }}>
               <CheckCircle size={13} strokeWidth={2.5} /> Account created successfully!
             </div>
@@ -436,7 +436,7 @@ const UserManager: React.FC = () => {
             <Btn label="Cancel" variant="ghost" small Icon={RefreshCw}
               onClick={() => { setShowAddUser(false); resetForm(); }} />
           </div>
-          <div style={{ color:C.txtMut, fontSize:11, marginTop:10 }}>
+          <div style={{ color:C.txtMut, fontSize:13, marginTop:10 }}>
             The new user will log in with the email and password you set here.
           </div>
         </div>
@@ -451,13 +451,13 @@ const UserManager: React.FC = () => {
           <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search by name, email, reg…"
             style={{ width:"100%", background:C.card, border:`1px solid ${C.border}`,
               color:C.txtPri, borderRadius:8, padding:"9px 12px 9px 34px",
-              fontSize:13, boxSizing:"border-box", outline:"none" }} />
+              fontSize:15, boxSizing:"border-box", outline:"none" }} />
         </div>
         <div style={{ display:"flex", gap:6 }}>
           {(["all","admin","teacher","student"] as const).map(r => (
             <button key={r} onClick={() => setRoleFilter(r)} style={{
               padding:"8px 14px", borderRadius:8, cursor:"pointer", fontWeight:600,
-              fontSize:12, border:"none", textTransform:"capitalize",
+              fontSize:14, border:"none", textTransform:"capitalize",
               background: roleFilter===r ? C.accent : C.card,
               color: roleFilter===r ? "white" : C.txtSec,
             }}>{r === "all" ? "All Roles" : r}</button>
@@ -478,24 +478,24 @@ const UserManager: React.FC = () => {
                   <div style={{ display:"flex", alignItems:"center", gap:10 }}>
                     <Avatar name={u.fullName} />
                     <div>
-                      <span style={{ color:C.txtPri, fontSize:13, fontWeight:600 }}>{u.fullName}</span>
+                      <span style={{ color:C.txtPri, fontSize:15, fontWeight:600 }}>{u.fullName}</span>
                       {u.seeded && (
                         <span style={{ marginLeft:6, background:"rgba(124,58,237,0.12)",
                           color:"#7c3aed", borderRadius:20, padding:"1px 7px",
-                          fontSize:10, fontWeight:700 }}>Seeded</span>
+                          fontSize:12, fontWeight:700 }}>Seeded</span>
                       )}
                     </div>
                   </div>
                 </td>
-                <td style={{ padding:"11px 14px", color:C.txtSec, fontSize:12 }}>{u.email}</td>
+                <td style={{ padding:"11px 14px", color:C.txtSec, fontSize:14 }}>{u.email}</td>
                 <td style={{ padding:"11px 14px" }}><RoleBadge role={u.role} /></td>
                 <td style={{ padding:"11px 14px" }}>
                   {u.regNumber
                     ? <code style={{ background:C.accentBg, color:C.accent, borderRadius:5,
-                        padding:"2px 8px", fontSize:12 }}>{u.regNumber}</code>
+                        padding:"2px 8px", fontSize:14 }}>{u.regNumber}</code>
                     : <span style={{ color:C.txtMut }}>—</span>}
                 </td>
-                <td style={{ padding:"11px 14px", color:C.txtMut, fontSize:12 }}>
+                <td style={{ padding:"11px 14px", color:C.txtMut, fontSize:14 }}>
                   {new Date(u.createdAt ?? "").toLocaleDateString()}
                 </td>
                 <td style={{ padding:"11px 14px" }}>
@@ -503,7 +503,7 @@ const UserManager: React.FC = () => {
                     background: u.suspended ? `${C.red}12` : `${C.accent}12`,
                     color: u.suspended ? C.red : C.accent,
                     border: `1px solid ${u.suspended ? `${C.red}44` : `${C.accent}44`}`,
-                    borderRadius:20, padding:"2px 10px", fontSize:11, fontWeight:700,
+                    borderRadius:20, padding:"2px 10px", fontSize:13, fontWeight:700,
                   }}>{u.suspended ? "Suspended" : "Active"}</span>
                 </td>
                 <td style={{ padding:"11px 14px" }}>
@@ -540,7 +540,7 @@ const UserManager: React.FC = () => {
           <div style={{ padding:36, textAlign:"center", color:C.txtMut }}>No users found.</div>
         )}
       </div>
-      <div style={{ color:C.txtMut, fontSize:12, marginTop:10 }}>
+      <div style={{ color:C.txtMut, fontSize:14, marginTop:10 }}>
         {filtered.length} of {allUsers.length} users
       </div>
     </div>
@@ -601,7 +601,7 @@ const AdminAnalytics: React.FC = () => {
           display:"flex", alignItems:"center", justifyContent:"center" }}>
           <Ic size={17} color={color} strokeWidth={2} />
         </div>
-        <span style={{ color:C.txtPri, fontWeight:800, fontSize:14 }}>{title}</span>
+        <span style={{ color:C.txtPri, fontWeight:800, fontSize:16 }}>{title}</span>
       </div>
       {children}
     </div>
@@ -610,10 +610,10 @@ const AdminAnalytics: React.FC = () => {
   const Metric: React.FC<{ label:string; value:string|number; sub?:string; color?:string }> = ({ label, value, sub, color }) => (
     <div style={{ marginBottom:14 }}>
       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"baseline", marginBottom:4 }}>
-        <span style={{ color:C.txtSec, fontSize:13 }}>{label}</span>
-        <span style={{ color:color ?? C.txtPri, fontWeight:800, fontSize:18, fontFamily:"monospace" }}>{value}</span>
+        <span style={{ color:C.txtSec, fontSize:15 }}>{label}</span>
+        <span style={{ color:color ?? C.txtPri, fontWeight:800, fontSize:20, fontFamily:"monospace" }}>{value}</span>
       </div>
-      {sub && <div style={{ color:C.txtMut, fontSize:11 }}>{sub}</div>}
+      {sub && <div style={{ color:C.txtMut, fontSize:13 }}>{sub}</div>}
       <div style={{ height:3, background:C.surface, borderRadius:2, marginTop:6 }}>
         <div style={{ width:"100%", height:"100%", background:`${color ?? C.accent}22`, borderRadius:2 }} />
       </div>
@@ -654,7 +654,7 @@ const AdminAnalytics: React.FC = () => {
             border:`1px solid ${health === "ok" ? `${C.accent}33` : `${C.red}33`}`, borderRadius:9 }}>
             <div style={{ width:10, height:10, borderRadius:"50%", background: health === "ok" ? C.accent : C.red,
               boxShadow:`0 0 6px ${health === "ok" ? C.accent : C.red}` }} />
-            <span style={{ color: health === "ok" ? C.accent : C.red, fontWeight:700, fontSize:13 }}>
+            <span style={{ color: health === "ok" ? C.accent : C.red, fontWeight:700, fontSize:15 }}>
               {health === "ok" ? "All systems operational" : "Service degraded"}
             </span>
           </div>
@@ -673,7 +673,7 @@ const AdminAnalytics: React.FC = () => {
 
           {/* 7-day activity heatmap */}
           <div style={{ marginTop:14 }}>
-            <div style={{ color:C.txtMut, fontSize:10, fontWeight:700, letterSpacing:0.8, textTransform:"uppercase", marginBottom:8 }}>7-Day Session Activity</div>
+            <div style={{ color:C.txtMut, fontSize:12, fontWeight:700, letterSpacing:0.8, textTransform:"uppercase", marginBottom:8 }}>7-Day Session Activity</div>
             <div style={{ display:"flex", gap:6, alignItems:"flex-end", height:60 }}>
               {dailyCounts.map(d => (
                 <div key={d.label} style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center", gap:3 }}>
@@ -681,8 +681,8 @@ const AdminAnalytics: React.FC = () => {
                     background: d.count > 0 ? "#7c3aed" : C.border,
                     height:`${Math.max(4, (d.count / maxDay) * 52)}px`,
                     minHeight: d.count > 0 ? 6 : 3, transition:"height .3s" }} />
-                  <span style={{ color:C.txtMut, fontSize:8 }}>{d.label}</span>
-                  <span style={{ color:C.txtSec, fontSize:9, fontWeight:700 }}>{d.count}</span>
+                  <span style={{ color:C.txtMut, fontSize:10 }}>{d.label}</span>
+                  <span style={{ color:C.txtSec, fontSize:11, fontWeight:700 }}>{d.count}</span>
                 </div>
               ))}
             </div>
@@ -700,7 +700,7 @@ const AdminAnalytics: React.FC = () => {
           <div style={{ marginTop:10, padding:"10px 12px",
             background: integrityPct >= 98 ? `${C.accent}10` : `${C.amber}10`,
             border:`1px solid ${integrityPct >= 98 ? `${C.accent}33` : `${C.amber}33`}`, borderRadius:8 }}>
-            <span style={{ color:integrityPct >= 98 ? C.accent : C.amber, fontSize:12, fontWeight:700 }}>
+            <span style={{ color:integrityPct >= 98 ? C.accent : C.amber, fontSize:14, fontWeight:700 }}>
               {integrityPct >= 98 ? "✓ Data pipeline healthy" : "⚠ Some records may need review"}
             </span>
           </div>
@@ -735,8 +735,8 @@ const AdminSettings: React.FC = () => {
     <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center",
       padding:"14px 0", borderBottom:`1px solid ${C.border}`, gap:16 }}>
       <div>
-        <div style={{ color:C.txtPri, fontSize:13, fontWeight:600 }}>{label}</div>
-        {sub && <div style={{ color:C.txtMut, fontSize:12, marginTop:2 }}>{sub}</div>}
+        <div style={{ color:C.txtPri, fontSize:15, fontWeight:600 }}>{label}</div>
+        {sub && <div style={{ color:C.txtMut, fontSize:14, marginTop:2 }}>{sub}</div>}
       </div>
       {children}
     </div>
@@ -745,8 +745,9 @@ const AdminSettings: React.FC = () => {
   const Block: React.FC<{TitleIcon:LucideIcon;title:string;children:React.ReactNode}> =
   ({TitleIcon,title,children}) => (
     <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:14,
-      padding:20, marginBottom:18, boxShadow:`0 1px 4px ${C.shadow}` }}>
-      <div style={{ color:C.txtPri, fontWeight:700, fontSize:14, marginBottom:4,
+      padding:20, boxShadow:`0 1px 4px ${C.shadow}`,
+      flex:"1 1 300px", minWidth:0, alignSelf:"stretch" }}>
+      <div style={{ color:C.txtPri, fontWeight:700, fontSize:16, marginBottom:4,
         display:"flex", alignItems:"center", gap:8 }}>
         <TitleIcon size={16} color={C.accent} strokeWidth={2} />{title}
       </div>
@@ -779,8 +780,11 @@ const AdminSettings: React.FC = () => {
   };
 
   return (
-    <div style={{ maxWidth:700 }}>
+    <div style={{ maxWidth:1200 }}>
       <SectionHeading title="System Settings" sub="Global platform configuration managed by the super admin." />
+
+      {/* Cards flow horizontally on laptop screens and wrap/stack on narrow screens */}
+      <div style={{ display:"flex", flexWrap:"wrap", gap:18, alignItems:"stretch", marginBottom:18 }}>
 
       <Block TitleIcon={Shield} title="Platform Status">
         <Row label="Maintenance Mode" sub="When ON, students and teachers see a maintenance page">
@@ -789,7 +793,7 @@ const AdminSettings: React.FC = () => {
         {maintenance && (
           <div style={{ background:`${C.red}10`, border:`1px solid ${C.red}44`,
             borderRadius:8, padding:"10px 14px", marginTop:8,
-            color:C.red, fontSize:13, display:"flex", alignItems:"center", gap:8 }}>
+            color:C.red, fontSize:15, display:"flex", alignItems:"center", gap:8 }}>
             <AlertTriangle size={15} /> Platform is in maintenance mode. Only admins can access.
           </div>
         )}
@@ -798,7 +802,7 @@ const AdminSettings: React.FC = () => {
         </Row>
         <Row label="Admin Invite Code" sub="Secret code required to create admin accounts">
           <code style={{ background:C.surface, border:`1px solid ${C.border2}`,
-            color:C.accent, borderRadius:6, padding:"5px 12px", fontSize:13,
+            color:C.accent, borderRadius:6, padding:"5px 12px", fontSize:15,
             letterSpacing:1.5, fontWeight:700 }}>VLAB-ADMIN-2026</code>
         </Row>
       </Block>
@@ -807,10 +811,10 @@ const AdminSettings: React.FC = () => {
         <Row label="Max Students" sub="Maximum number of student accounts allowed">
           <input type="number" value={maxStudents} onChange={e => setMaxStudents(e.target.value)}
             style={{ width:80, background:C.surface, border:`1px solid ${C.border2}`,
-              color:C.txtPri, borderRadius:7, padding:"6px 10px", fontSize:13, textAlign:"center" }} />
+              color:C.txtPri, borderRadius:7, padding:"6px 10px", fontSize:15, textAlign:"center" }} />
         </Row>
         <Row label="Total Registered" sub="Current user count">
-          <span style={{ color:C.accent, fontWeight:700, fontSize:14 }}>{totalUsers}</span>
+          <span style={{ color:C.accent, fontWeight:700, fontSize:16 }}>{totalUsers}</span>
         </Row>
       </Block>
 
@@ -819,7 +823,7 @@ const AdminSettings: React.FC = () => {
           <button onClick={handleClearAuditLog}
             style={{ background:`${C.red}10`, border:`1px solid ${C.red}44`,
               color:C.red, borderRadius:8, padding:"7px 14px", cursor:"pointer",
-              fontSize:12, fontWeight:600, display:"flex", alignItems:"center", gap:6 }}>
+              fontSize:14, fontWeight:600, display:"flex", alignItems:"center", gap:6 }}>
             <Trash2 size={13} strokeWidth={2} /> Clear Log
           </button>
         </Row>
@@ -827,20 +831,22 @@ const AdminSettings: React.FC = () => {
           <button onClick={handleExportJSON}
             style={{ background:C.accentBg, border:`1px solid ${C.accent}44`,
               color:C.accent, borderRadius:8, padding:"7px 14px", cursor:"pointer",
-              fontSize:12, fontWeight:600, display:"flex", alignItems:"center", gap:6 }}>
+              fontSize:14, fontWeight:600, display:"flex", alignItems:"center", gap:6 }}>
             <Download size={13} strokeWidth={2} /> Export JSON
           </button>
         </Row>
       </Block>
 
+      </div>{/* end cards flex */}
+
       <div style={{ display:"flex", gap:10, alignItems:"center" }}>
         <button onClick={() => { setSaved(true); setTimeout(()=>setSaved(false),2500); }}
           style={{ background:C.accent, color:"white", border:"none", borderRadius:8,
-            padding:"10px 20px", fontSize:14, fontWeight:700, cursor:"pointer",
+            padding:"10px 20px", fontSize:16, fontWeight:700, cursor:"pointer",
             display:"flex", alignItems:"center", gap:6 }}>
           <CheckCircle size={15} strokeWidth={2.5} /> Save Changes
         </button>
-        {saved && <span style={{ color:C.accent, fontSize:13, fontWeight:600 }}>✓ Saved</span>}
+        {saved && <span style={{ color:C.accent, fontSize:15, fontWeight:600 }}>✓ Saved</span>}
       </div>
     </div>
   );
@@ -897,7 +903,7 @@ const AuditLog: React.FC = () => {
 
   const selStyle = {
     background:C.card, border:`1px solid ${C.border}`, color:C.txtSec,
-    borderRadius:8, padding:"8px 12px", fontSize:12, cursor:"pointer", outline:"none",
+    borderRadius:8, padding:"8px 12px", fontSize:14, cursor:"pointer", outline:"none",
   };
 
   return (
@@ -915,7 +921,7 @@ const AuditLog: React.FC = () => {
       {userActivity.length > 0 && (
         <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:14,
           padding:18, marginBottom:20, boxShadow:`0 1px 4px ${C.shadow}` }}>
-          <div style={{ color:C.txtPri, fontWeight:700, fontSize:14, marginBottom:14,
+          <div style={{ color:C.txtPri, fontWeight:700, fontSize:16, marginBottom:14,
             display:"flex", alignItems:"center", gap:8 }}>
             <Award size={15} color={C.accent} strokeWidth={2} /> Most Active Users
           </div>
@@ -924,14 +930,14 @@ const AuditLog: React.FC = () => {
               <div key={u.name} style={{ display:"flex", alignItems:"center", gap:10,
                 background:C.surface, borderRadius:9, padding:"10px 12px",
                 border:`1px solid ${C.border}` }}>
-                <span style={{ color:C.txtMut, fontWeight:800, fontSize:13, minWidth:20 }}>#{i+1}</span>
+                <span style={{ color:C.txtMut, fontWeight:800, fontSize:15, minWidth:20 }}>#{i+1}</span>
                 <Avatar name={u.name} size={28} />
                 <div style={{ flex:1, minWidth:0 }}>
-                  <div style={{ color:C.txtPri, fontSize:12, fontWeight:600,
+                  <div style={{ color:C.txtPri, fontSize:14, fontWeight:600,
                     overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{u.name}</div>
                   <RoleBadge role={u.role} />
                 </div>
-                <span style={{ color:C.accent, fontWeight:800, fontSize:14 }}>{u.count}</span>
+                <span style={{ color:C.accent, fontWeight:800, fontSize:16 }}>{u.count}</span>
               </div>
             ))}
           </div>
@@ -949,7 +955,7 @@ const AuditLog: React.FC = () => {
             placeholder="Search by action, user, or detail…"
             style={{ width:"100%", background:C.card, border:`1px solid ${C.border}`,
               color:C.txtPri, borderRadius:8, padding:"8px 12px 8px 32px",
-              fontSize:13, boxSizing:"border-box", outline:"none" }} />
+              fontSize:15, boxSizing:"border-box", outline:"none" }} />
         </div>
         <select value={roleFilter} onChange={e => setRoleFilter(e.target.value as any)} style={selStyle}>
           <option value="all">All Roles</option>
@@ -981,24 +987,24 @@ const AuditLog: React.FC = () => {
               {filtered.map((e, i) => (
                 <tr key={`${e.id ?? i}`} style={{ background:i%2===0?"transparent":`${C.surface}88`,
                   borderBottom:`1px solid ${C.border}` }}>
-                  <td style={{ padding:"10px 14px", color:C.txtMut, fontSize:11, whiteSpace:"nowrap" }}>
+                  <td style={{ padding:"10px 14px", color:C.txtMut, fontSize:13, whiteSpace:"nowrap" }}>
                     {formatTime(e.timestamp)}
                   </td>
                   <td style={{ padding:"10px 14px" }}>
                     <span style={{ background:`${actionColor[e.action] ?? C.txtMut}18`,
                       color:actionColor[e.action] ?? C.txtMut,
-                      borderRadius:20, padding:"2px 10px", fontSize:11, fontWeight:700, whiteSpace:"nowrap" }}>
+                      borderRadius:20, padding:"2px 10px", fontSize:13, fontWeight:700, whiteSpace:"nowrap" }}>
                       {e.action.replace(/_/g, " ")}
                     </span>
                   </td>
                   <td style={{ padding:"10px 14px" }}>
                     <div style={{ display:"flex", alignItems:"center", gap:8 }}>
                       <Avatar name={e.actorName} size={24} />
-                      <span style={{ color:C.txtPri, fontSize:13 }}>{e.actorName}</span>
+                      <span style={{ color:C.txtPri, fontSize:15 }}>{e.actorName}</span>
                     </div>
                   </td>
                   <td style={{ padding:"10px 14px" }}><RoleBadge role={e.actorRole} /></td>
-                  <td style={{ padding:"10px 14px", color:C.txtSec, fontSize:12 }}>{e.detail}</td>
+                  <td style={{ padding:"10px 14px", color:C.txtSec, fontSize:14 }}>{e.detail}</td>
                 </tr>
               ))}
             </tbody>
@@ -1009,7 +1015,7 @@ const AuditLog: React.FC = () => {
           )}
         </div>
       )}
-      <div style={{ color:C.txtMut, fontSize:12, marginTop:10 }}>
+      <div style={{ color:C.txtMut, fontSize:14, marginTop:10 }}>
         Showing {filtered.length} of {log.length} log entries
       </div>
     </div>
@@ -1063,14 +1069,14 @@ const TeacherApprovals: React.FC = () => {
         ].map(s => (
           <div key={s.label} style={{ background:s.bg, border:`1px solid ${s.border}`,
             borderRadius:12, padding:"14px 20px", flex:"1 1 140px" }}>
-            <div style={{ color:s.color, fontSize:26, fontWeight:900 }}>{s.value}</div>
-            <div style={{ color:C.txtMut, fontSize:12, marginTop:2 }}>{s.label}</div>
+            <div style={{ color:s.color, fontSize:30, fontWeight:900 }}>{s.value}</div>
+            <div style={{ color:C.txtMut, fontSize:14, marginTop:2 }}>{s.label}</div>
           </div>
         ))}
       </div>
 
       {/* ── Pending ── */}
-      <div style={{ color:C.txtMut, fontSize:11, fontWeight:700, letterSpacing:1.5,
+      <div style={{ color:C.txtMut, fontSize:13, fontWeight:700, letterSpacing:1.5,
         textTransform:"uppercase", marginBottom:10 }}>
         Pending Approval ({pending.length})
       </div>
@@ -1079,10 +1085,10 @@ const TeacherApprovals: React.FC = () => {
         <div style={{ background:C.card, border:`2px dashed ${C.border2}`, borderRadius:14,
           padding:"40px 20px", textAlign:"center", marginBottom:28 }}>
           <GraduationCap size={36} color={C.txtMut} style={{ marginBottom:10, opacity:0.4 }} />
-          <div style={{ color:C.txtPri, fontWeight:700, fontSize:15, marginBottom:5 }}>
+          <div style={{ color:C.txtPri, fontWeight:700, fontSize:17, marginBottom:5 }}>
             No pending teachers
           </div>
-          <div style={{ color:C.txtMut, fontSize:13 }}>
+          <div style={{ color:C.txtMut, fontSize:15 }}>
             All teacher registrations have been reviewed.
           </div>
         </div>
@@ -1100,16 +1106,16 @@ const TeacherApprovals: React.FC = () => {
                 width:44, height:44, borderRadius:"50%", flexShrink:0,
                 background:"rgba(234,179,8,0.15)", border:"2px solid rgba(234,179,8,0.4)",
                 display:"flex", alignItems:"center", justifyContent:"center",
-                fontSize:17, fontWeight:800, color:"#ca8a04",
+                fontSize:19, fontWeight:800, color:"#ca8a04",
               }}>
                 {u.fullName.charAt(0).toUpperCase()}
               </div>
 
               {/* Info */}
               <div style={{ flex:1, minWidth:180 }}>
-                <div style={{ color:C.txtPri, fontWeight:700, fontSize:14 }}>{u.fullName}</div>
-                <div style={{ color:C.txtMut, fontSize:12, marginTop:2 }}>{u.email}</div>
-                <div style={{ color:C.txtMut, fontSize:11, marginTop:2 }}>
+                <div style={{ color:C.txtPri, fontWeight:700, fontSize:16 }}>{u.fullName}</div>
+                <div style={{ color:C.txtMut, fontSize:14, marginTop:2 }}>{u.email}</div>
+                <div style={{ color:C.txtMut, fontSize:13, marginTop:2 }}>
                   Registered: {new Date(u.createdAt ?? "").toLocaleString()}
                 </div>
               </div>
@@ -1118,7 +1124,7 @@ const TeacherApprovals: React.FC = () => {
               <div style={{
                 background:"rgba(234,179,8,0.1)", border:"1px solid rgba(234,179,8,0.4)",
                 borderRadius:20, padding:"4px 12px",
-                color:"#ca8a04", fontSize:11, fontWeight:700, flexShrink:0,
+                color:"#ca8a04", fontSize:13, fontWeight:700, flexShrink:0,
               }}>
                 ⏳ Pending
               </div>
@@ -1129,7 +1135,7 @@ const TeacherApprovals: React.FC = () => {
                   display:"flex", alignItems:"center", gap:6,
                   background:`${C.accent}18`, border:`1px solid ${C.accent}66`,
                   color:C.accent, borderRadius:8, padding:"8px 16px",
-                  fontSize:13, fontWeight:700, cursor:"pointer",
+                  fontSize:15, fontWeight:700, cursor:"pointer",
                 }}>
                   <CheckCircle size={14} strokeWidth={2.5} /> Approve
                 </button>
@@ -1137,7 +1143,7 @@ const TeacherApprovals: React.FC = () => {
                   display:"flex", alignItems:"center", gap:6,
                   background:`${C.red}10`, border:`1px solid ${C.red}66`,
                   color:C.red, borderRadius:8, padding:"8px 16px",
-                  fontSize:13, fontWeight:700, cursor:"pointer",
+                  fontSize:15, fontWeight:700, cursor:"pointer",
                 }}>
                   <AlertCircle size={14} strokeWidth={2.5} /> Reject
                 </button>
@@ -1150,7 +1156,7 @@ const TeacherApprovals: React.FC = () => {
       {/* ── Rejected (can be reversed) ── */}
       {rejected.length > 0 && (
         <>
-          <div style={{ color:C.txtMut, fontSize:11, fontWeight:700, letterSpacing:1.5,
+          <div style={{ color:C.txtMut, fontSize:13, fontWeight:700, letterSpacing:1.5,
             textTransform:"uppercase", marginBottom:10 }}>
             Rejected ({rejected.length})
           </div>
@@ -1165,24 +1171,24 @@ const TeacherApprovals: React.FC = () => {
                   width:40, height:40, borderRadius:"50%", flexShrink:0,
                   background:`${C.red}10`, border:`1px solid ${C.red}44`,
                   display:"flex", alignItems:"center", justifyContent:"center",
-                  fontSize:15, fontWeight:800, color:C.red,
+                  fontSize:17, fontWeight:800, color:C.red,
                 }}>
                   {u.fullName.charAt(0).toUpperCase()}
                 </div>
                 <div style={{ flex:1, minWidth:160 }}>
-                  <div style={{ color:C.txtPri, fontWeight:600, fontSize:13 }}>{u.fullName}</div>
-                  <div style={{ color:C.txtMut, fontSize:12 }}>{u.email}</div>
+                  <div style={{ color:C.txtPri, fontWeight:600, fontSize:15 }}>{u.fullName}</div>
+                  <div style={{ color:C.txtMut, fontSize:14 }}>{u.email}</div>
                 </div>
                 <div style={{ background:`${C.red}10`, border:`1px solid ${C.red}44`,
                   borderRadius:20, padding:"3px 12px",
-                  color:C.red, fontSize:11, fontWeight:700 }}>
+                  color:C.red, fontSize:13, fontWeight:700 }}>
                   ✗ Rejected
                 </div>
                 <button onClick={() => handleApprove(u.clientId)} style={{
                   display:"flex", alignItems:"center", gap:5,
                   background:`${C.accent}10`, border:`1px solid ${C.accent}55`,
                   color:C.accent, borderRadius:8, padding:"6px 14px",
-                  fontSize:12, fontWeight:700, cursor:"pointer",
+                  fontSize:14, fontWeight:700, cursor:"pointer",
                 }}>
                   <CheckCircle size={13} /> Reverse — Approve
                 </button>
@@ -1195,7 +1201,7 @@ const TeacherApprovals: React.FC = () => {
       {/* ── Approved teachers ── */}
       {approved.length > 0 && (
         <>
-          <div style={{ color:C.txtMut, fontSize:11, fontWeight:700, letterSpacing:1.5,
+          <div style={{ color:C.txtMut, fontSize:13, fontWeight:700, letterSpacing:1.5,
             textTransform:"uppercase", marginBottom:10 }}>
             Approved Teachers ({approved.length})
           </div>
@@ -1210,17 +1216,17 @@ const TeacherApprovals: React.FC = () => {
                     <td style={{ padding:"11px 14px" }}>
                       <div style={{ display:"flex", alignItems:"center", gap:10 }}>
                         <Avatar name={u.fullName} />
-                        <span style={{ color:C.txtPri, fontSize:13, fontWeight:600 }}>{u.fullName}</span>
+                        <span style={{ color:C.txtPri, fontSize:15, fontWeight:600 }}>{u.fullName}</span>
                       </div>
                     </td>
-                    <td style={{ padding:"11px 14px", color:C.txtSec, fontSize:12 }}>{u.email}</td>
-                    <td style={{ padding:"11px 14px", color:C.txtMut, fontSize:12 }}>
+                    <td style={{ padding:"11px 14px", color:C.txtSec, fontSize:14 }}>{u.email}</td>
+                    <td style={{ padding:"11px 14px", color:C.txtMut, fontSize:14 }}>
                       {new Date(u.createdAt ?? "").toLocaleDateString()}
                     </td>
                     <td style={{ padding:"11px 14px" }}>
                       <span style={{ background:`${C.accent}12`, border:`1px solid ${C.accent}44`,
                         color:C.accent, borderRadius:20, padding:"2px 10px",
-                        fontSize:11, fontWeight:700 }}>✓ Active</span>
+                        fontSize:13, fontWeight:700 }}>✓ Active</span>
                     </td>
                   </tr>
                 ))}
@@ -1341,8 +1347,8 @@ const AdminPanel: React.FC<Props> = ({ onLogout }) => {
             {sbOpen && (
               <>
                 <div style={{ flex:1, overflow:"hidden" }}>
-                  <div style={{ color:C.txtPri, fontWeight:800, fontSize:13, whiteSpace:"nowrap" }}>VirtualLab</div>
-                  <div style={{ color:C.txtMut, fontSize:10, whiteSpace:"nowrap", fontWeight:600,
+                  <div style={{ color:C.txtPri, fontWeight:800, fontSize:15, whiteSpace:"nowrap" }}>VirtualLab</div>
+                  <div style={{ color:C.txtMut, fontSize:12, whiteSpace:"nowrap", fontWeight:600,
                     textTransform:"uppercase", letterSpacing:0.8 }}>Super Admin</div>
                 </div>
                 <button onClick={() => setSbOpen(false)} title="Collapse sidebar" style={{
@@ -1370,7 +1376,7 @@ const AdminPanel: React.FC<Props> = ({ onLogout }) => {
                     borderRadius:9, border:"none", cursor:"pointer", marginBottom:3,
                     background: active ? `${C.accent}18` : "transparent",
                     color: active ? C.accent : C.txtSec,
-                    fontWeight: active ? 700 : 500, fontSize:13,
+                    fontWeight: active ? 700 : 500, fontSize:15,
                     transition:"background .15s,color .15s",
                   }}>
                   {/* Icon with badge dot */}
@@ -1381,7 +1387,7 @@ const AdminPanel: React.FC<Props> = ({ onLogout }) => {
                         position:"absolute", top:-5, right:-6,
                         background:"#dc2626", color:"white",
                         borderRadius:"50%", width:14, height:14,
-                        fontSize:9, fontWeight:800,
+                        fontSize:11, fontWeight:800,
                         display:"flex", alignItems:"center", justifyContent:"center",
                         lineHeight:1,
                       }}>{badgeN}</span>
@@ -1395,7 +1401,7 @@ const AdminPanel: React.FC<Props> = ({ onLogout }) => {
                       {badgeN > 0 && (
                         <span style={{
                           background:"#dc2626", color:"white", borderRadius:10,
-                          padding:"1px 7px", fontSize:10, fontWeight:800, flexShrink:0,
+                          padding:"1px 7px", fontSize:12, fontWeight:800, flexShrink:0,
                         }}>{badgeN}</span>
                       )}
                       {active && badgeN === 0 && (
@@ -1417,7 +1423,7 @@ const AdminPanel: React.FC<Props> = ({ onLogout }) => {
               gap: sbOpen ? 10 : 0,
               padding: sbOpen ? "11px 14px" : "11px 0",
               borderRadius:9, border:`1px solid ${C.red}33`,
-              background:`${C.red}10`, color:C.red, fontSize:13, fontWeight:700, cursor:"pointer",
+              background:`${C.red}10`, color:C.red, fontSize:15, fontWeight:700, cursor:"pointer",
             }}
             onMouseEnter={e => (e.currentTarget.style.background=`${C.red}20`)}
             onMouseLeave={e => (e.currentTarget.style.background=`${C.red}10`)}>
@@ -1442,16 +1448,16 @@ const AdminPanel: React.FC<Props> = ({ onLogout }) => {
                 cursor:"pointer", display:"flex", alignItems:"center", padding:4 }}>
                 <Menu size={20} strokeWidth={2} />
               </button>
-              {!isMobile && <span style={{ color:C.txtMut, fontSize:12 }}>Super Admin</span>}
+              {!isMobile && <span style={{ color:C.txtMut, fontSize:14 }}>Super Admin</span>}
               {!isMobile && <ChevronRight size={14} color={C.txtMut} />}
-              <span style={{ color:C.txtPri, fontWeight:700, fontSize:14 }}>{LABELS[section]}</span>
+              <span style={{ color:C.txtPri, fontWeight:700, fontSize:16 }}>{LABELS[section]}</span>
             </div>
 
             <div style={{ display:"flex", alignItems:"center", gap:8 }}>
               {!isMobile && (
                 <div style={{ background:`${C.accent}15`, border:`1px solid ${C.accent}44`,
                   borderRadius:20, padding:"3px 12px", color:C.accent,
-                  fontSize:11, fontWeight:700, display:"flex", alignItems:"center", gap:5 }}>
+                  fontSize:13, fontWeight:700, display:"flex", alignItems:"center", gap:5 }}>
                   <Shield size={11} strokeWidth={2.5} /> Super Admin
                 </div>
               )}

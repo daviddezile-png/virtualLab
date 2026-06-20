@@ -544,13 +544,20 @@ const ProtocolSidebar: React.FC<Props> = ({ isOpen, onClose, apparatus, practica
 
             <div style={S.warn}>
               <div style={{ color: "#fbbf24", fontWeight: 700, fontSize: 13, marginBottom: 6 }}>⚠ Safety Precautions</div>
-              {(isColdCream ? ["Borax is a mild irritant — avoid skin contact",
-                "Molten beeswax and hot glassware cause burns",
-                "Wear safety goggles and gloves throughout",
-              ] : ["KOH is corrosive — handle with care",
-                "Hot glassware causes burns — use appropriate care",
-                "Work carefully with all apparatus",
-              ]).map((s, i) => <div key={i} style={{ color: "#fcd34d", fontSize: 12, marginBottom: 3 }}>• {s}</div>)}
+              {(isColdCream ? [
+                { icon: "🧪", text: "Borax is a mild irritant — avoid skin contact" },
+                { icon: "🔥", text: "Molten beeswax and hot glassware cause burns" },
+                { icon: "🥽", text: "Wear safety goggles and gloves throughout" },
+              ] : [
+                { icon: "⚠️", text: "KOH is corrosive — handle with care" },
+                { icon: "🔥", text: "Hot glassware causes burns — use appropriate care" },
+                { icon: "🧤", text: "Work carefully with all apparatus" },
+              ]).map((s, i) => (
+                <div key={i} style={{ color: "#fcd34d", fontSize: 12, marginBottom: 4, display: "flex", alignItems: "flex-start", gap: 7 }}>
+                  <span style={{ fontSize: 14, lineHeight: "16px", flexShrink: 0 }}>{s.icon}</span>
+                  <span>{s.text}</span>
+                </div>
+              ))}
             </div>
           </div>
         );

@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { BEAKER_EMPTY_WEIGHTS } from "./apparatusData";
 
 interface Props {
   practicalId: string;
@@ -15,10 +16,14 @@ const SECTIONS = [
 type SectionId = typeof SECTIONS[number]["id"];
 
 /* ── tiny helpers ──────────────────────────────────────────────────────────── */
-const Bullet: React.FC<{ text: string }> = ({ text }) => (
+const Bullet: React.FC<{ text: string; icon?: string }> = ({ text, icon }) => (
   <li style={{ display:"flex", gap:10, marginBottom:8, alignItems:"flex-start" }}>
-    <span style={{ marginTop:3, flexShrink:0, width:7, height:7, borderRadius:"50%",
-      background:"#3b82f6", display:"inline-block" }} />
+    {icon ? (
+      <span style={{ flexShrink:0, fontSize:16, lineHeight:"20px" }}>{icon}</span>
+    ) : (
+      <span style={{ marginTop:3, flexShrink:0, width:7, height:7, borderRadius:"50%",
+        background:"#3b82f6", display:"inline-block" }} />
+    )}
     <span style={{ color:"#374151", fontSize:14, lineHeight:1.65 }}>{text}</span>
   </li>
 );
@@ -145,10 +150,10 @@ const PreLabNotebook: React.FC<Props> = ({ practicalId, onStart, onBack }) => {
         <div style={{ border:"1px solid #e2e8f0", borderRadius:10, overflow:"hidden", marginBottom:22 }}>
           <table style={{ width:"100%", borderCollapse:"collapse" }}>
             <tbody>
-              {[["250 mL Beaker (Oil Phase)","1","Holds beeswax + liquid paraffin"],
-                ["250 mL Beaker (Aqueous Phase)","1","Holds borax + distilled water"],
-                ["500 mL Beaker (Main Mixing)","1","Final mixing vessel"],
-                ["Digital Weight Balance","1","Weighing beeswax (±0.1 g)"],
+              {[["250 mL Beaker (Oil Phase)","1",`Holds beeswax + liquid paraffin · Empty wt ${BEAKER_EMPTY_WEIGHTS["beaker-250-oil"]} g`],
+                ["250 mL Beaker (Aqueous Phase)","1",`Holds borax + distilled water · Empty wt ${BEAKER_EMPTY_WEIGHTS["beaker-250-aqueous"]} g`],
+                ["500 mL Beaker (Main Mixing)","1",`Final mixing vessel · Empty wt ${BEAKER_EMPTY_WEIGHTS["beaker-500-main"]} g`],
+                ["Digital Weight Balance","1","Reads REAL weight (beaker + contents); subtract empty wt"],
                 ["Spatula","1","Scooping solid beeswax"],
                 ["Glass Stirring Rod","1","Stirring during & after mixing"],
                 ["Hot Plate","1","Heating both phases to 70°C"],
@@ -182,10 +187,11 @@ const PreLabNotebook: React.FC<Props> = ({ practicalId, onStart, onBack }) => {
         </div>
         <InfoBox title="⚠  Safety Precautions" color="yellow">
           <ul style={{ listStyle:"none", margin:0, padding:0 }}>
-            {["Borax is a mild irritant — avoid skin contact and wash hands after use",
-              "Molten beeswax and hot glassware cause burns — use appropriate caution",
-              "Wear safety goggles and gloves throughout the practical",
-            ].map((t,i) => <Bullet key={i} text={t} />)}
+            {[
+              { icon:"🧪", text:"Borax is a mild irritant — avoid skin contact and wash hands after use" },
+              { icon:"🔥", text:"Molten beeswax and hot glassware cause burns — use appropriate caution" },
+              { icon:"🥽", text:"Wear safety goggles and gloves throughout the practical" },
+            ].map((s,i) => <Bullet key={i} icon={s.icon} text={s.text} />)}
           </ul>
         </InfoBox>
       </>
@@ -351,10 +357,10 @@ const PreLabNotebook: React.FC<Props> = ({ practicalId, onStart, onBack }) => {
                 </thead>
                 <tbody>
                   {[
-                    ["250 mL Beaker (Oil Phase)",      "1", "Holds stearic acid + liquid paraffin"],
-                    ["250 mL Beaker (Aqueous Phase)",  "1", "Holds water + glycerin + KOH"],
-                    ["500 mL Beaker (Main Mixing)",    "1", "Final mixing vessel"],
-                    ["Digital Weight Balance",          "1", "Weighing stearic acid (±0.1 g)"],
+                    ["250 mL Beaker (Oil Phase)",      "1", `Holds stearic acid + liquid paraffin · Empty wt ${BEAKER_EMPTY_WEIGHTS["beaker-250-oil"]} g`],
+                    ["250 mL Beaker (Aqueous Phase)",  "1", `Holds water + glycerin + KOH · Empty wt ${BEAKER_EMPTY_WEIGHTS["beaker-250-aqueous"]} g`],
+                    ["500 mL Beaker (Main Mixing)",    "1", `Final mixing vessel · Empty wt ${BEAKER_EMPTY_WEIGHTS["beaker-500-main"]} g`],
+                    ["Digital Weight Balance",          "1", "Reads REAL weight (beaker + contents); subtract empty wt"],
                     ["Spatula",                         "1", "Transferring solid stearic acid"],
                     ["Glass Stirring Rod",              "1", "Stirring during mixing & cooling"],
                     ["Hot Plate",                       "1", "Heating both phases to 75°C"],
@@ -362,7 +368,7 @@ const PreLabNotebook: React.FC<Props> = ({ practicalId, onStart, onBack }) => {
                     ["Ice Bucket",                      "1", "Controlled cooling below 40°C"],
                     ["pH Meter",                        "1", "Measuring final cream pH"],
                     ["Viscosity Gauge",                 "1", "Measuring final cream viscosity"],
-                    ["100 mL Graduated Cylinder",       "1", "Measuring liquid volumes"],
+                    ["100 mL Graduated Cylinder",       "1", `Measuring liquid volumes · Empty wt ${BEAKER_EMPTY_WEIGHTS["graduated-cylinder-100"]} g`],
                   ].map(([a,b,c]) => <MatRow key={a} item={a} qty={b} purpose={c} />)}
                 </tbody>
               </table>
@@ -393,10 +399,10 @@ const PreLabNotebook: React.FC<Props> = ({ practicalId, onStart, onBack }) => {
             <InfoBox title="⚠  Safety Precautions" color="yellow">
               <ul style={{ listStyle:"none", margin:0, padding:0 }}>
                 {[
-                  "KOH is corrosive — handle with care and avoid skin contact",
-                  "Hot glassware (>70°C) causes burns — use appropriate caution",
-                  "Wear safety goggles and gloves throughout the practical",
-                ].map((t,i) => <Bullet key={i} text={t} />)}
+                  { icon:"⚠️", text:"KOH is corrosive — handle with care and avoid skin contact" },
+                  { icon:"🔥", text:"Hot glassware (>70°C) causes burns — use appropriate caution" },
+                  { icon:"🥽", text:"Wear safety goggles and gloves throughout the practical" },
+                ].map((s,i) => <Bullet key={i} icon={s.icon} text={s.text} />)}
               </ul>
             </InfoBox>
           </>
