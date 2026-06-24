@@ -12,7 +12,7 @@ import AuthPage from "./components/AuthPage";
 import StudentQAPanel from "./components/StudentQAPanel";
 import SessionWarning from "./components/SessionWarning";
 import { useSessionTimeout } from "./hooks/useSessionTimeout";
-import { Assignment } from "./utils/assignmentStore";
+import { Assignment, BASE_RECIPES, PracticalId } from "./utils/assignmentStore";
 import { logLabStarted, logCodeEntered } from "./utils/auditStore";
 import { getAllSubmissions } from "./utils/submissionStore";
 import type { LabSubmission } from "./utils/submissionStore";
@@ -75,6 +75,12 @@ function App() {
   const [latestSubmission,  setLatestSubmission]  = useState<LabSubmission | null>(null);
   const [hasQAQuestions,    setHasQAQuestions]    = useState(false);
 
+  // Self-practice only: how many times the student has previously submitted this
+  // practical in practice mode, and the amount of cream they choose to prepare.
+  // The amount picker is offered from the SECOND visit onward (prior attempts ≥ 1).
+  const [priorPracticeAttempts, setPriorPracticeAttempts] = useState(0);
+  const [practiceTargetGrams,   setPracticeTargetGrams]   = useState<number | null>(null);
+
   // Reload latest submission and Q&A availability whenever practical or appState changes
   useEffect(() => {
     if (appState !== "lab" || !user) return;
@@ -87,6 +93,22 @@ function App() {
     });
     getQuestionsForPractical(selectedPractical).then(qs => setHasQAQuestions(qs.length > 0));
   }, [appState, selectedPractical, user]);
+
+  // Count prior self-practice attempts for this practical. Drives whether the
+  // pre-lab notebook offers the "amount of cream" picker (2nd visit onward).
+  useEffect(() => {
+    if (activeAssignment || !user) return;
+    if (appState !== "pre-lab" && appState !== "lab") return;
+    const uid = (user as User).clientId ?? "";
+    getAllSubmissions().then(subs => {
+      const count = subs.filter(s =>
+        s.studentId   === uid &&
+        s.practicalId === selectedPractical &&
+        s.mode        === "practice"
+      ).length;
+      setPriorPracticeAttempts(count);
+    });
+  }, [appState, selectedPractical, user, activeAssignment]);
 
   useEffect(() => {
     const sync = () => setUser(getCurrentUser());
@@ -219,6 +241,7 @@ function App() {
         onSelect={id => {
           setActiveAssignment(null);
           setSelectedPractical(id);
+          setPracticeTargetGrams(null); // reset to base recipe for the new practical
           setAppState("pre-lab");
         }}
         onTeacherPanel={user?.role === "teacher" ? () => setAppState("teacher") : undefined}
@@ -256,6 +279,10 @@ function App() {
         )}
         <PreLabNotebook
           practicalId={selectedPractical}
+          showAmountPicker={!isAssignmentMode && priorPracticeAttempts >= 1}
+          baseGrams={BASE_RECIPES[selectedPractical as PracticalId]?.totalGrams ?? 100}
+          targetGrams={practiceTargetGrams}
+          onTargetGramsChange={setPracticeTargetGrams}
           onStart={handleLabStart}
           onBack={() => {
             setAppState("selection");
@@ -279,11 +306,8 @@ function App() {
         height:56, padding:"0 20px", zIndex:10, flexShrink:0,
       }}>
         <div style={{ display:"flex", alignItems:"center", gap:10 }}>
-          <button onClick={() => setAppState("pre-lab")} style={{
-            background:"#1e293b", border:"1px solid #334155", borderRadius:8,
-            color:"#94a3b8", padding:"6px 12px", cursor:"pointer", fontSize:12, fontWeight:600,
-          }}>← Notebook</button>
-          <div style={{ width:1, height:24, background:"#1e293b" }} />
+          {/* Once the practical has started, there is no way back to the pre-lab
+              notebook — the student is committed to the run. */}
           <div style={{ width:28, height:28, borderRadius:8,
             background: selectedPractical === "cold-cream"
               ? "linear-gradient(135deg,#6d28d9,#4c1d95)"
@@ -374,6 +398,7 @@ function App() {
             onApparatusClick={() => {}}
             practicalId={selectedPractical}
             assignment={activeAssignment}
+            practiceTargetGrams={isAssignmentMode ? null : practiceTargetGrams}
             labExpired={labExpired}
           />
         </div>

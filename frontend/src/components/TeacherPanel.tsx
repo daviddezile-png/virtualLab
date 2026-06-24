@@ -2,7 +2,7 @@ import React, { useState, useContext, createContext, useEffect } from "react";
 import {
   LayoutDashboard, TestTubes, ClipboardList, Users, BarChart2,
   ClipboardCheck, Settings, ArrowLeft, Sun, Moon, Menu,
-  Plus, Download, Edit, Trash2, Search, Upload, Copy, Eye,
+  Plus, Download, Trash2, Search, Upload, Copy, Eye,
   GripVertical, TrendingUp, Award, Clock, FileText, Bell,
   FlaskConical, FlaskRound, Beaker, User, BookOpen, Shield,
   LogOut, CheckCircle, AlertCircle, Activity, UserPlus, Filter,
@@ -22,6 +22,19 @@ import {
 import {
   ClassInvite, getClassInvites, generateClassInvite, deleteClassInvite,
 } from "../utils/classInviteStore";
+import {
+  getHeatmap, getFunnel, getAtRisk, getItemAnalysis, downloadCSV,
+  HeatmapResult, FunnelResult, AtRiskResult, ItemAnalysisResult,
+} from "../utils/analyticsStore";
+
+// Selectable time windows for the step heatmap — hours-based or days-based.
+const HEATMAP_PERIODS = [
+  { key: "24h", label: "Last 24 hours", short: "last 24 hours", period: { hours: 24 } },
+  { key: "48h", label: "Last 48 hours", short: "last 48 hours", period: { hours: 48 } },
+  { key: "7d",  label: "Last 7 days",   short: "last 7 days",   period: { days: 7 }   },
+  { key: "30d", label: "Last 30 days",  short: "last 30 days",  period: { days: 30 }  },
+  { key: "90d", label: "Last 90 days",  short: "last 90 days",  period: { days: 90 }  },
+] as const;
 
 // Persistent settings helpers
 const SETTINGS_KEY = "vlab_teacher_settings";
@@ -78,6 +91,11 @@ const LIGHT = {
 
 type Theme = typeof DARK;
 
+// Glossy gradient fill for chart bars — a soft top highlight over a base colour.
+// Gives flat bars a modern, dimensional look without any chart library.
+const barFill = (c: string) =>
+  `linear-gradient(180deg, rgba(255,255,255,0.28), rgba(255,255,255,0.03) 70%), ${c}`;
+
 const ThemeCtx = createContext<{ C: Theme; isDark: boolean; toggle: () => void }>({
   C: DARK, isDark: true, toggle: () => {},
 });
@@ -91,103 +109,9 @@ type Section =
   | "dashboard" | "questions" | "students" | "tracking"
   | "analytics" | "submissions" | "settings";
 
-interface Student {
-  id: string; name: string; email: string; enrolled: string;
-  completed: number; lastActive: string; avgScore: number;
-  status: "active" | "inactive";
-}
-interface Submission {
-  id: string; student: string; practical: string; submittedAt: string;
-  score: number; status: "graded" | "pending" | "failed"; duration: string;
-}
-interface Practical {
-  id: string; name: string; type: string; status: "active" | "inactive" | "draft";
-  enrolled: number; submissions: number; avgScore: number;
-  lastActivity: string; Icon: LucideIcon; color: string;
-}
-interface Question {
-  id: string; text: string; type: "mcq" | "short" | "long";
-  points: number; options?: string[];
-}
-interface Announcement {
-  id: string; title: string; body: string; target: string;
-  sentAt: string; read: number; total: number;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Mock data
-// ─────────────────────────────────────────────────────────────────────────────
-
-const STUDENTS: Student[] = [
-  { id:"s1",  name:"Amara Nkosi",    email:"amara@school.edu",  enrolled:"2026-01-10", completed:2, lastActive:"2 hours ago",  avgScore:88, status:"active"   },
-  { id:"s2",  name:"Brian Odhiambo", email:"brian@school.edu",  enrolled:"2026-01-10", completed:1, lastActive:"1 day ago",    avgScore:74, status:"active"   },
-  { id:"s3",  name:"Chloe Mwangi",   email:"chloe@school.edu",  enrolled:"2026-01-12", completed:2, lastActive:"3 hours ago",  avgScore:92, status:"active"   },
-  { id:"s4",  name:"David Kamau",    email:"david@school.edu",  enrolled:"2026-01-12", completed:0, lastActive:"5 days ago",   avgScore:0,  status:"inactive" },
-  { id:"s5",  name:"Eva Njoroge",    email:"eva@school.edu",    enrolled:"2026-01-14", completed:2, lastActive:"30 min ago",   avgScore:95, status:"active"   },
-  { id:"s6",  name:"Felix Otieno",   email:"felix@school.edu",  enrolled:"2026-01-14", completed:1, lastActive:"2 days ago",   avgScore:67, status:"active"   },
-  { id:"s7",  name:"Grace Wanjiru",  email:"grace@school.edu",  enrolled:"2026-01-15", completed:2, lastActive:"1 hour ago",   avgScore:81, status:"active"   },
-  { id:"s8",  name:"Hassan Ali",     email:"hassan@school.edu", enrolled:"2026-01-15", completed:1, lastActive:"4 days ago",   avgScore:71, status:"inactive" },
-  { id:"s9",  name:"Irene Chebet",   email:"irene@school.edu",  enrolled:"2026-01-18", completed:2, lastActive:"45 min ago",   avgScore:89, status:"active"   },
-  { id:"s10", name:"James Mutua",    email:"james@school.edu",  enrolled:"2026-01-18", completed:0, lastActive:"1 week ago",   avgScore:0,  status:"inactive" },
-];
-
-const SUBMISSIONS: Submission[] = [
-  { id:"sub1",  student:"Amara Nkosi",    practical:"Vanishing Cream", submittedAt:"2026-05-10 14:22", score:88, status:"graded",  duration:"52 min" },
-  { id:"sub2",  student:"Chloe Mwangi",   practical:"Vanishing Cream", submittedAt:"2026-05-10 13:55", score:92, status:"graded",  duration:"47 min" },
-  { id:"sub3",  student:"Eva Njoroge",    practical:"Cold Cream",      submittedAt:"2026-05-10 12:30", score:95, status:"graded",  duration:"44 min" },
-  { id:"sub4",  student:"Brian Odhiambo", practical:"Vanishing Cream", submittedAt:"2026-05-09 16:10", score:74, status:"graded",  duration:"68 min" },
-  { id:"sub5",  student:"Grace Wanjiru",  practical:"Cold Cream",      submittedAt:"2026-05-09 15:40", score:81, status:"graded",  duration:"59 min" },
-  { id:"sub6",  student:"Irene Chebet",   practical:"Vanishing Cream", submittedAt:"2026-05-09 11:20", score:89, status:"graded",  duration:"50 min" },
-  { id:"sub7",  student:"Felix Otieno",   practical:"Cold Cream",      submittedAt:"2026-05-08 14:05", score:67, status:"graded",  duration:"73 min" },
-  { id:"sub8",  student:"Hassan Ali",     practical:"Vanishing Cream", submittedAt:"2026-05-08 10:30", score:71, status:"pending", duration:"65 min" },
-  { id:"sub9",  student:"Amara Nkosi",    practical:"Cold Cream",      submittedAt:"2026-05-07 15:00", score:85, status:"graded",  duration:"48 min" },
-  { id:"sub10", student:"Chloe Mwangi",   practical:"Cold Cream",      submittedAt:"2026-05-07 14:20", score:94, status:"graded",  duration:"42 min" },
-];
-
-const PRACTICALS: Practical[] = [
-  { id:"vanishing-cream", name:"Vanishing Cream",    type:"O/W Emulsion", status:"active", enrolled:10, submissions:7, avgScore:82, lastActivity:"2 hours ago", Icon:FlaskConical, color:"#2563eb" },
-  { id:"cold-cream",      name:"Cold Cream",          type:"W/O Emulsion", status:"active", enrolled:10, submissions:5, avgScore:84, lastActivity:"3 hours ago", Icon:FlaskRound,   color:"#7c3aed" },
-  { id:"acid-base",       name:"Acid-Base Titration", type:"Titration",    status:"draft",  enrolled:0,  submissions:0, avgScore:0,  lastActivity:"—",           Icon:Beaker,       color:"#0f766e" },
-];
-
-const QUESTIONS_VC: Question[] = [
-  { id:"q1", text:"What type of emulsion is vanishing cream? Explain the phase arrangement.", type:"short", points:5 },
-  { id:"q2", text:"Which of the following is the primary emulsifier in vanishing cream?", type:"mcq", points:2, options:["Glycerin","Potassium stearate","Liquid paraffin","Distilled water"] },
-  { id:"q3", text:"Why must both phases be heated to 75°C before mixing?", type:"short", points:5 },
-  { id:"q4", text:"What is the acceptable pH range for the finished vanishing cream?", type:"mcq", points:2, options:["3.0–4.5","5.0–7.0","7.5–9.0","9.5–11.0"] },
-  { id:"q5", text:"Describe the role of the ice bucket step and explain why controlled cooling improves emulsion stability.", type:"long", points:10 },
-];
-
-const ANNOUNCEMENTS: Announcement[] = [
-  { id:"a1", title:"Practical 1 Now Live",  body:"Vanishing Cream practical is now open. Please complete it before Friday.", target:"All Students", sentAt:"2026-05-08 09:00", read:8, total:10 },
-  { id:"a2", title:"Cold Cream Lab Open",   body:"Cold Cream W/O emulsion practical is available. Refer to your pre-lab notebook.", target:"All Students", sentAt:"2026-05-09 08:30", read:6, total:10 },
-  { id:"a3", title:"Submission Reminder",   body:"Reminder: all submissions for Practical 1 are due tomorrow at 5 PM.", target:"All Students", sentAt:"2026-05-09 16:00", read:9, total:10 },
-];
-
 // ─────────────────────────────────────────────────────────────────────────────
 // Micro-components
 // ─────────────────────────────────────────────────────────────────────────────
-
-type BadgeStatus = "active"|"inactive"|"draft"|"graded"|"pending"|"failed";
-
-const StatusBadge: React.FC<{ status: BadgeStatus }> = ({ status }) => {
-  const { C } = useTheme();
-  const map: Record<BadgeStatus,[string,string]> = {
-    active:   [C.green,  `${C.green}18`],
-    inactive: [C.txtSec, C.surface],
-    draft:    [C.amber,  `${C.amber}18`],
-    graded:   [C.green,  `${C.green}18`],
-    pending:  [C.amber,  `${C.amber}18`],
-    failed:   [C.red,    `${C.red}18`],
-  };
-  const [color, bg] = map[status];
-  return (
-    <span style={{ background:bg, color, borderRadius:20,
-      padding:"2px 10px", fontSize:13, fontWeight:700, letterSpacing:0.3 }}>
-      {status.charAt(0).toUpperCase() + status.slice(1)}
-    </span>
-  );
-};
 
 const ScoreBar: React.FC<{ score: number }> = ({ score }) => {
   const { C } = useTheme();
@@ -204,22 +128,84 @@ const ScoreBar: React.FC<{ score: number }> = ({ score }) => {
 
 const StatCard: React.FC<{
   label:string; value:string|number; sub?:string;
-  Icon: LucideIcon; accent:string;
-}> = ({ label, value, sub, Icon, accent }) => {
+  Icon: LucideIcon; accent:string; loading?:boolean;
+}> = ({ label, value, sub, Icon, accent, loading }) => {
   const { C } = useTheme();
   return (
     <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:14,
-      padding:"18px 20px", display:"flex", gap:14, alignItems:"flex-start",
-      boxShadow:`0 1px 4px ${C.shadow}` }}>
+      padding:"20px 24px", display:"flex", gap:14, alignItems:"center", justifyContent:"center",
+      boxShadow:`0 1px 4px ${C.shadow}`, minWidth:0, flex:"1 1 220px" }}>
       <div style={{ width:44, height:44, borderRadius:12, background:`${accent}18`,
         display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>
         <Icon size={22} color={accent} strokeWidth={1.8} />
       </div>
-      <div>
+      <div style={{ minWidth:0, flex:"0 1 auto", width: loading ? 120 : undefined }}>
         <div style={{ color:C.txtMut, fontSize:13, fontWeight:600, textTransform:"uppercase",
           letterSpacing:0.8, marginBottom:4 }}>{label}</div>
-        <div style={{ color:C.txtPri, fontSize:30, fontWeight:800, lineHeight:1 }}>{value}</div>
-        {sub && <div style={{ color:C.txtSec, fontSize:14, marginTop:4 }}>{sub}</div>}
+        {loading ? (
+          <>
+            <span className="vlab-skel" style={{ width:"70%", height:24, display:"block" }} />
+            <span className="vlab-skel" style={{ width:"90%", height:11, display:"block", marginTop:8 }} />
+          </>
+        ) : (
+          <>
+            <div style={{ color:C.txtPri, fontSize:"clamp(20px,4.5vw,30px)", fontWeight:800,
+              lineHeight:1.1, whiteSpace:"nowrap" }}>{value}</div>
+            {sub && <div style={{ color:C.txtSec, fontSize:14, marginTop:4 }}>{sub}</div>}
+          </>
+        )}
+      </div>
+    </div>
+  );
+};
+
+// Shimmer placeholder + skeleton table rows — shown while the first fetch resolves.
+const Skel: React.FC<{ w?:number|string; h?:number; style?:React.CSSProperties }> =
+({ w="100%", h=14, style }) => (
+  <span className="vlab-skel" style={{ width:w, height:h, ...style }} />
+);
+
+const SkeletonRows: React.FC<{ rows?:number; cols:number }> = ({ rows=6, cols }) => {
+  const { C } = useTheme();
+  return (
+    <tbody>
+      {Array.from({ length: rows }).map((_, r) => (
+        <tr key={r} style={{ borderBottom:`1px solid ${C.border}` }}>
+          {Array.from({ length: cols }).map((_, c) => (
+            <td key={c} style={{ padding:"13px 14px" }}>
+              <Skel w={c === 0 ? "70%" : c === cols-1 ? "40%" : "55%"} />
+            </td>
+          ))}
+        </tr>
+      ))}
+    </tbody>
+  );
+};
+
+// Rows-per-page pagination — applied to every data table for mobile-friendly browsing.
+const PAGE_SIZE = 10;
+
+const Pagination: React.FC<{ page:number; total:number; onPage:(p:number)=>void; unit?:string }> =
+({ page, total, onPage, unit="rows" }) => {
+  const { C } = useTheme();
+  const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const from = total === 0 ? 0 : page * PAGE_SIZE + 1;
+  const to   = Math.min(total, (page + 1) * PAGE_SIZE);
+  const btn = (disabled:boolean):React.CSSProperties => ({
+    background: C.card, border:`1px solid ${C.border2}`,
+    color: disabled ? C.txtMut : C.txtSec, borderRadius:8, padding:"6px 12px",
+    fontSize:14, fontWeight:600, cursor: disabled ? "default" : "pointer", opacity: disabled ? 0.5 : 1,
+  });
+  return (
+    <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between",
+      gap:10, marginTop:12, flexWrap:"wrap" }}>
+      <span style={{ color:C.txtMut, fontSize:14 }}>{from}–{to} of {total} {unit}</span>
+      <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+        <button disabled={page===0} onClick={() => onPage(page-1)} style={btn(page===0)}>Prev</button>
+        <span style={{ color:C.txtSec, fontSize:14, padding:"0 4px", whiteSpace:"nowrap" }}>
+          Page {page+1} / {pageCount}
+        </span>
+        <button disabled={page>=pageCount-1} onClick={() => onPage(page+1)} style={btn(page>=pageCount-1)}>Next</button>
       </div>
     </div>
   );
@@ -244,19 +230,26 @@ const Btn: React.FC<{
   Icon?: LucideIcon; small?:boolean;
 }> = ({ label, onClick, variant="primary", Icon: IconComp, small }) => {
   const { C } = useTheme();
+  const [spinning, setSpinning] = useState(false);
+  // Spin the icon briefly on Refresh buttons so the click registers visually
+  const spinnable = IconComp === RefreshCw && label.toLowerCase().includes("refresh");
   const map: Record<string,React.CSSProperties> = {
     primary: { background:C.accent,     color:"white",  border:"none" },
     ghost:   { background:"transparent",color:C.txtSec, border:`1px solid ${C.border2}` },
     danger:  { background:`${C.red}12`, color:C.red,    border:`1px solid ${C.red}44`  },
   };
+  const handleClick = () => {
+    if (spinnable) { setSpinning(true); setTimeout(() => setSpinning(false), 600); }
+    onClick?.();
+  };
   return (
-    <button onClick={onClick} style={{
+    <button onClick={handleClick} style={{
       ...map[variant], borderRadius:8,
       padding: small ? "6px 12px" : "9px 18px",
       fontSize: small ? 14 : 15, fontWeight:600, cursor:"pointer",
       display:"flex", alignItems:"center", gap:6, whiteSpace:"nowrap",
     }}>
-      {IconComp && <IconComp size={small ? 13 : 15} strokeWidth={2} />}
+      {IconComp && <IconComp size={small ? 13 : 15} strokeWidth={2} className={spinning ? "vlab-icon-spin" : undefined} />}
       {label}
     </button>
   );
@@ -330,39 +323,60 @@ const resultBadge = (r: "PASS"|"AVERAGE"|"FAIL", C: ReturnType<typeof useTheme>[
   );
 };
 
-const Dashboard: React.FC = () => {
+const Dashboard: React.FC<{ onNavigate?: (s: Section) => void }> = ({ onNavigate }) => {
   const { C } = useTheme();
   const [stats, setStats]       = useState<StatsResult>({
     total: 0, passed: 0, average: 0, failed: 0, classAvg: 0, todayCount: 0, avgDur: 0,
   });
   const [allSubs, setAllSubs]   = useState<LabSubmission[]>([]);
   const [students, setStudents] = useState<StoreUser[]>([]);
+  const [refresh, setRefresh]   = useState(0);
+  const [qaSpin, setQaSpin]     = useState(false);
+  const [loading, setLoading]   = useState(true);
 
   useEffect(() => {
-    getStats().then(setStats);
-    getAllSubmissions().then(subs =>
-      setAllSubs(subs.slice().sort((a, b) =>
-        new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime()
-      ))
-    );
-    getStudents().then(users => setStudents(users.filter(u => u.role === "student")));
-  }, []);
+    setLoading(true);
+    Promise.all([
+      getStats().then(setStats),
+      getAllSubmissions().then(subs =>
+        setAllSubs(subs.slice().sort((a, b) =>
+          new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime()
+        ))
+      ),
+      getStudents().then(users => setStudents(users.filter(u => u.role === "student"))),
+    ]).finally(() => setLoading(false));
+  }, [refresh]);
+
+  const exportAnalytics = () => downloadCSV(
+    `dashboard-analytics_${new Date().toISOString().slice(0,10)}.csv`,
+    allSubs.map(s => ({
+      student:    s.studentName,
+      regNumber:  s.studentReg ?? "",
+      practical:  s.practicalId === "vanishing-cream" ? "Vanishing Cream" : "Cold Cream",
+      score:      s.scorePct,
+      result:     s.result,
+      durationMin: s.durationSec > 0 ? Math.round(s.durationSec / 60) : "",
+      submittedAt: s.submittedAt,
+    })),
+  );
 
   const quickActions = [
-    { Icon:ClipboardList, label:"Create Assignment",   color:C.accent  },
-    { Icon:Download,      label:"Export Analytics",    color:C.amber   },
-    { Icon:RefreshCw,     label:"Refresh Data",        color:C.green   },
+    { Icon:ClipboardList, label:"Create Assignment",   color:C.accent, onClick:() => onNavigate?.("questions") },
+    { Icon:Download,      label:"Export Analytics",    color:C.amber,  onClick:exportAnalytics },
+    { Icon:RefreshCw,     label:"Refresh Data",        color:C.green,  onClick:() => {
+      setQaSpin(true); setTimeout(() => setQaSpin(false), 600); setRefresh(r => r + 1);
+    } },
   ];
 
   return (
     <div>
       <SectionHeading title="Dashboard" sub="Real-time overview of your lab sessions." />
 
-      <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))", gap:16, marginBottom:28 }}>
-        <StatCard label="Registered Students" value={students.length} sub="Self-registered accounts"   Icon={Users}         accent={C.accent} />
-        <StatCard label="Total Submissions"   value={stats.total}     sub={`${stats.todayCount} today`} Icon={ClipboardCheck} accent={C.green}  />
-        <StatCard label="Class Average"       value={stats.total > 0 ? `${stats.classAvg}%` : "—"} sub="Based on real evals" Icon={TrendingUp} accent={C.amber} />
-        <StatCard label="Avg Duration"        value={stats.total > 0 ? `${stats.avgDur} min` : "—"} sub="Time per practical" Icon={Clock}      accent="#7c3aed" />
+      <div style={{ display:"flex", flexWrap:"wrap", gap:14, marginBottom:28 }}>
+        <StatCard loading={loading} label="Registered Students" value={students.length} sub="Self-registered accounts"   Icon={Users}         accent={C.accent} />
+        <StatCard loading={loading} label="Total Submissions"   value={stats.total}     sub={`${stats.todayCount} today`} Icon={ClipboardCheck} accent={C.green}  />
+        <StatCard loading={loading} label="Class Average"       value={stats.total > 0 ? `${stats.classAvg}%` : "—"} sub="Based on real evals" Icon={TrendingUp} accent={C.amber} />
+        <StatCard loading={loading} label="Avg Duration"        value={stats.total > 0 ? `${stats.avgDur} min` : "—"} sub="Time per practical" Icon={Clock}      accent="#7c3aed" />
       </div>
 
       <div className="tp-grid-dash" style={{ display:"grid", gridTemplateColumns:"1fr 300px", gap:20, alignItems:"start" }}>
@@ -374,14 +388,21 @@ const Dashboard: React.FC = () => {
             <span style={{ color:C.txtPri, fontWeight:700, fontSize:16 }}>Recent Submissions</span>
             <span style={{ color:C.txtMut, fontSize:14 }}>{allSubs.length} total</span>
           </div>
-          {allSubs.length === 0 ? (
+          {loading ? (
+            <div className="tp-table-wrap">
+            <table style={{ width:"100%", borderCollapse:"collapse", minWidth:600 }}>
+              <TableHead cols={["Student","Practical","Score","Result","Duration"]} />
+              <SkeletonRows cols={5} rows={5} />
+            </table>
+            </div>
+          ) : allSubs.length === 0 ? (
             <div style={{ padding:"32px 20px", textAlign:"center", color:C.txtMut }}>
               <ClipboardCheck size={28} style={{ marginBottom:8, opacity:0.3 }} />
               <div style={{ fontSize:15 }}>No submissions yet. Students will appear here after evaluating a practical.</div>
             </div>
           ) : (
             <div className="tp-table-wrap">
-            <table style={{ width:"100%", borderCollapse:"collapse" }}>
+            <table style={{ width:"100%", borderCollapse:"collapse", minWidth:600 }}>
               <TableHead cols={["Student","Practical","Score","Result","Duration"]} />
               <tbody>
                 {allSubs.slice(0,6).map((s,i) => (
@@ -415,14 +436,15 @@ const Dashboard: React.FC = () => {
         <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:14,
           padding:18, boxShadow:`0 1px 4px ${C.shadow}` }}>
           <div style={{ color:C.txtPri, fontWeight:700, fontSize:16, marginBottom:14 }}>Quick Actions</div>
-          {quickActions.map(({ Icon:Ic, label, color }) => (
-            <button key={label} style={{ width:"100%", display:"flex", alignItems:"center", gap:10,
+          {quickActions.map(({ Icon:Ic, label, color, onClick }) => (
+            <button key={label} onClick={onClick} style={{ width:"100%", display:"flex", alignItems:"center", gap:10,
               background:"transparent", border:`1px solid ${C.border}`, borderRadius:8,
               padding:"10px 12px", marginBottom:8, cursor:"pointer", color:C.txtSec,
               fontSize:15, fontWeight:600 }}>
               <span style={{ width:30, height:30, borderRadius:8, background:`${color}18`,
                 display:"flex", alignItems:"center", justifyContent:"center" }}>
-                <Ic size={16} color={color} strokeWidth={2} />
+                <Ic size={16} color={color} strokeWidth={2}
+                  className={label === "Refresh Data" && qaSpin ? "vlab-icon-spin" : undefined} />
               </span>
               {label}
             </button>
@@ -451,97 +473,6 @@ const Dashboard: React.FC = () => {
               ))}
             </div>
           )}
-        </div>
-      </div>
-    </div>
-  );
-};
-
-// Placeholder kept to avoid removing the original Practicals component references
-// (it's no longer in the nav — just remove dead code silently)
-const Practicals: React.FC = () => {
-  const { C } = useTheme();
-  const [list, setList] = useState(PRACTICALS);
-
-  const toggleStatus = (id:string) =>
-    setList(prev => prev.map(p =>
-      p.id===id ? { ...p, status:(p.status==="active"?"inactive":"active") as Practical["status"] } : p
-    ));
-
-  return (
-    <div>
-      <SectionHeading title="Practicals" sub="Manage all lab practicals and control student access."
-        action={<Btn label="Add Practical" Icon={Plus} />} />
-
-      <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(300px,1fr))", gap:18 }}>
-        {list.map(p => (
-          <div key={p.id} style={{ background:C.card, border:`1px solid ${C.border}`,
-            borderRadius:14, overflow:"hidden", boxShadow:`0 1px 4px ${C.shadow}` }}>
-            <div style={{ height:4, background: p.status==="active" ? p.color : C.border }} />
-            <div style={{ padding:20 }}>
-              <div style={{ display:"flex", alignItems:"flex-start", justifyContent:"space-between", marginBottom:14 }}>
-                <div style={{ display:"flex", gap:12, alignItems:"center" }}>
-                  <div style={{ width:46, height:46, borderRadius:12, background:`${p.color}18`,
-                    display:"flex", alignItems:"center", justifyContent:"center" }}>
-                    <p.Icon size={24} color={p.color} strokeWidth={1.6} />
-                  </div>
-                  <div>
-                    <div style={{ color:C.txtPri, fontWeight:700, fontSize:17 }}>{p.name}</div>
-                    <div style={{ color:C.txtMut, fontSize:14 }}>{p.type}</div>
-                  </div>
-                </div>
-                <StatusBadge status={p.status} />
-              </div>
-
-              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:10, marginBottom:16 }}>
-                {[
-                  { label:"Students",  val:p.enrolled },
-                  { label:"Submitted", val:p.submissions },
-                  { label:"Avg Score", val: p.avgScore>0 ? `${p.avgScore}%` : "—" },
-                ].map(({ label, val }) => (
-                  <div key={label} style={{ background:C.surface, borderRadius:8, padding:"8px 10px",
-                    textAlign:"center", border:`1px solid ${C.border}` }}>
-                    <div style={{ color:C.txtPri, fontWeight:700, fontSize:18 }}>{val}</div>
-                    <div style={{ color:C.txtMut, fontSize:12, marginTop:2, textTransform:"uppercase", letterSpacing:0.5 }}>{label}</div>
-                  </div>
-                ))}
-              </div>
-
-              <div style={{ color:C.txtMut, fontSize:13, marginBottom:16, display:"flex", alignItems:"center", gap:5 }}>
-                <Activity size={12} color={C.txtMut} />
-                Last activity: {p.lastActivity}
-              </div>
-
-              <div style={{ display:"flex", gap:8 }}>
-                <Btn label="Edit"      Icon={Edit}         variant="ghost" small />
-                <Btn label="Questions" Icon={ClipboardList} variant="ghost" small />
-                <button onClick={() => toggleStatus(p.id)} style={{
-                  marginLeft:"auto",
-                  background: p.status==="active" ? `${C.red}10` : `${C.green}10`,
-                  color:      p.status==="active" ? C.red : C.green,
-                  border:    `1px solid ${p.status==="active" ? `${C.red}44` : `${C.green}44`}`,
-                  borderRadius:8, padding:"6px 12px", cursor:"pointer", fontSize:14, fontWeight:600,
-                  display:"flex", alignItems:"center", gap:5,
-                }}>
-                  {p.status==="active"
-                    ? <><AlertCircle size={13} strokeWidth={2} />Deactivate</>
-                    : <><CheckCircle size={13} strokeWidth={2} />Activate</>}
-                </button>
-              </div>
-            </div>
-          </div>
-        ))}
-
-        {/* Add card */}
-        <div style={{ border:`2px dashed ${C.border2}`, borderRadius:14,
-          display:"flex", flexDirection:"column", alignItems:"center",
-          justifyContent:"center", minHeight:220, cursor:"pointer", gap:10, color:C.txtMut }}>
-          <div style={{ width:52, height:52, borderRadius:14, background:C.surface,
-            border:`1px solid ${C.border}`, display:"flex", alignItems:"center", justifyContent:"center" }}>
-            <Plus size={24} color={C.txtMut} strokeWidth={1.8} />
-          </div>
-          <div style={{ fontSize:16, fontWeight:600 }}>New Practical</div>
-          <div style={{ fontSize:14 }}>Click to create</div>
         </div>
       </div>
     </div>
@@ -619,7 +550,7 @@ const AssignmentsTab: React.FC = () => {
   const practicalName = practicalId === "vanishing-cream" ? "Vanishing Cream" : "Cold Cream";
 
   return (
-    <div className="tp-grid-2col" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20, alignItems: "start" }}>
+    <div className="tp-grid-assign" style={{ display: "grid", gridTemplateColumns: "1fr", gap: 20, alignItems: "start" }}>
 
       {/* ── Create assignment ── */}
       <div style={{ background: C.card, border: `1px solid ${C.border}`,
@@ -1311,10 +1242,15 @@ const Students: React.FC = () => {
   const [addOk,       setAddOk]       = useState(false);
 
   const [allStudents, setAllStudents] = useState<StoreUser[]>([]);
+  const [loading,     setLoading]     = useState(true);
+  const [page, setPage] = useState(0);
 
   useEffect(() => {
     // role guard: even if the API ever misbehaved, never show non-students here
-    getStudents().then(users => setAllStudents(users.filter(u => u.role === "student")));
+    setLoading(true);
+    getStudents()
+      .then(users => setAllStudents(users.filter(u => u.role === "student")))
+      .finally(() => setLoading(false));
   }, [refresh]);
 
   const filtered = allStudents.filter(u =>
@@ -1322,6 +1258,11 @@ const Students: React.FC = () => {
     u.email.toLowerCase().includes(search.toLowerCase()) ||
     (u.regNumber ?? "").toLowerCase().includes(search.toLowerCase())
   );
+
+  useEffect(() => { setPage(0); }, [search, refresh]);
+  const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const safePage  = Math.min(page, pageCount - 1);
+  const paged     = filtered.slice(safePage * PAGE_SIZE, safePage * PAGE_SIZE + PAGE_SIZE);
 
   const resetForm = () => {
     setNewName(""); setNewEmail(""); setNewReg(""); setNewPass(""); setAddError(null);
@@ -1362,7 +1303,16 @@ const Students: React.FC = () => {
               onClick={() => { resetForm(); setShowAdd(v => !v); }} />
             <Btn label="Refresh" Icon={RefreshCw} variant="ghost" small
               onClick={() => setRefresh(r => r + 1)} />
-            <Btn label="Export CSV" Icon={Download} variant="ghost" small />
+            <Btn label="Export CSV" Icon={Download} variant="ghost" small
+              onClick={() => downloadCSV(
+                `students_${new Date().toISOString().slice(0,10)}.csv`,
+                filtered.map(u => ({
+                  fullName:  u.fullName,
+                  regNumber: u.regNumber ?? "",
+                  email:     u.email,
+                  status:    u.suspended ? "suspended" : (u.status ?? "active"),
+                })),
+              )} />
           </div>
         }
       />
@@ -1437,7 +1387,17 @@ const Students: React.FC = () => {
         </div>
       </div>
 
-      {allStudents.length === 0 ? (
+      {loading ? (
+        <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:14,
+          overflow:"hidden", boxShadow:`0 1px 4px ${C.shadow}` }}>
+          <div className="tp-table-wrap">
+          <table style={{ width:"100%", borderCollapse:"collapse", minWidth:640 }}>
+            <TableHead cols={["Student","Email","Reg Number","Joined",""]} />
+            <SkeletonRows cols={5} />
+          </table>
+          </div>
+        </div>
+      ) : allStudents.length === 0 ? (
         <div style={{ background:C.card, border:`2px dashed ${C.border2}`, borderRadius:14,
           padding:"48px 20px", textAlign:"center" }}>
           <Users size={36} color={C.txtMut} style={{ marginBottom:12, opacity:0.4 }} />
@@ -1453,10 +1413,10 @@ const Students: React.FC = () => {
         <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:14,
           overflow:"hidden", boxShadow:`0 1px 4px ${C.shadow}` }}>
           <div className="tp-table-wrap">
-          <table style={{ width:"100%", borderCollapse:"collapse" }}>
+          <table style={{ width:"100%", borderCollapse:"collapse", minWidth:640 }}>
             <TableHead cols={["Student","Email","Reg Number","Joined",""]} />
             <tbody>
-              {filtered.map((u, i) => (
+              {paged.map((u, i) => (
                 <tr key={u.clientId} style={{ background: i%2===0 ? "transparent" : `${C.surface}88`,
                   borderBottom:`1px solid ${C.border}` }}>
                   <td style={{ padding:"12px 14px" }}>
@@ -1466,11 +1426,12 @@ const Students: React.FC = () => {
                     </div>
                   </td>
                   <td style={{ padding:"12px 14px", color:C.txtSec, fontSize:14 }}>{u.email}</td>
-                  <td style={{ padding:"12px 14px" }}>
+                  <td style={{ padding:"12px 14px", whiteSpace:"nowrap" }}>
                     {u.regNumber
                       ? <code style={{ background:`${C.green}12`, color:C.green,
                           border:`1px solid ${C.green}44`, borderRadius:5,
-                          padding:"2px 8px", fontSize:14, fontWeight:700 }}>
+                          padding:"2px 8px", fontSize:14, fontWeight:700,
+                          whiteSpace:"nowrap" }}>
                           {u.regNumber}
                         </code>
                       : <span style={{ color:C.txtMut, fontSize:14 }}>—</span>}
@@ -1495,9 +1456,9 @@ const Students: React.FC = () => {
           )}
         </div>
       )}
-      <div style={{ color:C.txtMut, fontSize:14, marginTop:10 }}>
-        Showing {filtered.length} of {allStudents.length} students in your class
-      </div>
+      {allStudents.length > 0 && (
+        <Pagination page={safePage} total={filtered.length} onPage={setPage} unit="students" />
+      )}
     </div>
   );
 };
@@ -1505,6 +1466,224 @@ const Students: React.FC = () => {
 // ─────────────────────────────────────────────────────────────────────────────
 // Analytics
 // ─────────────────────────────────────────────────────────────────────────────
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Telemetry & decision-aid insights — step heatmap, completion funnel,
+// at-risk students and Q&A item analysis. All from real backend analytics.
+// ─────────────────────────────────────────────────────────────────────────────
+const TelemetryInsights: React.FC = () => {
+  const { C } = useTheme();
+  const [heatmap, setHeatmap] = useState<HeatmapResult | null>(null);
+  const [funnel,  setFunnel]  = useState<FunnelResult | null>(null);
+  const [atRisk,  setAtRisk]  = useState<AtRiskResult | null>(null);
+  const [items,   setItems]   = useState<ItemAnalysisResult | null>(null);
+  const [itemPractical, setItemPractical] = useState<string>("");
+  const [heatPeriod, setHeatPeriod] = useState<string>("30d");
+  const [refresh, setRefresh] = useState(0);
+
+  const heatPreset = HEATMAP_PERIODS.find(p => p.key === heatPeriod) ?? HEATMAP_PERIODS[3];
+
+  useEffect(() => {
+    getFunnel().then(setFunnel);
+    getAtRisk().then(setAtRisk);
+  }, [refresh]);
+  useEffect(() => {
+    getHeatmap(heatPreset.period).then(setHeatmap);
+  }, [heatPeriod, refresh]);
+  useEffect(() => {
+    getItemAnalysis(itemPractical || undefined).then(setItems);
+  }, [itemPractical, refresh]);
+
+  const Card: React.FC<{ title: string; Icon: LucideIcon; color: string;
+    action?: React.ReactNode; children: React.ReactNode }> =
+    ({ title, Icon: Ic, color, action, children }) => (
+    <div className="vlab-chart-card" style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:14,
+      padding:20, boxShadow:`0 1px 4px ${C.shadow}`, position:"relative", overflow:"hidden" }}>
+      {/* accent strip across the top edge */}
+      <div style={{ position:"absolute", top:0, left:0, right:0, height:3,
+        background:`linear-gradient(90deg, ${color}, ${color}33)` }} />
+      <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:16 }}>
+        <div style={{ width:32, height:32, borderRadius:9, background:`${color}1a`,
+          display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>
+          <Ic size={16} color={color} strokeWidth={2.2} />
+        </div>
+        <span style={{ color:C.txtPri, fontWeight:800, fontSize:16 }}>{title}</span>
+        <span style={{ marginLeft:"auto" }}>{action}</span>
+      </div>
+      {children}
+    </div>
+  );
+
+  const riskColor = (sev: string) => sev === "high" ? C.red : sev === "medium" ? C.amber : C.txtSec;
+
+  const exportAtRisk = () => downloadCSV(`at-risk_${new Date().toISOString().slice(0,10)}.csv`,
+    (atRisk?.students ?? []).map(s => ({
+      Name:s.name, Reg:s.regNumber ?? "", Email:s.email, Severity:s.severity,
+      Attempts:s.attempts, "Avg Score (%)":s.avgScore, Fails:s.failCount,
+      "Idle Days":s.idleDays ?? "", Reasons:s.reasons.join("; "),
+    })));
+
+  const exportItems = () => downloadCSV(`item-analysis_${new Date().toISOString().slice(0,10)}.csv`,
+    (items?.items ?? []).map(i => ({
+      Question:i.text, Type:i.type, Practical:i.practicalId, Answered:i.answered,
+      Correct:i.correct, Wrong:i.wrong, Pending:i.pending,
+      "Correct (%)":i.correctPct ?? "n/a",
+    })));
+
+  return (
+    <div style={{ marginTop:20, display:"grid", gap:20 }}>
+      <SectionHeading title="Telemetry & Insights" sub="Step-level performance and decision aids drawn from live lab activity."
+        action={<Btn label="Refresh" Icon={RefreshCw} variant="ghost" small onClick={() => setRefresh(r => r + 1)} />} />
+
+      <div className="tp-grid-2col" style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:20 }}>
+        {/* ── Step heatmap (Phase 2) ── */}
+        <Card title={`Step Heatmap — ${heatPreset.short}`} Icon={Activity} color={C.accent}
+          action={
+            <select value={heatPeriod} onChange={e => setHeatPeriod(e.target.value)}
+              style={{ background:C.surface, color:C.txtPri, border:`1px solid ${C.border2}`,
+                borderRadius:7, padding:"5px 8px", fontSize:13 }}>
+              {HEATMAP_PERIODS.map(p => <option key={p.key} value={p.key}>{p.label}</option>)}
+            </select>
+          }>
+          {!heatmap || heatmap.totalEvents === 0 ? (
+            <div style={{ color:C.txtMut, fontSize:14 }}>No step activity recorded in this period.</div>
+          ) : (
+            <>
+              <div style={{ display:"flex", flexWrap:"wrap", gap:8, marginBottom:14 }}>
+                {[["Success",C.green],["Warning",C.amber],["Error",C.red],["Info",C.border2]].map(([l,c]) => (
+                  <span key={l} className="vlab-legend-pill" style={{ background:`${c}1a`, color:c }}>
+                    <span className="vlab-legend-dot" style={{ background:c }} />{l}
+                  </span>
+                ))}
+              </div>
+              {heatmap.stages.filter(s => s.total > 0).map(s => {
+                const t = s.total || 1;
+                const seg = (w:number, c:string) => w>0 && (
+                  <div style={{ width:`${w/t*100}%`, background:barFill(c) }} />
+                );
+                return (
+                  <div key={s.stage} style={{ marginBottom:15 }}>
+                    <div style={{ display:"flex", justifyContent:"space-between", marginBottom:6 }}>
+                      <span style={{ color:C.txtSec, fontSize:14, fontWeight:600 }}>{s.stage}</span>
+                      <span style={{ color:C.txtMut, fontSize:13 }}>{s.total} events</span>
+                    </div>
+                    <div className="vlab-hbar-track" style={{ display:"flex", height:16, borderRadius:8, overflow:"hidden",
+                      border:`1px solid ${C.border}`, boxShadow:`inset 0 1px 2px ${C.shadow}` }}>
+                      <div className="vlab-hbar" style={{ display:"flex", width:"100%", height:"100%" }}>
+                        {seg(s.success, C.green)}
+                        {seg(s.warning, C.amber)}
+                        {seg(s.error, C.red)}
+                        {seg(s.info, C.border2)}
+                      </div>
+                    </div>
+                    <div style={{ color:C.txtMut, fontSize:12, marginTop:5 }}>
+                      <span style={{ color:C.green }}>{s.success} ✓</span> · <span style={{ color:C.amber }}>{s.warning} ⚠</span> · <span style={{ color:C.red }}>{s.error} ✗</span>
+                    </div>
+                  </div>
+                );
+              })}
+            </>
+          )}
+        </Card>
+
+        {/* ── Completion funnel (Phase 3) ── */}
+        <Card title="Completion Funnel" Icon={Filter} color="#7c3aed">
+          {!funnel || funnel.funnel.length === 0 ? (
+            <div style={{ color:C.txtMut, fontSize:14 }}>No funnel data yet.</div>
+          ) : (() => {
+            const top = funnel.funnel[0]?.count || 1;
+            const shades = ["#7c3aed", "#8b5cf6", "#a78bfa", "#c4b5fd"];
+            return funnel.funnel.map((f, i) => {
+              const prev = i > 0 ? funnel.funnel[i-1].count : f.count;
+              const conv = prev > 0 ? Math.round(f.count/prev*100) : 0;
+              const col  = shades[Math.min(i, shades.length-1)];
+              return (
+                <div key={f.stage} style={{ marginBottom:14 }}>
+                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:6 }}>
+                    <span style={{ color:C.txtSec, fontSize:14, fontWeight:600 }}>{f.stage}</span>
+                    <span style={{ display:"flex", alignItems:"center", gap:8 }}>
+                      <span style={{ color:C.txtPri, fontSize:16, fontWeight:800, fontFamily:"monospace" }}>{f.count}</span>
+                      {i > 0 && (
+                        <span style={{ fontSize:11, fontWeight:700, color:col, background:`${col}22`,
+                          borderRadius:20, padding:"2px 8px" }}>{conv}%</span>
+                      )}
+                    </span>
+                  </div>
+                  <div className="vlab-hbar-track" style={{ height:16, background:C.surface, borderRadius:8, overflow:"hidden",
+                    border:`1px solid ${C.border}`, boxShadow:`inset 0 1px 2px ${C.shadow}` }}>
+                    <div className="vlab-hbar" style={{ width:`${Math.max(2, f.count/top*100)}%`, height:"100%",
+                      background:barFill(col), borderRadius:8, boxShadow:`0 0 12px -1px ${col}99` }} />
+                  </div>
+                </div>
+              );
+            });
+          })()}
+        </Card>
+      </div>
+
+      {/* ── At-risk students (Phase 3 + export Phase 4) ── */}
+      <Card title={`At-Risk Students${atRisk ? ` (${atRisk.flaggedCount})` : ""}`}
+        Icon={AlertCircle} color={C.red}
+        action={<Btn label="Export CSV" Icon={Download} variant="ghost" small onClick={exportAtRisk} />}>
+        {!atRisk || atRisk.students.length === 0 ? (
+          <div style={{ color:C.txtMut, fontSize:14 }}>No students currently flagged. 🎉</div>
+        ) : atRisk.students.map(s => (
+          <div key={s.studentId} style={{ display:"flex", alignItems:"center", gap:10,
+            padding:"10px 0", borderBottom:`1px solid ${C.border}` }}>
+            <Avatar name={s.name} size={30} />
+            <div style={{ flex:1, minWidth:0 }}>
+              <div style={{ color:C.txtPri, fontSize:15, fontWeight:600 }}>{s.name}</div>
+              <div style={{ color:C.txtMut, fontSize:12 }}>{s.reasons.join(" · ")}</div>
+            </div>
+            <span style={{ color:riskColor(s.severity), fontWeight:700, fontSize:13,
+              background:`${riskColor(s.severity)}18`, borderRadius:20, padding:"2px 10px",
+              textTransform:"uppercase", letterSpacing:0.4 }}>{s.severity}</span>
+          </div>
+        ))}
+      </Card>
+
+      {/* ── Item analysis (Phase 3 + export Phase 4) ── */}
+      <Card title="Q&A Item Analysis" Icon={ListChecks} color={C.amber}
+        action={
+          <div style={{ display:"flex", gap:8, alignItems:"center" }}>
+            <select value={itemPractical} onChange={e => setItemPractical(e.target.value)}
+              style={{ background:C.surface, color:C.txtPri, border:`1px solid ${C.border2}`,
+                borderRadius:7, padding:"5px 8px", fontSize:13 }}>
+              <option value="">All practicals</option>
+              <option value="vanishing-cream">Vanishing Cream</option>
+              <option value="cold-cream">Cold Cream</option>
+            </select>
+            <Btn label="Export CSV" Icon={Download} variant="ghost" small onClick={exportItems} />
+          </div>
+        }>
+        {!items || items.items.length === 0 ? (
+          <div style={{ color:C.txtMut, fontSize:14 }}>No answers submitted yet.</div>
+        ) : items.items.map(i => {
+          const pct = i.correctPct;
+          const barColor = pct === null ? C.border2 : pct >= 70 ? C.green : pct >= 40 ? C.amber : C.red;
+          return (
+            <div key={i.questionId} style={{ marginBottom:14 }}>
+              <div style={{ display:"flex", justifyContent:"space-between", gap:12, marginBottom:5 }}>
+                <span style={{ color:C.txtSec, fontSize:14, flex:1 }}>{i.text}</span>
+                <span style={{ color:barColor, fontWeight:700, fontSize:14, whiteSpace:"nowrap" }}>
+                  {pct === null ? "ungraded" : `${pct}%`}
+                </span>
+              </div>
+              <div className="vlab-hbar-track" style={{ height:10, background:C.surface, borderRadius:6, overflow:"hidden",
+                border:`1px solid ${C.border}`, boxShadow:`inset 0 1px 2px ${C.shadow}` }}>
+                <div className="vlab-hbar" style={{ width:`${pct ?? 0}%`, height:"100%",
+                  background:barFill(barColor), borderRadius:6, boxShadow:`0 0 8px -1px ${barColor}99` }} />
+              </div>
+              <div style={{ color:C.txtMut, fontSize:12, marginTop:3 }}>
+                {i.correct} correct · {i.wrong} wrong{i.pending > 0 ? ` · ${i.pending} pending` : ""} of {i.answered}
+              </div>
+            </div>
+          );
+        })}
+      </Card>
+    </div>
+  );
+};
 
 const Analytics: React.FC = () => {
   const { C } = useTheme();
@@ -1569,7 +1748,7 @@ const Analytics: React.FC = () => {
         ))}
       </div>
 
-      <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))", gap:14, marginBottom:28 }}>
+      <div style={{ display:"flex", flexWrap:"wrap", gap:14, marginBottom:28 }}>
         <StatCard label="Total Submissions" value={filtered.length} sub={`${stats.todayCount} today`} Icon={ClipboardCheck} accent={C.accent} />
         <StatCard label="Class Average"     value={filtered.length>0 ? `${Math.round(filtered.reduce((a,s)=>a+s.scorePct,0)/filtered.length)}%` : "—"} sub="All evaluated sessions" Icon={TrendingUp} accent={C.green} />
         <StatCard label="Pass Rate"         value={filtered.length>0 ? `${Math.round(filtered.filter(s=>s.result==="PASS").length/filtered.length*100)}%` : "—"} sub="PASS result" Icon={CheckCircle} accent="#7c3aed" />
@@ -1587,7 +1766,7 @@ const Analytics: React.FC = () => {
         <>
           <div className="tp-grid-2col" style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:20, marginBottom:20 }}>
             {/* Score by practical */}
-            <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:14,
+            <div className="vlab-chart-card" style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:14,
               padding:20, boxShadow:`0 1px 4px ${C.shadow}` }}>
               <div style={{ color:C.txtPri, fontWeight:700, fontSize:16, marginBottom:18,
                 display:"flex", alignItems:"center", gap:8 }}>
@@ -1597,39 +1776,50 @@ const Analytics: React.FC = () => {
                 { label:"Vanishing Cream", score:vcAvg, color:"#2563eb", count:vcSubs.length },
                 { label:"Cold Cream",      score:ccAvg, color:"#7c3aed", count:ccSubs.length },
               ].map(d => (
-                <div key={d.label} style={{ marginBottom:16 }}>
-                  <div style={{ display:"flex", justifyContent:"space-between", marginBottom:6 }}>
-                    <span style={{ color:C.txtSec, fontSize:15 }}>{d.label}</span>
-                    <span style={{ color:C.txtPri, fontWeight:700, fontSize:15 }}>
-                      {d.count > 0 ? `${d.score}%` : "No data"}
+                <div key={d.label} style={{ marginBottom:18 }}>
+                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"baseline", marginBottom:7 }}>
+                    <span style={{ color:C.txtSec, fontSize:15, fontWeight:600 }}>{d.label}</span>
+                    <span style={{ color: d.count>0 ? d.color : C.txtMut, fontWeight:800, fontSize:18,
+                      fontFamily:"monospace" }}>
+                      {d.count > 0 ? `${d.score}%` : "—"}
                     </span>
                   </div>
-                  <div style={{ height:10, background:C.surface, borderRadius:5, overflow:"hidden",
-                    border:`1px solid ${C.border}` }}>
-                    <div style={{ width:`${d.score}%`, height:"100%", background:d.color, borderRadius:5 }} />
+                  <div className="vlab-hbar-track" style={{ height:14, background:C.surface, borderRadius:8, overflow:"hidden",
+                    border:`1px solid ${C.border}`, boxShadow:`inset 0 1px 3px ${C.shadow}` }}>
+                    <div className="vlab-hbar" style={{ width:`${Math.max(d.score, d.count>0?2:0)}%`, height:"100%",
+                      background:barFill(d.color), borderRadius:8,
+                      boxShadow:`0 0 12px -1px ${d.color}99` }} />
                   </div>
-                  <div style={{ color:C.txtMut, fontSize:13, marginTop:4 }}>{d.count} submission{d.count!==1?"s":""}</div>
+                  <div style={{ color:C.txtMut, fontSize:13, marginTop:5 }}>{d.count} submission{d.count!==1?"s":""}</div>
                 </div>
               ))}
             </div>
 
             {/* Score distribution */}
-            <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:14,
+            <div className="vlab-chart-card" style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:14,
               padding:20, boxShadow:`0 1px 4px ${C.shadow}` }}>
               <div style={{ color:C.txtPri, fontWeight:700, fontSize:16, marginBottom:18,
                 display:"flex", alignItems:"center", gap:8 }}>
                 <Activity size={16} color={C.accent} strokeWidth={2} /> Score Distribution
               </div>
-              <div style={{ display:"flex", gap:10, alignItems:"flex-end", height:120 }}>
+              <div style={{ position:"relative", display:"flex", gap:12, alignItems:"flex-end",
+                height:150, paddingBottom:2 }}>
+                {/* dashed gridlines backdrop */}
+                <div className="vlab-chart-grid" style={{ bottom:38, top:8 }}>
+                  {[0,1,2,3].map(i => <span key={i} />)}
+                </div>
                 {ranges.map(d => (
                   <div key={d.range} style={{ flex:1, display:"flex", flexDirection:"column",
-                    alignItems:"center", gap:4 }}>
-                    <span style={{ color:C.txtSec, fontSize:13 }}>{d.count}</span>
-                    <div style={{ width:"100%", borderRadius:"4px 4px 0 0",
-                      background: d.count>0 ? d.color : C.border,
-                      height: `${(d.count/maxC)*90}px`,
-                      minHeight: d.count>0 ? 8 : 4 }} />
-                    <span style={{ color:C.txtMut, fontSize:12, textAlign:"center", lineHeight:1.2 }}>{d.range}</span>
+                    alignItems:"center", gap:6, height:"100%", justifyContent:"flex-end" }}>
+                    <span style={{ color: d.count>0 ? d.color : C.txtMut, fontSize:14, fontWeight:800,
+                      fontFamily:"monospace" }}>{d.count}</span>
+                    <div className={d.count>0 ? "vlab-col" : undefined} style={{ width:"82%", maxWidth:54,
+                      borderRadius:"7px 7px 3px 3px",
+                      background: d.count>0 ? barFill(d.color) : C.border,
+                      height: `${Math.max((d.count/maxC)*100, d.count>0 ? 6 : 3)}px`,
+                      boxShadow: d.count>0 ? `0 4px 12px -2px ${d.color}66` : "none" }} />
+                    <span style={{ color:C.txtMut, fontSize:12, textAlign:"center", lineHeight:1.2,
+                      fontWeight:600 }}>{d.range}</span>
                   </div>
                 ))}
               </div>
@@ -1669,6 +1859,8 @@ const Analytics: React.FC = () => {
           </div>
         </>
       )}
+
+      <TelemetryInsights />
     </div>
   );
 };
@@ -1711,30 +1903,38 @@ const Submissions: React.FC = () => {
   const [practicalFilter, setPracticalFilter] = useState("all");
   const [tokenFilter,     setTokenFilter]     = useState("all");
   const [resultFilter,    setResultFilter]    = useState<"all"|"PASS"|"AVERAGE"|"FAIL">("all");
-  const [modeFilter,      setModeFilter]      = useState<"all"|"assignment"|"practice">("all");
   const [search,          setSearch]          = useState("");
   const [refresh,         setRefresh]         = useState(0);
 
   const [allSubs,      setAllSubs]      = useState<LabSubmission[]>([]);
   const [assignments,  setAssignments]  = useState<Assignment[]>([]);
+  const [loading,      setLoading]      = useState(true);
+  const [page,         setPage]         = useState(0);
 
   useEffect(() => {
-    getAllSubmissions().then(subs =>
-      setAllSubs(subs.slice().sort((a, b) =>
-        new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime()
-      ))
-    );
-    getAllAssignments().then(setAssignments);
+    setLoading(true);
+    Promise.all([
+      getAllSubmissions().then(subs =>
+        setAllSubs(subs.slice().sort((a, b) =>
+          new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime()
+        ))
+      ),
+      getAllAssignments().then(setAssignments),
+    ]).finally(() => setLoading(false));
   }, [refresh]);
 
   const filtered = allSubs.filter(s =>
     (practicalFilter === "all" || s.practicalId === practicalFilter) &&
     (tokenFilter     === "all" || s.token       === tokenFilter)     &&
     (resultFilter    === "all" || s.result      === resultFilter)    &&
-    (modeFilter      === "all" || s.mode        === modeFilter)      &&
     (s.studentName.toLowerCase().includes(search.toLowerCase()) ||
      (s.studentReg ?? "").toLowerCase().includes(search.toLowerCase()))
   );
+
+  useEffect(() => { setPage(0); }, [search, practicalFilter, tokenFilter, resultFilter, refresh]);
+  const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const safePage  = Math.min(page, pageCount - 1);
+  const paged     = filtered.slice(safePage * PAGE_SIZE, safePage * PAGE_SIZE + PAGE_SIZE);
 
   return (
     <div>
@@ -1797,19 +1997,19 @@ const Submissions: React.FC = () => {
             color: resultFilter===f ? "white" : C.txtSec,
           }}>{f === "all" ? "All Results" : f}</button>
         ))}
-
-        {/* Mode filter */}
-        {(["all","assignment","practice"] as const).map(f => (
-          <button key={f} onClick={() => setModeFilter(f)} style={{
-            padding:"7px 12px", borderRadius:8, cursor:"pointer", fontWeight:600,
-            fontSize:14, border:"none", textTransform:"capitalize",
-            background: modeFilter===f ? `${C.purple}55` : C.card,
-            color: modeFilter===f ? "white" : C.txtSec,
-          }}>{f === "all" ? "All Modes" : f}</button>
-        ))}
       </div>
 
-      {allSubs.length === 0 ? (
+      {loading ? (
+        <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:14,
+          overflow:"hidden", boxShadow:`0 1px 4px ${C.shadow}` }}>
+          <div className="tp-table-wrap">
+          <table style={{ width:"100%", borderCollapse:"collapse", minWidth:1080 }}>
+            <TableHead cols={["Student","Practical","Assignment Code","Score","Result","pH","Viscosity","Duration","Submitted"]} />
+            <SkeletonRows cols={9} rows={8} />
+          </table>
+          </div>
+        </div>
+      ) : allSubs.length === 0 ? (
         <div style={{ background:C.card, border:`2px dashed ${C.border2}`, borderRadius:14,
           padding:"48px 20px", textAlign:"center" }}>
           <ClipboardCheck size={36} color={C.txtMut} style={{ marginBottom:12, opacity:0.3 }} />
@@ -1823,10 +2023,10 @@ const Submissions: React.FC = () => {
           <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:14,
             overflow:"hidden", boxShadow:`0 1px 4px ${C.shadow}` }}>
             <div className="tp-table-wrap">
-            <table style={{ width:"100%", borderCollapse:"collapse" }}>
-              <TableHead cols={["Student","Practical","Mode","Assignment Code","Score","Result","pH","Viscosity","Duration","Submitted"]} />
+            <table style={{ width:"100%", borderCollapse:"collapse", minWidth:1080 }}>
+              <TableHead cols={["Student","Practical","Assignment Code","Score","Result","pH","Viscosity","Duration","Submitted"]} />
               <tbody>
-                {filtered.map((s,i) => (
+                {paged.map((s,i) => (
                   <tr key={s.id} style={{ background: i%2===0?"transparent":`${C.surface}88`,
                     borderBottom:`1px solid ${C.border}` }}>
                     <td style={{ padding:"11px 14px" }}>
@@ -1842,14 +2042,7 @@ const Submissions: React.FC = () => {
                       {s.practicalId === "vanishing-cream" ? "Vanishing Cream" : "Cold Cream"}
                     </td>
                     <td style={{ padding:"11px 14px" }}>
-                      <span style={{ background: s.mode==="assignment" ? `${C.accent}18` : C.surface,
-                        color: s.mode==="assignment" ? C.accent : C.txtMut,
-                        border:`1px solid ${s.mode==="assignment" ? `${C.accent}44` : C.border}`,
-                        borderRadius:20, padding:"2px 8px", fontSize:13, fontWeight:700,
-                        textTransform:"capitalize" }}>{s.mode}</span>
-                    </td>
-                    <td style={{ padding:"11px 14px" }}>
-                      {s.mode === "assignment" && s.token ? (
+                      {s.token ? (
                         <code style={{ background:`${C.accent}12`, color:C.accent,
                           border:`1px solid ${C.accent}44`, borderRadius:6,
                           padding:"2px 8px", fontSize:14, fontWeight:700, letterSpacing:1 }}>
@@ -1882,9 +2075,7 @@ const Submissions: React.FC = () => {
               <div style={{ padding:32, textAlign:"center", color:C.txtMut }}>No submissions match the filters.</div>
             )}
           </div>
-          <div style={{ color:C.txtMut, fontSize:14, marginTop:10 }}>
-            {filtered.length} of {allSubs.length} submissions
-          </div>
+          <Pagination page={safePage} total={filtered.length} onPage={setPage} unit="submissions" />
         </>
       )}
     </div>
@@ -2441,15 +2632,25 @@ interface Props { onBack: () => void; }
 
 const TeacherPanel: React.FC<Props> = ({ onBack }) => {
   const [isDark,   setIsDark]   = useState(true);
-  const [section,  setSection]  = useState<Section>("dashboard");
-  const [sbOpen,   setSbOpen]   = useState(window.innerWidth >= 768);
+  const [section,  setSection]  = useState<Section>(() => {
+    const saved = localStorage.getItem("tp.section") as Section | null;
+    const valid: Section[] = ["dashboard","questions","students","tracking","analytics","submissions","settings"];
+    return saved && valid.includes(saved) ? saved : "dashboard";
+  });
+
+  useEffect(() => { localStorage.setItem("tp.section", section); }, [section]);
+  const [sbOpen,   setSbOpen]   = useState(window.innerWidth >= 1024);
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
 
   useEffect(() => {
     const handleResize = () => {
-      const mobile = window.innerWidth < 768;
+      const w = window.innerWidth;
+      const mobile = w < 768;
       setIsMobile(mobile);
-      if (!mobile) setSbOpen(true);
+      // Auto-collapse: off-canvas on phones, icon-rail on tablets, expanded on desktop.
+      if (mobile)        setSbOpen(false);
+      else if (w < 1024) setSbOpen(false);
+      else               setSbOpen(true);
     };
     window.addEventListener("resize", handleResize);
     return () => window.removeEventListener("resize", handleResize);
@@ -2465,7 +2666,7 @@ const TeacherPanel: React.FC<Props> = ({ onBack }) => {
 
   const renderSection = () => {
     switch (section) {
-      case "dashboard":     return <Dashboard />;
+      case "dashboard":     return <Dashboard onNavigate={navTo} />;
       case "questions":     return <Questions />;
       case "tracking":      return <AssignmentTracking />;
       case "students":      return <Students />;
@@ -2507,23 +2708,28 @@ const TeacherPanel: React.FC<Props> = ({ onBack }) => {
         }}>
 
           {/* Logo row */}
-          <div style={{ padding:"16px 18px", borderBottom:`1px solid ${C.border}`,
-            display:"flex", alignItems:"center", justifyContent:"space-between",
+          <div style={{ padding: sbOpen ? "16px 18px" : "16px 0", borderBottom:`1px solid ${C.border}`,
+            display:"flex", alignItems:"center",
+            justifyContent: sbOpen ? "space-between" : "center",
             minHeight:60, gap:8 }}>
             <div style={{ width:34, height:34, borderRadius:10, flexShrink:0,
               background:"linear-gradient(135deg,#2563eb,#7c3aed)",
               display:"flex", alignItems:"center", justifyContent:"center" }}>
               <FlaskConical size={18} color="white" strokeWidth={2} />
             </div>
-            <div style={{ flex:1, overflow:"hidden" }}>
-              <div style={{ color:C.txtPri, fontWeight:800, fontSize:15, whiteSpace:"nowrap" }}>VirtualLab</div>
-              <div style={{ color:C.txtMut, fontSize:12, whiteSpace:"nowrap" }}>Teacher Panel</div>
-            </div>
-            <button onClick={() => setSbOpen(false)}
-              style={{ background:"transparent", border:"none", color:C.txtMut,
-                cursor:"pointer", padding:4, display:"flex", alignItems:"center", flexShrink:0 }}>
-              <Menu size={16} strokeWidth={2} />
-            </button>
+            {sbOpen && (
+              <>
+                <div style={{ flex:1, overflow:"hidden" }}>
+                  <div style={{ color:C.txtPri, fontWeight:800, fontSize:15, whiteSpace:"nowrap" }}>VirtualLab</div>
+                  <div style={{ color:C.txtMut, fontSize:12, whiteSpace:"nowrap" }}>Teacher Panel</div>
+                </div>
+                <button onClick={() => setSbOpen(false)} title="Collapse sidebar"
+                  style={{ background:"transparent", border:"none", color:C.txtMut,
+                    cursor:"pointer", padding:4, display:"flex", alignItems:"center", flexShrink:0 }}>
+                  <Menu size={16} strokeWidth={2} />
+                </button>
+              </>
+            )}
           </div>
 
           {/* Nav */}
@@ -2531,9 +2737,13 @@ const TeacherPanel: React.FC<Props> = ({ onBack }) => {
             {NAV.map(item => {
               const active = section === item.id;
               return (
-                <button key={item.id} onClick={() => navTo(item.id)} style={{
-                  width:"100%", display:"flex", alignItems:"center", gap:10,
-                  padding:"10px 12px",
+                <button key={item.id} onClick={() => navTo(item.id)}
+                  title={!sbOpen ? item.label : undefined}
+                  style={{
+                  width:"100%", display:"flex", alignItems:"center",
+                  justifyContent: sbOpen ? "flex-start" : "center",
+                  gap: sbOpen ? 10 : 0,
+                  padding: sbOpen ? "10px 12px" : "10px 0",
                   borderRadius:9, border:"none", cursor:"pointer", marginBottom:3,
                   background: active ? `${C.accent}20` : "transparent",
                   color: active ? C.accent : C.txtSec,
@@ -2541,12 +2751,16 @@ const TeacherPanel: React.FC<Props> = ({ onBack }) => {
                   transition:"background .15s,color .15s",
                 }}>
                   <item.Icon size={17} strokeWidth={active ? 2.2 : 1.8} />
-                  <span style={{ overflow:"hidden", whiteSpace:"nowrap", flex:1, textAlign:"left" }}>
-                    {item.label}
-                  </span>
-                  {active && (
-                    <span style={{ width:6, height:6, borderRadius:"50%",
-                      background:C.accent, flexShrink:0 }} />
+                  {sbOpen && (
+                    <>
+                      <span style={{ overflow:"hidden", whiteSpace:"nowrap", flex:1, textAlign:"left" }}>
+                        {item.label}
+                      </span>
+                      {active && (
+                        <span style={{ width:6, height:6, borderRadius:"50%",
+                          background:C.accent, flexShrink:0 }} />
+                      )}
+                    </>
                   )}
                 </button>
               );
@@ -2628,8 +2842,9 @@ const TeacherPanel: React.FC<Props> = ({ onBack }) => {
 
       {/* ── Responsive helpers ── */}
       <style>{`
+        /* Tables never compress or clip — they scroll horizontally on narrow screens. */
+        .tp-table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
         @media (max-width: 640px) {
-          .tp-table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
           .tp-grid-2col  { grid-template-columns: 1fr !important; }
           .tp-grid-dash  { grid-template-columns: 1fr !important; }
           .tp-hide-sm    { display: none !important; }
@@ -2637,6 +2852,10 @@ const TeacherPanel: React.FC<Props> = ({ onBack }) => {
         }
         @media (max-width: 900px) {
           .tp-grid-dash  { grid-template-columns: 1fr !important; }
+        }
+        /* Assignments: stacked by default, side-by-side only on x-large screens */
+        @media (min-width: 1280px) {
+          .tp-grid-assign { grid-template-columns: 1fr 1fr !important; }
         }
       `}</style>
     </ThemeCtx.Provider>

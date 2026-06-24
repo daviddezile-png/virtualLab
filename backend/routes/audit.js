@@ -19,10 +19,22 @@ router.get('/', requireRole('admin'), async (req, res) => {
         { detail:    { $regex: search, $options: 'i' } },
       ];
     }
-    const logs = await AuditLog.find(query)
+    const docs = await AuditLog.find(query)
       .sort({ createdAt: -1 })
       .limit(parseInt(limit))
-      .skip(parseInt(offset));
+      .skip(parseInt(offset))
+      .lean();
+    // Shape each row to the contract the frontend expects: a stable `id` and a
+    // single `timestamp` (the client-side time if present, else server receipt).
+    const logs = docs.map(d => ({
+      id:        d.clientId || String(d._id),
+      action:    d.action,
+      actorId:   d.actorId,
+      actorName: d.actorName,
+      actorRole: d.actorRole,
+      detail:    d.detail,
+      timestamp: (d.clientTimestamp || d.createdAt).toISOString(),
+    }));
     const total = await AuditLog.countDocuments(query);
     res.json({ logs, total });
   } catch (err) {

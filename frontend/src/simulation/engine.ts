@@ -6,7 +6,9 @@ export interface FormulationInput {
   water: number;
   oil_phase_temperature: number;
   aqueous_phase_temperature: number;
-  mixing_order: "aqueous_to_oil" | "oil_to_aqueous";
+  // "none" = the two phases were never combined into the main beaker (step not
+  // performed). "oil_to_aqueous" = combined, but in the reversed order.
+  mixing_order: "aqueous_to_oil" | "oil_to_aqueous" | "none";
   mixing_time: number;
   cooling_temperature: number;
   cooling_stirring: boolean;
@@ -93,7 +95,8 @@ export function evaluateFormulation(input: FormulationInput): EvaluationResult {
 
   // Step 4 — Emulsification score
   const order_score = input.mixing_order === "aqueous_to_oil" ? 1 : 0;
-  const time_score = input.mixing_time >= 30 ? 1 : 0.5;
+  // 0 s of stirring earns nothing — only a partial attempt (<30 s) earns half.
+  const time_score = input.mixing_time >= 30 ? 1 : input.mixing_time > 0 ? 0.5 : 0;
   const emulsification_score = (order_score + time_score) / 2;
 
   // Step 5 — Cooling score
@@ -161,34 +164,61 @@ export function evaluateFormulation(input: FormulationInput): EvaluationResult {
       ? "Smooth white cream"
       : "Phase separation or grainy texture";
 
-  // Critical failure — wrong mixing order forms the WRONG emulsion type.
-  // For a vanishing cream (O/W) the aqueous phase must go INTO the oil phase.
-  // Reversing it yields a cold cream (W/O) instead, so no vanishing cream is
-  // produced → the whole attempt scores zero.
-  const wrong_order = input.mixing_order !== "aqueous_to_oil";
+  // Two distinct procedural situations, reported separately so the feedback
+  // matches what the student ACTUALLY did:
+  //   • not_combined — the two phases were never combined; no emulsion was ever
+  //     formed. This is an incomplete attempt, NOT a wrong-order mistake, so the
+  //     student keeps the partial marks earned on the steps they did complete.
+  //   • wrong_order  — the phases WERE combined, but reversed (oil into aqueous),
+  //     which forms a cold cream (W/O) instead of a vanishing cream. No valid
+  //     product was made → the whole attempt scores zero.
+  const not_combined = input.mixing_order === "none";
+  const wrong_order  = input.mixing_order === "oil_to_aqueous";
   if (wrong_order) {
     final_score = 0;
     result = "FAIL";
     stability = "separation";
     appearance = "Cold cream (W/O) formed — not vanishing cream";
+  } else if (not_combined) {
+    result = "FAIL";
+    stability = "separation";
+    appearance = "Phases not combined — no emulsion formed";
   }
 
-  // Step 11 — Feedback
+  // Step 11 — Feedback (describe the real condition, not a generic checklist)
   const feedback: string[] = [];
-  if (wrong_order)
+  if (not_combined)
+    feedback.push("The two phases were never combined, so no emulsion formed. Pour the oil phase into the main beaker, then add the aqueous phase INTO it and stir. (Partial marks given for the steps you completed.)");
+  else if (wrong_order)
     feedback.push("Vanishing cream NOT formed — the phases were combined in the wrong order, producing a cold cream (W/O emulsion) instead. Add the aqueous phase INTO the oil phase. Score: 0.");
-  if (temp_diff > 5)
-    feedback.push("Temperature mismatch between phases may cause separation.");
-  if (input.mixing_order !== "aqueous_to_oil" && !wrong_order)
-    feedback.push("Incorrect mixing order. Add aqueous phase into oil phase.");
-  if (input.mixing_time < 30)
+
+  // Heating — distinguish "never heated" from "heated to the wrong temperature".
+  const oil_not_heated = input.oil_phase_temperature <= 30;
+  const aq_not_heated  = input.aqueous_phase_temperature <= 30;
+  if (oil_not_heated || aq_not_heated)
+    feedback.push(`You did not heat the ${oil_not_heated && aq_not_heated ? "oil and aqueous phases" : oil_not_heated ? "oil phase" : "aqueous phase"} to 70–80 °C before mixing.`);
+  else if (temp_diff > 5)
+    feedback.push("Temperature mismatch between phases may cause separation — keep both at 70–80 °C.");
+
+  // Stirring — "never stirred" vs "stirred too briefly".
+  if (input.mixing_time === 0)
+    feedback.push("You did not stir the mixture. Stir continuously for at least 30 s to emulsify.");
+  else if (input.mixing_time < 30)
     feedback.push("Increase mixing time to at least 30 s for full emulsification.");
+
   if (predicted_pH > 7)
     feedback.push("High pH detected. Reduce potassium hydroxide quantity.");
   if (ingredient_score < 3)
     feedback.push("Ingredient proportions are outside acceptable ranges.");
-  if (cooling_score < 1)
-    feedback.push("Cool below 40 °C with continuous stirring for best texture.");
+
+  // Cooling — only mention it once the emulsion stage is reached; distinguish
+  // "not cooled at all" from "not cooled far enough".
+  if (cooling_score < 1) {
+    if (input.cooling_temperature > 50)
+      feedback.push("The cream was not cooled. Cool it below 40 °C in the ice bath while stirring.");
+    else
+      feedback.push("Cool below 40 °C with continuous stirring for best texture.");
+  }
 
   return {
     result,
@@ -225,7 +255,8 @@ export interface ColdCreamInput {
   water: number;             // mL
   oil_phase_temperature: number;
   aqueous_phase_temperature: number;
-  mixing_order: "aqueous_to_oil" | "oil_to_aqueous";
+  // "none" = phases never combined (step not performed).
+  mixing_order: "aqueous_to_oil" | "oil_to_aqueous" | "none";
   mixing_time: number;
   cooling_temperature: number;
   cooling_stirring: boolean;
@@ -284,7 +315,8 @@ export function evaluateColdCream(input: ColdCreamInput): ColdCreamResult {
 
   // Emulsification — same rule: aqueous into oil (W/O)
   const order_score = input.mixing_order === "aqueous_to_oil" ? 1 : 0;
-  const time_score  = input.mixing_time >= 20 ? 1 : 0.5;
+  // 0 s of stirring earns nothing — only a partial attempt (<20 s) earns half.
+  const time_score  = input.mixing_time >= 20 ? 1 : input.mixing_time > 0 ? 0.5 : 0;
   const emulsification_score = (order_score + time_score) / 2;
 
   // Cooling — cold cream needs to cool to ≤35°C (colder than vanishing cream)
@@ -341,34 +373,53 @@ export function evaluateColdCream(input: ColdCreamInput): ColdCreamResult {
     : result === "AVERAGE" ? "Soft but slightly greasy cream"
     : "Phase separation or watery texture";
 
-  // Critical failure — wrong mixing order forms the WRONG emulsion type.
-  // A cold cream (W/O) needs the aqueous phase added INTO the oil phase.
-  // Reversing it yields a vanishing cream (O/W) instead → scores zero.
-  const wrong_order = input.mixing_order !== "aqueous_to_oil";
+  // Two distinct procedural situations (see vanishing-cream engine for rationale):
+  //   • not_combined — phases never combined; incomplete attempt, keeps partial marks.
+  //   • wrong_order  — combined in reverse, forms a vanishing cream (O/W) → scores zero.
+  const not_combined = input.mixing_order === "none";
+  const wrong_order  = input.mixing_order === "oil_to_aqueous";
   if (wrong_order) {
     final_score_out = 0;
     result = "FAIL";
     stability = "separation";
     appearance = "Vanishing cream (O/W) formed — not cold cream";
+  } else if (not_combined) {
+    result = "FAIL";
+    stability = "separation";
+    appearance = "Phases not combined — no emulsion formed";
   }
 
   const feedback: string[] = [];
-  if (wrong_order)
+  if (not_combined)
+    feedback.push("The two phases were never combined, so no emulsion formed. Pour the oil phase into the main beaker, then add the aqueous (borax+water) phase INTO it and stir. (Partial marks given for the steps you completed.)");
+  else if (wrong_order)
     feedback.push("Cold cream NOT formed — the phases were combined in the wrong order, producing a vanishing cream (O/W emulsion) instead. Add the aqueous (borax+water) phase INTO the oil phase. Score: 0.");
-  if (temp_diff > 5)
-    feedback.push("Temperature mismatch between phases — keep both at 65–75°C.");
-  if (input.mixing_order !== "aqueous_to_oil" && !wrong_order)
-    feedback.push("Incorrect mixing order. Add aqueous (borax+water) into the oil phase.");
-  if (input.mixing_time < 20)
+
+  const oil_not_heated = input.oil_phase_temperature <= 30;
+  const aq_not_heated  = input.aqueous_phase_temperature <= 30;
+  if (oil_not_heated || aq_not_heated)
+    feedback.push(`You did not heat the ${oil_not_heated && aq_not_heated ? "oil and aqueous phases" : oil_not_heated ? "oil phase" : "aqueous phase"} to 65–75 °C before mixing.`);
+  else if (temp_diff > 5)
+    feedback.push("Temperature mismatch between phases — keep both at 65–75 °C.");
+
+  if (input.mixing_time === 0)
+    feedback.push("You did not stir the mixture. Stir continuously for at least 20 s to emulsify.");
+  else if (input.mixing_time < 20)
     feedback.push("Increase stirring time to at least 20 s for full emulsification.");
+
   if (predicted_pH > 7.5)
     feedback.push("pH too high — reduce borax quantity.");
   if (beeswax_pct < 10 || beeswax_pct > 16)
     feedback.push("Beeswax proportion out of range (target 10–16%).");
   if (paraffin_pct < 34 || paraffin_pct > 46)
     feedback.push("Liquid paraffin proportion out of range (target 34–46%).");
-  if (cooling_score < 1)
-    feedback.push("Cool to ≤35°C with continuous stirring for best cold cream texture.");
+
+  if (cooling_score < 1) {
+    if (input.cooling_temperature > 45)
+      feedback.push("The cream was not cooled. Cool it to ≤35 °C in the ice bath while stirring.");
+    else
+      feedback.push("Cool to ≤35 °C with continuous stirring for best cold cream texture.");
+  }
 
   return {
     result,

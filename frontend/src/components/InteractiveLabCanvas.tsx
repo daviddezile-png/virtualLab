@@ -7,6 +7,7 @@ import { getInitialApparatus, getInitialApparatusColdCream, Apparatus } from "./
 import { Assignment, BASE_RECIPES } from "../utils/assignmentStore";
 import { logLabMilestone } from "../utils/auditStore";
 import { fetchAmbientWeather, DEFAULT_AMBIENT, AmbientWeather } from "../simulation/weather";
+import { soundManager } from "../utils/soundManager";
 
 // Maps source bottle ID → composition key
 const BOTTLE_INGREDIENT: Record<string, string> = {
@@ -43,9 +44,35 @@ const shadeColor = (col: string, amt: number): string => {
 // dips into wide-mouth solid reagent jars.
 const CONTAINABLE_TYPES = ["stirringrod", "thermometer", "phmeter", "viscositygauge", "spatula"];
 const CONTAINER_TYPES   = ["beaker", "cylinder"];
+// Heavy bench items that scrape audibly when dragged across the table top.
+const SLIDE_SOUND_TYPES = ["beaker", "container", "bottle", "hotplate", "icebucket", "weightbalance"];
+// Items whose base "knocks" the bench when set down (glassware containers only).
+const DROP_SOUND_TYPES  = ["beaker", "container", "bottle"];
 
 // Maximum solid (grams) a spatula blade can hold in a single scoop.
 const MAX_SPATULA_LOAD = 30;
+
+// True when a spatula's blade tip (the "chopping head") is aimed into a
+// container's mouth — i.e. over the top opening and near the rim, the only spot
+// where a real scoop tips its contents out. The blade resting lower against the
+// side of the glass must NOT deposit anything.
+const bladeOverMouth = (
+  bladeCX: number,
+  bladeBot: number,
+  c: { x: number; y: number; width: number; height: number },
+): boolean => {
+  // Horizontal: blade is over the mouth opening. Allow a little overhang past
+  // each rim so just clipping the lip from the side still counts as a pour.
+  const overhang = c.width * 0.15;
+  const overOpening = bladeCX >= c.x - overhang && bladeCX <= c.x + c.width + overhang;
+  // Vertical: pour as soon as the blade touches the mouth-top. The band reaches
+  // a full ~50% of the beaker height ABOVE the rim (so contact with the mouth/lip
+  // releases the solid) down through the entire beaker body — lowering a loaded
+  // blade into the beaker deposits wherever it is released. A blade resting
+  // beside the glass is excluded by the horizontal `overOpening` check above.
+  const atMouth = bladeBot >= c.y - c.height * 0.5 && bladeBot <= c.y + c.height;
+  return overOpening && atMouth;
+};
 
 // Thickness of the container's glass floor — the contained item's tip rests this
 // many px above the outer bottom so it never pokes through onto the table.
@@ -1892,6 +1919,8 @@ interface InteractiveLabCanvasProps {
   onApparatusClick?: (apparatus: Apparatus) => void;
   practicalId?: string;
   assignment?: Assignment | null;
+  /** Self-practice: student-chosen batch size (g). null → base recipe (multiplier 1). */
+  practiceTargetGrams?: number | null;
   labExpired?: boolean;
 }
 
@@ -1900,19 +1929,31 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
   onApparatusClick,
   practicalId = "vanishing-cream",
   assignment = null,
+  practiceTargetGrams = null,
   labExpired = false,
 }) => {
   const isColdCream = practicalId === "cold-cream";
 
-  // Multiplier = 1 for self-practice (base recipe), or scaled for assignment mode
+  // Multiplier scales the target reagent amounts. Assignment mode uses the
+  // teacher's targetGrams; self-practice uses the student's chosen batch size
+  // (2nd visit onward), otherwise 1 (base recipe).
+  const baseGrams  = BASE_RECIPES[isColdCream ? "cold-cream" : "vanishing-cream"].totalGrams;
   const multiplier = assignment
     ? +(assignment.targetGrams / BASE_RECIPES[assignment.practicalId].totalGrams).toFixed(4)
+    : practiceTargetGrams != null
+    ? +(practiceTargetGrams / baseGrams).toFixed(4)
     : 1;
+  // Whether a target batch size is in effect (assignment OR chosen in self-practice).
+  const hasTarget = !!assignment || practiceTargetGrams != null;
   const canvasRef     = useRef<HTMLCanvasElement>(null);
   const holdStirRef   = useRef<{ rodId: string; targetId: string } | null>(null);
   const draggingRef   = useRef<{ id: string; offsetX: number; offsetY: number } | null>(null);
   const dragStartRef  = useRef<{ x: number; y: number } | null>(null); // mousedown client coords
   const dragMovedRef  = useRef(false);                                  // true once a real drag occurs
+  const dragOnTableRef = useRef(false);                                 // true while the dragged item rests on the table surface
+  const dragLiftedRef  = useRef(false);                                 // true once the dragged item has been off the table (in the air)
+  const lastMovePosRef = useRef<{ x: number; y: number } | null>(null); // previous move client coords → drag speed
+  const dragTypeRef    = useRef<string | null>(null);                   // type of the currently dragged apparatus (for sound gating)
   // ── Touch interaction state ───────────────────────────────────────────────
   const touchStartRef     = useRef<{ clientX: number; clientY: number; x: number; y: number; time: number } | null>(null);
   const longPressTimerRef = useRef<number | null>(null);  // pending long-press → context menu
@@ -1960,8 +2001,17 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
   const LEFT_GAP = 25; // Small space on left side
   const SIDE_DEPTH = 22; // Angle on the right side
 
-  // Dynamic calculation for 3/4 width
-  const tableTotalWidth = canvasSize.width * 0.75;
+  // Minimum scene width. The shelf apparatus extend to ~1205px, so the table
+  // (which is 92% of the canvas) must never be allowed to shrink narrower than
+  // that — otherwise the shelf overhangs past the table edge on small/medium
+  // screens. Keeping this floor high enough means the table + shelf stay a
+  // constant size and smaller viewports scroll horizontally instead of breaking.
+  const MIN_SCENE_WIDTH = 1500;
+
+  // Bench spans almost the full canvas so there is a vast countertop for placing
+  // beakers — on small/medium screens too (the canvas never drops below
+  // MIN_SCENE_WIDTH, so the layout stays consistent and just scrolls).
+  const tableTotalWidth = canvasSize.width * 0.92;
   const benchHeight = canvasSize.height - (TABLE_Y + LIP_HEIGHT); // Reaches bottom
   const shelfY = 220;
 
@@ -2001,6 +2051,10 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
     targetId: string;
   } | null>(null);
   const [isAnimatingPour, setIsAnimatingPour] = useState(false);
+  // Frozen scale (available volume + selected amount) captured when a pour
+  // starts, so the measuring-cylinder graduations stay put instead of
+  // re-scaling on every animation frame as the source drains.
+  const pourScaleFreezeRef = useRef<{ available: number; maxPour: number; amount: number } | null>(null);
   const [showLidModal, setShowLidModal] = useState<{ id: string } | null>(null);
   const [lidContextMenu, setLidContextMenu] = useState<{ id: string; x: number; y: number } | null>(null);
   const [showHotPlateModal, setShowHotPlateModal] = useState(false);
@@ -2448,8 +2502,7 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
           );
           const overBeaker = apparatus.some(
             (a) => (a.type === "beaker" || a.type === "cylinder") &&
-                   bladeCX  >= a.x && bladeCX  <= a.x + a.width &&
-                   bladeBot >= a.y && bladeBot <= a.y + a.height,
+                   bladeOverMouth(bladeCX, bladeBot, a),
           );
           const action: "idle" | "chop" | "tip" =
             isActive && load === 0 && overSolid ? "chop" :
@@ -2653,7 +2706,7 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
       // Walk up to find the scrollable wrapper (.lab-canvas-wrap or similar)
       const container = canvasRef.current?.parentElement;
       if (container) {
-        const w = Math.max(container.clientWidth,  1200);
+        const w = Math.max(container.clientWidth,  MIN_SCENE_WIDTH);
         const h = Math.max(container.clientHeight, 680);
         setCanvasSize({ width: w, height: h });
       }
@@ -2673,6 +2726,28 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
   const anyStirring       = apparatus.some((a) => a.data?.isStirring);
   const viscosityActive   = apparatus.some((a) => a.data?.isViscosityActive);
   const animating         = hotPlateIsOn || anyStirring || viscosityActive;
+
+  // ── Ambient sound cues ──────────────────────────────────────────────────────
+  // Drive the procedural sound loops from the matching simulation state so the
+  // lab feels physical: a rolling boil once any sample is hot, a swish while
+  // stirring, and a trickle while a container is pouring.
+  const anyBoiling = apparatus.some(
+    (a) => (a.type === "beaker" || a.type === "cylinder") &&
+      (a.data?.currentVolume ?? 0) > 0 && (a.data?.liquidTemperature ?? 25) > 70,
+  );
+  const anyPouring = apparatus.some((a) => a.data?.isPouring);
+
+  const [soundMuted, setSoundMuted] = useState(soundManager.isMuted());
+  useEffect(() => { soundManager.setMuted(soundMuted); }, [soundMuted]);
+  useEffect(() => { soundManager.setLoop("boiling", anyBoiling); }, [anyBoiling]);
+  useEffect(() => { soundManager.setLoop("stirring", anyStirring); }, [anyStirring]);
+  useEffect(() => { soundManager.setLoop("pouring", anyPouring); }, [anyPouring]);
+  // Silence every loop when the canvas unmounts
+  useEffect(() => () => {
+    soundManager.setLoop("boiling", false);
+    soundManager.setLoop("stirring", false);
+    soundManager.setLoop("pouring", false);
+  }, []);
 
   // Hot plate self-heating + beaker heating when on
   useEffect(() => {
@@ -3140,22 +3215,27 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
             const checkPour = (
               key: string, label: string, baseMin: number, baseMax: number, unit: string,
             ) => {
+              // The pour event triggers the check, but the warning is judged on the
+              // TOTAL of this ingredient now in the beaker — not the single pour —
+              // so students who build up the amount over several pours are graded
+              // on the accumulated quantity.
               const added = +((endComp[key] ?? 0) - (startComp[key] ?? 0)).toFixed(1);
               if (added < 0.02) return;
+              const total = +(endComp[key] ?? 0).toFixed(1);
               const min = +(baseMin * multiplier).toFixed(2);
               const max = +(baseMax * multiplier).toFixed(2);
-              if (added >= min && added <= max) {
-                addNotif(`✓ ${label}: ${added} ${unit}`, "success",
+              if (total >= min && total <= max) {
+                addNotif(`✓ ${label}: ${total} ${unit}`, "success",
                   `Correct amount — target ${min}–${max} ${unit}`);
-                logLabMilestone(practicalId, `${label} poured: ${added} ${unit} ✓`);
-              } else if (added < min) {
-                addNotif(`⚠ ${label}: ${added} ${unit} — too little`, "warning",
+                logLabMilestone(practicalId, `${label} total: ${total} ${unit} ✓`);
+              } else if (total < min) {
+                addNotif(`⚠ ${label}: ${total} ${unit} — too little`, "warning",
                   `Target is ${min}–${max} ${unit}`);
-                logLabMilestone(practicalId, `${label} poured: ${added} ${unit} ⚠ too little`);
+                logLabMilestone(practicalId, `${label} total: ${total} ${unit} ⚠ too little`);
               } else {
-                addNotif(`⚠ ${label}: ${added} ${unit} — too much`, "warning",
+                addNotif(`⚠ ${label}: ${total} ${unit} — too much`, "warning",
                   `Target is ${min}–${max} ${unit}`);
-                logLabMilestone(practicalId, `${label} poured: ${added} ${unit} ⚠ too much`);
+                logLabMilestone(practicalId, `${label} total: ${total} ${unit} ⚠ too much`);
               }
             };
 
@@ -3207,53 +3287,59 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
           logLabMilestone(practicalId, `${name} cooled to ≤40°C — cooling step complete ✓`);
         }
 
-        // Solid stearic acid deposited by spatula (instant, not a pour animation)
+        // Solid stearic acid deposited by spatula (instant, not a pour animation).
+        // The deposit triggers the check, but the warning is judged on the TOTAL
+        // stearic acid now in the beaker — not the single spatula load — so a charge
+        // built up over several scoops is graded on the accumulated quantity.
         const prevSolid = p.data?.solidStearicGrams ?? 0;
         const currSolid = curr.data?.solidStearicGrams ?? 0;
         if (currSolid > prevSolid) {
-          const added  = +(currSolid - prevSolid).toFixed(1);
+          const total  = +currSolid.toFixed(1);
           const sMin   = +(15 * multiplier).toFixed(1);
           const sMax   = +(20 * multiplier).toFixed(1);
           const sWarnL = +(12 * multiplier).toFixed(1);
           const sWarnH = +(23 * multiplier).toFixed(1);
           const hint   = `Target is ${sMin}–${sMax} g`;
-          if (added >= sMin && added <= sMax) {
-            addNotif(`✓ Stearic acid: ${added} g`, "success", `Correct amount (${hint})`);
-            logLabMilestone(practicalId, `Stearic acid weighed: ${added} g ✓ (target ${sMin}–${sMax} g)`);
-          } else if (added >= sWarnL && added <= sWarnH) {
-            addNotif(`⚠ Stearic acid: ${added} g — marginal`, "warning", `${hint} — borderline amount`);
-            logLabMilestone(practicalId, `Stearic acid weighed: ${added} g ⚠ borderline (target ${sMin}–${sMax} g)`);
-          } else if (added < sWarnL) {
-            addNotif(`✗ Stearic acid: ${added} g — too little`, "error", hint);
-            logLabMilestone(practicalId, `Stearic acid weighed: ${added} g ✗ too little (target ${sMin}–${sMax} g)`);
+          if (total >= sMin && total <= sMax) {
+            addNotif(`✓ Stearic acid: ${total} g`, "success", `Correct amount (${hint})`);
+            logLabMilestone(practicalId, `Stearic acid total: ${total} g ✓ (target ${sMin}–${sMax} g)`);
+          } else if (total >= sWarnL && total <= sWarnH) {
+            addNotif(`⚠ Stearic acid: ${total} g — marginal`, "warning", `${hint} — borderline amount`);
+            logLabMilestone(practicalId, `Stearic acid total: ${total} g ⚠ borderline (target ${sMin}–${sMax} g)`);
+          } else if (total < sWarnL) {
+            addNotif(`✗ Stearic acid: ${total} g — too little`, "error", hint);
+            logLabMilestone(practicalId, `Stearic acid total: ${total} g ✗ too little (target ${sMin}–${sMax} g)`);
           } else {
-            addNotif(`✗ Stearic acid: ${added} g — too much`, "error", hint);
-            logLabMilestone(practicalId, `Stearic acid weighed: ${added} g ✗ too much (target ${sMin}–${sMax} g)`);
+            addNotif(`✗ Stearic acid: ${total} g — too much`, "error", hint);
+            logLabMilestone(practicalId, `Stearic acid total: ${total} g ✗ too much (target ${sMin}–${sMax} g)`);
           }
         }
 
-        // Solid beeswax deposited by spatula (cold cream)
+        // Solid beeswax deposited by spatula (cold cream).
+        // Judged on the TOTAL beeswax now in the beaker — not the single spatula
+        // load — so a charge built up over several scoops is graded on the
+        // accumulated quantity.
         const prevWax = p.data?.solidBeeswaxGrams ?? 0;
         const currWax = curr.data?.solidBeeswaxGrams ?? 0;
         if (currWax > prevWax) {
-          const added  = +(currWax - prevWax).toFixed(1);
+          const total  = +currWax.toFixed(1);
           const wMin   = +(10 * multiplier).toFixed(1);
           const wMax   = +(16 * multiplier).toFixed(1);
           const wWarnL = +(8  * multiplier).toFixed(1);
           const wWarnH = +(18 * multiplier).toFixed(1);
           const hint   = `Target is ${wMin}–${wMax} g`;
-          if (added >= wMin && added <= wMax) {
-            addNotif(`✓ Beeswax: ${added} g`, "success", `Correct amount (${hint})`);
-            logLabMilestone(practicalId, `Beeswax weighed: ${added} g ✓ (target ${wMin}–${wMax} g)`);
-          } else if (added >= wWarnL && added <= wWarnH) {
-            addNotif(`⚠ Beeswax: ${added} g — marginal`, "warning", `${hint} — borderline amount`);
-            logLabMilestone(practicalId, `Beeswax weighed: ${added} g ⚠ borderline (target ${wMin}–${wMax} g)`);
-          } else if (added < wWarnL) {
-            addNotif(`✗ Beeswax: ${added} g — too little`, "error", hint);
-            logLabMilestone(practicalId, `Beeswax weighed: ${added} g ✗ too little (target ${wMin}–${wMax} g)`);
+          if (total >= wMin && total <= wMax) {
+            addNotif(`✓ Beeswax: ${total} g`, "success", `Correct amount (${hint})`);
+            logLabMilestone(practicalId, `Beeswax total: ${total} g ✓ (target ${wMin}–${wMax} g)`);
+          } else if (total >= wWarnL && total <= wWarnH) {
+            addNotif(`⚠ Beeswax: ${total} g — marginal`, "warning", `${hint} — borderline amount`);
+            logLabMilestone(practicalId, `Beeswax total: ${total} g ⚠ borderline (target ${wMin}–${wMax} g)`);
+          } else if (total < wWarnL) {
+            addNotif(`✗ Beeswax: ${total} g — too little`, "error", hint);
+            logLabMilestone(practicalId, `Beeswax total: ${total} g ✗ too little (target ${wMin}–${wMax} g)`);
           } else {
-            addNotif(`✗ Beeswax: ${added} g — too much`, "error", hint);
-            logLabMilestone(practicalId, `Beeswax weighed: ${added} g ✗ too much (target ${wMin}–${wMax} g)`);
+            addNotif(`✗ Beeswax: ${total} g — too much`, "error", hint);
+            logLabMilestone(practicalId, `Beeswax total: ${total} g ✗ too much (target ${wMin}–${wMax} g)`);
           }
         }
       }
@@ -3363,7 +3449,16 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
     draggingRef.current = dragState;
     dragStartRef.current = { x: clientX, y: clientY };
     dragMovedRef.current = false;
+    // Seed table-surface contact from where the item is grabbed (the move
+    // updater keeps it current thereafter). If it's grabbed off the table
+    // (e.g. from the shelf) treat it as already airborne so bringing it down
+    // onto the bench produces a landing knock.
+    dragOnTableRef.current = Math.abs(clicked.y + clicked.height - TABLE_Y) < 2;
+    dragLiftedRef.current  = !dragOnTableRef.current;
+    dragTypeRef.current    = clicked.type;
+    lastMovePosRef.current = { x: clientX, y: clientY };
     setDragging(dragState);
+    soundManager.grab();   // tactile pick-up sound for any apparatus on the table
     if (kind === "mouse") {
       window.addEventListener("mousemove", handleMouseMove);
       window.addEventListener("mouseup", handleMouseUp);
@@ -3392,6 +3487,23 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
         const dym = e.clientY - dragStartRef.current.y;
         if (Math.hypot(dxm, dym) > 4) dragMovedRef.current = true;
       }
+      // Friction of the apparatus sliding across the table while it's dragged —
+      // only for the heavy bench items, only while in contact with the table
+      // surface (dragOnTableRef, updated by the previous move's position update),
+      // and skipped during hold-to-stir (the rod hasn't lifted into a drag yet).
+      // Speed of the pointer drives the scrape volume so it reflects the motion.
+      if (dragMovedRef.current && !holdStirRef.current && dragOnTableRef.current) {
+        const draggedType = dragTypeRef.current;
+        if (draggedType && SLIDE_SOUND_TYPES.includes(draggedType)) {
+          const last = lastMovePosRef.current;
+          const speed = last ? Math.hypot(e.clientX - last.x, e.clientY - last.y) : 0;
+          soundManager.slide(speed / 22);   // ~22 px/move ≈ full intensity
+        }
+      }
+      lastMovePosRef.current = { x: e.clientX, y: e.clientY };
+      // Once the item leaves the table top, remember it was airborne so the
+      // landing "knock" can fire when it next touches the table.
+      if (!dragOnTableRef.current) dragLiftedRef.current = true;
       // While stirring, keep the rod still until the pointer clearly moves; once
       // it does, stop the swirl and let the press become a drag (lift the rod).
       if (holdStirRef.current) {
@@ -3470,6 +3582,10 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
             const TOP_CLEARANCE = NAV_BAR_HEIGHT + 16;
             const boundedX = Math.max(0, Math.min(x - drag.offsetX, canvasSize.width - app.width));
             const boundedY = Math.max(TOP_CLEARANCE, Math.min(newY, canvasSize.height - app.height));
+            // Track table-surface contact so friction/landing sounds only play
+            // while the item is actually resting on the table (not mid-air, on
+            // the shelf, in a beaker, on the hot plate, etc.).
+            dragOnTableRef.current = Math.abs(boundedY + app.height - TABLE_Y) < 2;
             carryDx = boundedX - app.x;
             carryDy = boundedY - app.y;
             return { ...app, x: boundedX, y: boundedY };
@@ -3520,7 +3636,15 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
 
     if (dragging) {
       const didMove = dragMovedRef.current;
-      if (didMove) pushHistory(); // ← snapshot the position before a real drag is finalised
+      if (didMove) {
+        pushHistory(); // ← snapshot the position before a real drag is finalised
+        // Landing "knock" only for glassware containers, and only when they
+        // actually come down onto the table surface from the air — sliding flat
+        // along the bench, or setting down on the shelf / hot plate, is silent.
+        const t = dragTypeRef.current;
+        if (t && DROP_SOUND_TYPES.includes(t) && dragOnTableRef.current && dragLiftedRef.current)
+          soundManager.drop();
+      }
       // Check if dropped over a valid target (beaker or cylinder, lid off).
       // Only when the container was actually dragged — a plain click/double-click
       // must never raise the pour prompt.
@@ -3597,12 +3721,12 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
         const currentLoad = dragged.data?.spatulaLoad ?? 0;
 
         if (currentLoad > 0) {
-          // Loaded — deposit into beaker if blade is inside one
+          // Loaded — deposit only when the blade (chopping head) is aimed into
+          // the beaker's mouth, mirroring how a real scoop is tipped over the rim.
           const beakerTarget = apparatus.find(
             (a) =>
               (a.type === "beaker" || a.type === "cylinder") &&
-              bladeCX >= a.x && bladeCX <= a.x + a.width &&
-              bladeY  >= a.y && bladeY  <= a.y + a.height,
+              bladeOverMouth(bladeCX, bladeY, a),
           );
           if (beakerTarget) {
             const grams = currentLoad;
@@ -3651,6 +3775,10 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
     draggingRef.current = null;
     dragStartRef.current = null;
     dragMovedRef.current = false;
+    dragOnTableRef.current = false;
+    dragLiftedRef.current = false;
+    dragTypeRef.current = null;
+    lastMovePosRef.current = null;
     setDragging(null);
     window.removeEventListener("mousemove", handleMouseMove);
     window.removeEventListener("mouseup", handleMouseUp);
@@ -3724,12 +3852,14 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
       if (clicked.type === "hotplate") {
         const topH = clicked.height * 0.42;
         const frontH = clicked.height - topH;
+        const frontY = clicked.y + topH;
         const btnR = Math.min(frontH * 0.34, 12);
         const btnCX = clicked.x + btnR + 5;
-        const btnCY = clicked.y + topH + frontH / 2;
+        const btnCY = frontY + frontH / 2;
         const dx = x - btnCX;
         const dy = y - btnCY;
         if (Math.sqrt(dx * dx + dy * dy) <= btnR + 4) {
+          soundManager.click(!(clicked.data?.isOn ?? false));
           setApparatus((prev) =>
             prev.map((a) =>
               a.type === "hotplate"
@@ -3739,8 +3869,20 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
           );
           return;
         }
+        // Temperature (heat-range) knob — only this opens the temperature modal.
+        // Matches the knob geometry drawn in drawHotPlate().
+        const knobCX = clicked.x + clicked.width - btnR - 5;
+        const knobCY = frontY + frontH / 2;
+        const knobR  = frontH * 0.3;
+        const kdx = x - knobCX;
+        const kdy = y - knobCY;
+        if (Math.sqrt(kdx * kdx + kdy * kdy) <= knobR + 4) {
+          setSelectedApparatus(clicked);
+          setShowHotPlateModal(true);
+          return;
+        }
+        // Any other part of the hot plate just selects it — no modal.
         setSelectedApparatus(clicked);
-        setShowHotPlateModal(true);
         return;
       }
       setSelectedApparatus(clicked);
@@ -3914,12 +4056,19 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
           const source = apparatus.find((a) => a.id === showPourModal.sourceId);
           const target = apparatus.find((a) => a.id === showPourModal.targetId);
           if (!source || !target) return null;
-          const available    = source.data?.currentVolume || 0;
-          const targetMax    = target.data?.maxVolume || 0;
-          const targetCurrent = target.data?.currentVolume || 0;
-          const maxPour      = Math.min(available, targetMax - targetCurrent);
-          const currentAmount = selectedPourAmount > 0 && selectedPourAmount <= maxPour
-            ? selectedPourAmount : maxPour;
+          const liveAvailable  = source.data?.currentVolume || 0;
+          const targetMax      = target.data?.maxVolume || 0;
+          const targetCurrent  = target.data?.currentVolume || 0;
+          const liveMaxPour    = Math.min(liveAvailable, targetMax - targetCurrent);
+          // While the pour animation runs the source drains every frame, which
+          // would otherwise rescale the cylinder graduations on each tick. Hold
+          // the scale steady using the snapshot taken when the pour started.
+          const frozen     = isAnimatingPour ? pourScaleFreezeRef.current : null;
+          const maxPour    = frozen ? frozen.maxPour : liveMaxPour;
+          const currentAmount = frozen
+            ? frozen.amount
+            : (selectedPourAmount > 0 && selectedPourAmount <= maxPour
+                ? selectedPourAmount : maxPour);
           const pct = maxPour > 0 ? (currentAmount / maxPour) * 100 : 100;
           const liquidColor = source.data?.liquidColor || "rgba(56,189,248,0.7)";
 
@@ -3965,10 +4114,14 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
                     const ticks: number[] = [];
                     for (let v = 0; v <= maxPour + 1e-6; v += tickStep) ticks.push(+v.toFixed(2));
                     if (ticks[ticks.length - 1] < maxPour - 1e-6) ticks.push(+maxPour.toFixed(2));
-                    const TOP = 20, BOT = 185, BODY = BOT - TOP;
+                    // Measuring-cylinder geometry (narrow tall tube), matching
+                    // the realistic cylinder drawn on the lab bench.
+                    const CYL_L = 50, CYL_W = 32, CYL_R = CYL_L + CYL_W;
+                    const CX = CYL_L + CYL_W / 2;
+                    const TOP = 32, BOT = 166, BODY = BOT - TOP;
                     const fmtTick  = (n: number) => (Number.isInteger(n) ? String(n) : n.toFixed(1));
                     const liquidY  = BOT - BODY * fillFrac;
-                    // Map a pointer position on the beaker to a pour amount (drag to fill)
+                    // Map a pointer position on the cylinder to a pour amount (drag to fill)
                     const setFromEvent = (e: React.PointerEvent<SVGSVGElement>) => {
                       if (isAnimatingPour) return;
                       const r = e.currentTarget.getBoundingClientRect();
@@ -3980,37 +4133,61 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
                     };
                     return (
                       <div style={{ display:"flex", gap:18, marginBottom:18 }}>
-                        {/* Beaker visualization — doubles as the graduated scale / number line */}
+                        {/* Measuring-cylinder visualization — doubles as the graduated scale / number line */}
                         <svg viewBox="0 0 120 200" width={120} height={200}
                           onPointerDown={e => { if (isAnimatingPour) return; e.currentTarget.setPointerCapture(e.pointerId); setFromEvent(e); }}
                           onPointerMove={e => { if (e.buttons === 1) setFromEvent(e); }}
                           style={{ flexShrink:0, touchAction:"none",
                             cursor: isAnimatingPour ? "not-allowed" : "ns-resize" }}>
                           <defs>
-                            <clipPath id="pourBeakerClip">
-                              <path d="M40 22 L40 180 Q40 184 44 184 L96 184 Q100 184 100 180 L100 22 Z" />
+                            <clipPath id="pourCylClip">
+                              <path d={`M${CYL_L} ${TOP} L${CYL_L} ${BOT - 5} Q${CYL_L} ${BOT} ${CYL_L + 5} ${BOT} L${CYL_R - 5} ${BOT} Q${CYL_R} ${BOT} ${CYL_R} ${BOT - 5} L${CYL_R} ${TOP} Z`} />
                             </clipPath>
+                            <linearGradient id="pourCylGlass" x1="0" y1="0" x2="1" y2="0">
+                              <stop offset="0"    stopColor="rgba(255,255,255,0.05)" />
+                              <stop offset="0.18" stopColor="rgba(255,255,255,0.22)" />
+                              <stop offset="0.5"  stopColor="rgba(255,255,255,0.04)" />
+                              <stop offset="0.85" stopColor="rgba(180,210,235,0.16)" />
+                              <stop offset="1"    stopColor="rgba(150,185,220,0.22)" />
+                            </linearGradient>
                           </defs>
-                          {/* Liquid */}
-                          <g clipPath="url(#pourBeakerClip)">
-                            <rect x={40} y={liquidY} width={60} height={BOT - liquidY + 6} fill={liquidColor} />
-                            {fillFrac > 0.015 &&
-                              <rect x={40} y={liquidY} width={60} height={4} fill="rgba(255,255,255,0.35)" />}
+
+                          {/* Liquid (clipped to the beaker body) */}
+                          <g clipPath="url(#pourCylClip)">
+                            <rect x={CYL_L} y={liquidY} width={CYL_W} height={BOT - liquidY} fill={liquidColor} />
+                            {/* concave meniscus — water wets the glass and dips in the middle */}
+                            {fillFrac > 0.015 && <>
+                              <path d={`M${CYL_L} ${liquidY} Q${CX} ${liquidY + 5} ${CYL_R} ${liquidY}`}
+                                fill="rgba(255,255,255,0.18)" />
+                              <path d={`M${CYL_L + 1} ${liquidY + 0.5} Q${CX} ${liquidY + 5} ${CYL_R - 1} ${liquidY + 0.5}`}
+                                fill="none" stroke="rgba(255,255,255,0.6)" strokeWidth={1.3} />
+                            </>}
                           </g>
-                          {/* Beaker outline + pouring spout */}
-                          <path d="M40 22 L40 180 Q40 184 44 184 L96 184 Q100 184 100 180 L100 22"
-                            fill="none" stroke="#64748b" strokeWidth={2.5} strokeLinejoin="round" />
-                          <path d="M40 22 Q35 17 31 20"
-                            fill="none" stroke="#64748b" strokeWidth={2.5} strokeLinecap="round" />
-                          {/* Graduation marks (the scale) */}
+
+                          {/* Glass beaker body — flat rounded bottom, open top */}
+                          <path d={`M${CYL_L} ${TOP} L${CYL_L} ${BOT - 5} Q${CYL_L} ${BOT} ${CYL_L + 5} ${BOT} L${CYL_R - 5} ${BOT} Q${CYL_R} ${BOT} ${CYL_R} ${BOT - 5} L${CYL_R} ${TOP}`}
+                            fill="url(#pourCylGlass)" stroke="#94a3b8" strokeWidth={2} strokeLinejoin="round" />
+                          {/* Vertical glass highlight streak */}
+                          <rect x={CYL_L + 4} y={TOP + 8} width={3} height={BODY - 18} rx={1.5}
+                            fill="rgba(255,255,255,0.3)" />
+
+                          {/* Beaker pouring spout — small curved lip on the right */}
+                          <path d={`M${CYL_R - 1} ${TOP} Q${CYL_R + 4} ${TOP - 5} ${CYL_R + 9} ${TOP - 2}`}
+                            fill="none" stroke="#94a3b8" strokeWidth={2} strokeLinecap="round" />
+
+                          {/* "mL" unit label */}
+                          <text x={CYL_R - 4} y={TOP + 12} textAnchor="end" fontSize={7} fontWeight={700}
+                            fill="rgba(226,232,240,0.7)" fontFamily="monospace">mL</text>
+
+                          {/* Graduation marks (the scale) — alternating long/short ticks */}
                           {ticks.map((v, i) => {
                             const y = BOT - BODY * (maxPour > 0 ? v / maxPour : 0);
                             return (
                               <g key={i}>
-                                <line x1={40} y1={y} x2={50} y2={y}
-                                  stroke="rgba(226,232,240,0.55)" strokeWidth={1} />
-                                <text x={37} y={y + 3} textAnchor="end" fontSize={8}
-                                  fill="#94a3b8" fontFamily="monospace">{fmtTick(v)}</text>
+                                <line x1={CYL_L + 1} y1={y} x2={CYL_L + 11} y2={y}
+                                  stroke="rgba(226,232,240,0.8)" strokeWidth={1.2} />
+                                <text x={CYL_L - 4} y={y + 3.2} textAnchor="end" fontSize={9}
+                                  fontWeight={600} fill="#e2e8f0" fontFamily="monospace">{fmtTick(v)}</text>
                               </g>
                             );
                           })}
@@ -4143,6 +4320,9 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
                     const srcOrigComp  = { ...(source.data?.composition ?? {}) } as Record<string, number>;
                     const ingredientKey = BOTTLE_INGREDIENT[source.id];
 
+                    // Freeze the cylinder scale at the values shown right now so
+                    // the graduations don't shift while the source drains.
+                    pourScaleFreezeRef.current = { available: liveAvailable, maxPour, amount };
                     setIsAnimatingPour(true);
                     let progress = 0;
                     const steps  = 60;
@@ -4271,6 +4451,7 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
                             return a;
                           }),
                         );
+                        pourScaleFreezeRef.current = null;
                         setIsAnimatingPour(false);
                         setShowPourModal(null);
                         setSelectedPourAmount(0);
@@ -4417,6 +4598,7 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
                     <button
                       onClick={() => {
                         pushHistory();
+                        soundManager.click(!isOn);
                         setApparatus(prev => prev.map(a =>
                           a.type === "hotplate"
                             ? { ...a, data: { ...a.data, isOn: !isOn,
@@ -4882,7 +5064,7 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
         const swatch         = src.data?.liquidColor || "rgba(255,250,240,0.95)";
         const available      = Math.round((src.data?.currentVolume ?? 0) * density);
         const presets        = [
-          ...(assignment ? [{ label: "Target", val: Math.max(1, Math.min(Math.round(targetGrams), maxG)) }] : []),
+          ...(hasTarget ? [{ label: "Target", val: Math.max(1, Math.min(Math.round(targetGrams), maxG)) }] : []),
           { label: "½ load", val: Math.max(1, Math.round(maxG / 2)) },
           { label: "Max",    val: maxG },
         ];
@@ -4933,7 +5115,7 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
                     <div style={{ color:"#64748b", fontSize:10, textTransform:"uppercase", letterSpacing:0.6 }}>Spatula max</div>
                     <div style={{ color:"#e2e8f0", fontWeight:700, fontSize:14 }}>{maxG} g</div>
                   </div>
-                  {assignment && (
+                  {hasTarget && (
                     <div style={{ flex:1, background:"#10210f", border:"1px solid #1e3a1e",
                       borderRadius:10, padding:"8px 12px" }}>
                       <div style={{ color:"#65a30d", fontSize:10, textTransform:"uppercase", letterSpacing:0.6 }}>🎯 Target</div>
@@ -5064,6 +5246,32 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
         }}
       >
         ↩ Undo
+      </button>
+
+      {/* ── Sound mute toggle ─── */}
+      <button
+        onClick={() => setSoundMuted((m) => !m)}
+        title={soundMuted ? "Sound off — click to enable lab sounds" : "Sound on — click to mute"}
+        style={{
+          position: "absolute",
+          top: 14,
+          right: 510,
+          background: soundMuted ? "#1e293b" : "#334155",
+          color: soundMuted ? "#475569" : "#e2e8f0",
+          border: "none",
+          borderRadius: 10,
+          padding: "9px 16px",
+          fontWeight: 700,
+          fontSize: 13,
+          cursor: "pointer",
+          zIndex: 50,
+          display: "flex",
+          alignItems: "center",
+          gap: 6,
+          transition: "background .15s, color .15s",
+        }}
+      >
+        {soundMuted ? "🔇 Sound" : "🔊 Sound"}
       </button>
 
       <EvaluationPanel

@@ -2,10 +2,28 @@ const express  = require('express');
 const jwt      = require('jsonwebtoken');
 const { body, validationResult } = require('express-validator');
 const User     = require('../models/User');
+const Settings = require('../models/Settings');
+const AuditLog = require('../models/AuditLog');
 const { authenticate } = require('../middleware/auth');
 
 const router     = express.Router();
 const JWT_SECRET = process.env.JWT_SECRET || 'change-this-secret';
+
+// Record an audit entry without blocking the response — a logging failure must
+// never break sign-in or registration.
+async function recordAudit(action, user, detail) {
+  try {
+    await AuditLog.create({
+      action,
+      actorId:   user.clientId,
+      actorName: user.fullName,
+      actorRole: user.role,
+      detail,
+    });
+  } catch (err) {
+    console.error('Audit write failed:', err.message);
+  }
+}
 
 const signToken = (user) =>
   jwt.sign({ id: user.clientId, role: user.role, email: user.email }, JWT_SECRET, {
@@ -29,6 +47,22 @@ router.post('/register', [
     return res.status(400).json({ error: 'Registration number is required for students' });
 
   try {
+    const settings = await Settings.getSingleton();
+
+    // Maintenance mode / closed registration block self-service sign-ups.
+    // (Accounts created on a user's behalf by an admin go through /api/users.)
+    if (settings.maintenanceMode)
+      return res.status(503).json({ error: 'The platform is in maintenance mode. Please try again later.' });
+    if (!settings.openRegistration)
+      return res.status(403).json({ error: 'New registrations are currently closed. Please contact your administrator.' });
+
+    // Enforce the student account cap.
+    if (role === 'student') {
+      const activeStudents = await User.countDocuments({ role: 'student', status: 'active' });
+      if (activeStudents >= settings.maxStudents)
+        return res.status(403).json({ error: 'The maximum number of student accounts has been reached. Please contact your administrator.' });
+    }
+
     const existing = await User.findOne({ email });
     if (existing)
       return res.status(409).json({ error: 'An account with this email already exists' });
@@ -42,6 +76,8 @@ router.post('/register', [
       regNumber: role === 'student' ? regNumber.trim() : null,
       passwordHash, status,
     });
+
+    await recordAudit('user_registered', user, `${fullName} registered as ${role}`);
 
     // Pending teachers wait for approval — no token issued
     if (status === 'pending') {
@@ -102,8 +138,17 @@ router.post('/login', [
     if (user.suspended)
       return res.status(403).json({ error: 'Your account has been suspended.' });
 
+    // During maintenance only admins may sign in.
+    if (user.role !== 'admin') {
+      const settings = await Settings.getSingleton();
+      if (settings.maintenanceMode)
+        return res.status(503).json({ error: 'The platform is in maintenance mode. Please try again later.' });
+    }
+
     user.lastLogin = new Date();
     await user.save();
+
+    await recordAudit('user_login', user, `${user.fullName} (${user.role}) signed in`);
 
     res.json({ token: signToken(user), user: user.toPublicJSON() });
   } catch (err) {

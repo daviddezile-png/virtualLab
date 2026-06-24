@@ -60,6 +60,11 @@ export default defineConfig({
         target: 'http://localhost:3543',
         changeOrigin: true,
         secure: false,
+      },
+      '/health': {
+        target: 'http://localhost:3543',
+        changeOrigin: true,
+        secure: false,
       }
     }
   },

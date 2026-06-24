@@ -146,7 +146,9 @@ function readLabState(apparatus: Apparatus[]): FormulationInput {
   const aqMaxTemp = aqBeaker?.data?.maxTemperatureReached ?? 25;
 
   const history = mainBeaker?.data?.pouringSourceHistory ?? [];
-  let mixingOrder: "aqueous_to_oil" | "oil_to_aqueous" = "oil_to_aqueous";
+  // Default "none": until BOTH phases have actually been poured into the main
+  // beaker there is no mixing order to judge — the step simply wasn't performed.
+  let mixingOrder: "aqueous_to_oil" | "oil_to_aqueous" | "none" = "none";
   const oilIdx = history.findIndex(id => id === "beaker-250-oil");
   const aqIdx  = history.findIndex(id => id === "beaker-250-aqueous");
   if (oilIdx !== -1 && aqIdx !== -1) {
@@ -201,7 +203,8 @@ function readColdCreamLabState(apparatus: Apparatus[]): ColdCreamInput {
   const history = mainBeaker?.data?.pouringSourceHistory ?? [];
   const oilIdx  = history.findIndex(id => id === "beaker-250-oil");
   const aqIdx   = history.findIndex(id => id === "beaker-250-aqueous");
-  let mixingOrder: "aqueous_to_oil" | "oil_to_aqueous" = "oil_to_aqueous";
+  // "none" until both phases are actually combined (see vanishing-cream reader).
+  let mixingOrder: "aqueous_to_oil" | "oil_to_aqueous" | "none" = "none";
   if (oilIdx !== -1 && aqIdx !== -1)
     mixingOrder = oilIdx < aqIdx ? "aqueous_to_oil" : "oil_to_aqueous";
 
@@ -267,7 +270,7 @@ const buildChecklist = (r: EvaluationResult, f: FormulationInput, measuredVisc: 
       got:`${td.toFixed(1)}°C`, target:"≤5°C",
       status:(td<=5?"pass":td<=10?"warn":"fail") as "pass"|"warn"|"fail" },
     { label:"Mixing Order",
-      got:f.mixing_order==="aqueous_to_oil"?"Oil first, then Aqueous":"Aqueous first, then Oil",
+      got:f.mixing_order==="aqueous_to_oil"?"Oil first, then Aqueous":f.mixing_order==="none"?"Phases not combined":"Aqueous first, then Oil (reversed)",
       target:"Oil first, then Aqueous",
       status:(f.mixing_order==="aqueous_to_oil"?"pass":"fail") as "pass"|"warn"|"fail" },
     { label:"Mixing Time",
@@ -306,7 +309,7 @@ const buildColdCreamChecklist = (r: ColdCreamResult, f: ColdCreamInput, measured
       status:(f.aqueous_phase_temperature>=65&&f.aqueous_phase_temperature<=75?"pass":f.aqueous_phase_temperature>=58&&f.aqueous_phase_temperature<=82?"warn":"fail") as "pass"|"warn"|"fail" },
     { label:"Phase Temperature Difference", got:`${td.toFixed(1)}°C`, target:"≤5°C",
       status:(td<=5?"pass":td<=10?"warn":"fail") as "pass"|"warn"|"fail" },
-    { label:"Mixing Order",       got:f.mixing_order==="aqueous_to_oil"?"Oil first, then Aqueous":"Aqueous first, then Oil", target:"Oil first, then Aqueous",
+    { label:"Mixing Order",       got:f.mixing_order==="aqueous_to_oil"?"Oil first, then Aqueous":f.mixing_order==="none"?"Phases not combined":"Aqueous first, then Oil (reversed)", target:"Oil first, then Aqueous",
       status:(f.mixing_order==="aqueous_to_oil"?"pass":"fail") as "pass"|"warn"|"fail" },
     { label:"Mixing Time",        got:`${f.mixing_time} s`, target:"≥20 s",
       status:(f.mixing_time>=20?"pass":f.mixing_time>=12?"warn":"fail") as "pass"|"warn"|"fail" },
@@ -361,12 +364,15 @@ const EvaluationPanel: React.FC<Props> = ({
   const persistSubmission = async (
     rawScore: number, predictedPH: number, predictedVisc: number,
     stabilityStr: string, pc: number, wc: number, ts: number,
-    liveVisc: number, livePH: number,
+    liveVisc: number, livePH: number, forceFail: boolean,
   ) => {
     if (submittedRef.current) return; // already successfully saved this session
 
+    // forceFail = phases reversed or never combined → no valid product, so the
+    // saved result must be FAIL regardless of how many individual steps passed.
     const dr: "PASS" | "AVERAGE" | "FAIL" =
-      pc === ts ? "PASS" : pc + wc >= ts || pc >= 10 ? "AVERAGE" : "FAIL";
+      forceFail ? "FAIL"
+      : pc === ts ? "PASS" : pc + wc >= ts || pc >= 10 ? "AVERAGE" : "FAIL";
     const sp  = Math.round((pc / ts) * 100);
     const now = Date.now();
     const u   = getCurrentUser();
@@ -420,7 +426,7 @@ const EvaluationPanel: React.FC<Props> = ({
         const cl = buildColdCreamChecklist(r, ccLive, liveVisc, livePH);
         const pc = cl.filter(i => i.status === "pass").length;
         const wc = cl.filter(i => i.status === "warn").length;
-        await persistSubmission(r.score, r.predicted_pH, r.predicted_viscosity, r.stability, pc, wc, 13, liveVisc, livePH);
+        await persistSubmission(r.score, r.predicted_pH, r.predicted_viscosity, r.stability, pc, wc, 13, liveVisc, livePH, ccLive.mixing_order !== "aqueous_to_oil");
       } catch { /* no ingredients added yet */ }
     } else {
       const live = readLabState(apparatus);
@@ -431,7 +437,7 @@ const EvaluationPanel: React.FC<Props> = ({
         const cl = buildChecklist(r, live, liveVisc, livePH);
         const pc = cl.filter(i => i.status === "pass").length;
         const wc = cl.filter(i => i.status === "warn").length;
-        await persistSubmission(r.score, r.predicted_pH, r.predicted_viscosity, r.stability, pc, wc, 14, liveVisc, livePH);
+        await persistSubmission(r.score, r.predicted_pH, r.predicted_viscosity, r.stability, pc, wc, 14, liveVisc, livePH, live.mixing_order !== "aqueous_to_oil");
       } catch { /* no ingredients yet */ }
     }
   };
@@ -445,15 +451,18 @@ const EvaluationPanel: React.FC<Props> = ({
   const warnCount  = checklist.filter(i => i.status==="warn").length;
   const totalSteps = isColdCream ? 13 : 14;
 
-  // Wrong mixing order forms the WRONG emulsion type (cold cream instead of
-  // vanishing cream, or vice-versa). When that happens no valid product was
-  // made, so the attempt is a hard FAIL with zero marks regardless of the other
-  // steps — overrides the checklist-derived result below.
+  // Two distinct procedural situations, kept separate so the result text matches
+  // what the student actually did:
+  //   • wrongOrder  — phases combined in REVERSE → forms the wrong emulsion type,
+  //     a hard FAIL with zero marks regardless of other steps.
+  //   • notCombined — phases never combined → incomplete attempt. Still a FAIL
+  //     (no product), but the student keeps the partial marks they earned.
   const detectedOrder = isColdCream ? ccForm.mixing_order : form.mixing_order;
-  const wrongOrder = !!activeResult && detectedOrder !== "aqueous_to_oil";
+  const wrongOrder  = !!activeResult && detectedOrder === "oil_to_aqueous";
+  const notCombined = !!activeResult && detectedOrder === "none";
 
   const displayResult: "PASS" | "AVERAGE" | "FAIL" =
-    wrongOrder                             ? "FAIL"
+    wrongOrder || notCombined              ? "FAIL"
     : passCount === totalSteps             ? "PASS"
     : passCount + warnCount >= totalSteps  ? "AVERAGE"
     : passCount >= 10                      ? "AVERAGE"
@@ -535,12 +544,12 @@ const EvaluationPanel: React.FC<Props> = ({
             <SectionTitle>Process Recorded</SectionTitle>
 
             {isColdCream ? (<>
-              <DetectedRow label="Mixing Order"        value={ccForm.mixing_order==="aqueous_to_oil" ? "Oil first ✓" : "Aqueous first ✗"} inRange={ccForm.mixing_order==="aqueous_to_oil"} />
+              <DetectedRow label="Mixing Order"        value={ccForm.mixing_order==="aqueous_to_oil" ? "Oil first ✓" : ccForm.mixing_order==="none" ? "Not combined —" : "Aqueous first ✗"} inRange={ccForm.mixing_order==="aqueous_to_oil" ? true : ccForm.mixing_order==="none" ? null : false} />
               <DetectedRow label="Stirring Time"       value={`${ccForm.mixing_time} s`}       inRange={ccForm.mixing_time>=20} />
               <DetectedRow label="Cooling Temperature" value={`${ccForm.cooling_temperature}°C`} inRange={ccForm.cooling_temperature<=35} />
               <DetectedRow label="Stirred while Cooling" value={ccForm.cooling_stirring ? "Yes ✓" : "No ✗"} inRange={ccForm.cooling_stirring} />
             </>) : (<>
-              <DetectedRow label="Mixing Order"        value={form.mixing_order==="aqueous_to_oil" ? "Oil first ✓" : "Aqueous first ✗"} inRange={form.mixing_order==="aqueous_to_oil"} />
+              <DetectedRow label="Mixing Order"        value={form.mixing_order==="aqueous_to_oil" ? "Oil first ✓" : form.mixing_order==="none" ? "Not combined —" : "Aqueous first ✗"} inRange={form.mixing_order==="aqueous_to_oil" ? true : form.mixing_order==="none" ? null : false} />
               <DetectedRow label="Stirring Time"       value={`${form.mixing_time} s`}       inRange={form.mixing_time>=30} />
               <DetectedRow label="Cooling Temperature" value={`${form.cooling_temperature}°C`} inRange={form.cooling_temperature<=40} />
               <DetectedRow label="Stirred while Cooling" value={form.cooling_stirring ? "Yes ✓" : "No ✗"} inRange={form.cooling_stirring} />
@@ -627,7 +636,9 @@ const EvaluationPanel: React.FC<Props> = ({
 
                   <div style={{ flex:1 }}>
                     <div style={{ color:resultColor, fontSize:28, fontWeight:900, letterSpacing:1 }}>
-                      {wrongOrder
+                      {notCombined
+                        ? "Procedure Incomplete"
+                        : wrongOrder
                         ? (isColdCream ? "Cold Cream NOT Formed" : "Vanishing Cream NOT Formed")
                         : isColdCream
                         ? displayResult === "PASS"    ? "Cold Cream Formed!"
@@ -638,7 +649,9 @@ const EvaluationPanel: React.FC<Props> = ({
                           : "Vanishing Cream Formed with Grainy Texture"}
                     </div>
                     <div style={{ color:"#94a3b8", fontSize:13, marginTop:3 }}>
-                      {wrongOrder
+                      {notCombined
+                        ? `The two phases were never combined, so no ${isColdCream ? "cold cream" : "vanishing cream"} was formed. You earned partial marks only for the steps you completed — pour the oil phase into the main beaker, then add the aqueous phase into it and stir.`
+                        : wrongOrder
                         ? `Wrong mixing order — the phases were combined in reverse, so a ${isColdCream ? "vanishing cream (O/W emulsion)" : "cold cream (W/O emulsion)"} formed instead of ${isColdCream ? "cold cream" : "vanishing cream"}. No valid product was made — 0 marks.`
                         : displayResult==="PASS"
                         ? `Excellent! Correct procedure — a quality ${isColdCream ? "cold cream (W/O emulsion)" : "vanishing cream (O/W emulsion)"} was produced.`

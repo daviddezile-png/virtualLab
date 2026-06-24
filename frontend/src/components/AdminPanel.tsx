@@ -16,6 +16,13 @@ import {
 } from "../utils/userStore";
 import { getAllSubmissions, getStats } from "../utils/submissionStore";
 import { getAuditLog, clearAuditLog } from "../utils/auditStore";
+import { getSettings, updateSettings } from "../utils/settingsStore";
+import { checkHealth } from "../utils/apiClient";
+import type { HealthResult } from "../utils/apiClient";
+import {
+  getErrorTrend, getFunnel, getAtRisk,
+  ErrorTrendResult, FunnelResult, AtRiskResult, downloadCSV,
+} from "../utils/analyticsStore";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Theme tokens — pure black/white + green
@@ -39,6 +46,12 @@ const LIGHT = {
 } as const;
 
 type C = typeof DARK;
+
+// Glossy gradient fill for chart bars — soft top highlight over a base colour,
+// giving flat bars a dimensional, modern look with no chart library.
+const barFill = (c: string) =>
+  `linear-gradient(180deg, rgba(255,255,255,0.28), rgba(255,255,255,0.03) 70%), ${c}`;
+
 const ThemeCtx = createContext<{ C:C; isDark:boolean; toggle:()=>void }>({ C:DARK, isDark:true, toggle:()=>{} });
 const useTheme = () => useContext(ThemeCtx);
 
@@ -50,22 +63,61 @@ type Section = "dashboard"|"users"|"approvals"|"analytics"|"settings"|"auditlog"
 // ─────────────────────────────────────────────────────────────────────────────
 // Shared micro-components
 // ─────────────────────────────────────────────────────────────────────────────
-const StatCard: React.FC<{ label:string; value:string|number; sub?:string; Icon:LucideIcon; color:string }> =
-({ label, value, sub, Icon, color }) => {
+const StatCard: React.FC<{ label:string; value:string|number; sub?:string; Icon:LucideIcon; color:string; loading?:boolean }> =
+({ label, value, sub, Icon, color, loading }) => {
   const { C } = useTheme();
   return (
     <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:14,
-      padding:"18px 20px", display:"flex", gap:14, alignItems:"flex-start",
-      boxShadow:`0 1px 4px ${C.shadow}` }}>
+      padding:"20px 24px", display:"flex", gap:14, alignItems:"center", justifyContent:"center",
+      boxShadow:`0 1px 4px ${C.shadow}`, minWidth:0, flex:"1 1 220px" }}>
       <div style={{ width:44, height:44, borderRadius:12, background:`${color}18`,
         display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>
         <Icon size={22} color={color} strokeWidth={1.8} />
       </div>
-      <div>
+      <div style={{ minWidth:0, flex:"0 1 auto", width: loading ? 120 : undefined }}>
         <div style={{ color:C.txtMut, fontSize:13, fontWeight:600, textTransform:"uppercase",
           letterSpacing:0.8, marginBottom:4 }}>{label}</div>
-        <div style={{ color:C.txtPri, fontSize:30, fontWeight:800, lineHeight:1 }}>{value}</div>
-        {sub && <div style={{ color:C.txtSec, fontSize:14, marginTop:4 }}>{sub}</div>}
+        {loading ? (
+          <>
+            <span className="vlab-skel" style={{ width:"70%", height:24, display:"block" }} />
+            <span className="vlab-skel" style={{ width:"90%", height:11, display:"block", marginTop:8 }} />
+          </>
+        ) : (
+          <>
+            <div style={{ color:C.txtPri, fontSize:"clamp(20px,4.5vw,30px)", fontWeight:800,
+              lineHeight:1.1, whiteSpace:"nowrap" }}>{value}</div>
+            {sub && <div style={{ color:C.txtSec, fontSize:14, marginTop:4 }}>{sub}</div>}
+          </>
+        )}
+      </div>
+    </div>
+  );
+};
+
+// Rows-per-page pagination — applied to every data table for mobile-friendly browsing.
+const PAGE_SIZE = 10;
+
+const Pagination: React.FC<{ page:number; total:number; onPage:(p:number)=>void; unit?:string }> =
+({ page, total, onPage, unit="rows" }) => {
+  const { C } = useTheme();
+  const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const from = total === 0 ? 0 : page * PAGE_SIZE + 1;
+  const to   = Math.min(total, (page + 1) * PAGE_SIZE);
+  const btn = (disabled:boolean):React.CSSProperties => ({
+    background: C.card, border:`1px solid ${C.border2}`,
+    color: disabled ? C.txtMut : C.txtSec, borderRadius:8, padding:"6px 12px",
+    fontSize:14, fontWeight:600, cursor: disabled ? "default" : "pointer", opacity: disabled ? 0.5 : 1,
+  });
+  return (
+    <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between",
+      gap:10, marginTop:12, flexWrap:"wrap" }}>
+      <span style={{ color:C.txtMut, fontSize:14 }}>{from}–{to} of {total} {unit}</span>
+      <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+        <button disabled={page===0} onClick={() => onPage(page-1)} style={btn(page===0)}>Prev</button>
+        <span style={{ color:C.txtSec, fontSize:14, padding:"0 4px", whiteSpace:"nowrap" }}>
+          Page {page+1} / {pageCount}
+        </span>
+        <button disabled={page>=pageCount-1} onClick={() => onPage(page+1)} style={btn(page>=pageCount-1)}>Next</button>
       </div>
     </div>
   );
@@ -89,18 +141,25 @@ const SectionHeading: React.FC<{ title:string; sub?:string; action?:React.ReactN
 const Btn: React.FC<{ label:string; onClick?:()=>void; variant?:"primary"|"ghost"|"danger"; Icon?:LucideIcon; small?:boolean }> =
 ({ label, onClick, variant="primary", Icon:Ic, small }) => {
   const { C } = useTheme();
+  const [spinning, setSpinning] = useState(false);
+  // Spin the icon briefly on Refresh buttons so the click registers visually
+  const spinnable = Ic === RefreshCw && label.toLowerCase().includes("refresh");
   const styles: Record<string,React.CSSProperties> = {
     primary: { background:C.accent, color:"white", border:"none" },
     ghost:   { background:"transparent", color:C.txtSec, border:`1px solid ${C.border2}` },
     danger:  { background:`${C.red}12`, color:C.red, border:`1px solid ${C.red}44` },
   };
+  const handleClick = () => {
+    if (spinnable) { setSpinning(true); setTimeout(() => setSpinning(false), 600); }
+    onClick?.();
+  };
   return (
-    <button onClick={onClick} style={{
+    <button onClick={handleClick} style={{
       ...styles[variant], borderRadius:8, fontWeight:600, cursor:"pointer",
       padding: small?"6px 12px":"9px 18px", fontSize: small?14: 15,
       display:"flex", alignItems:"center", gap:6, whiteSpace:"nowrap",
     }}>
-      {Ic && <Ic size={small?13:15} strokeWidth={2} />} {label}
+      {Ic && <Ic size={small?13:15} strokeWidth={2} className={spinning ? "vlab-icon-spin" : undefined} />} {label}
     </button>
   );
 };
@@ -119,6 +178,32 @@ const TableHead: React.FC<{ cols:string[] }> = ({ cols }) => {
         ))}
       </tr>
     </thead>
+  );
+};
+
+// Shimmer placeholder shown while a request is in flight. `w` lets each bar vary
+// so a skeleton row reads like real, ragged data rather than a solid block.
+const Skel: React.FC<{ w?:number|string; h?:number; style?:React.CSSProperties }> =
+({ w="100%", h=14, style }) => (
+  <span className="vlab-skel" style={{ width:w, height:h, ...style }} />
+);
+
+// A <tbody> of shimmer rows that matches a table's column count, so the table
+// keeps its shape while the first fetch resolves (no layout jump, no empty flash).
+const SkeletonRows: React.FC<{ rows?:number; cols:number }> = ({ rows=6, cols }) => {
+  const { C } = useTheme();
+  return (
+    <tbody>
+      {Array.from({ length: rows }).map((_, r) => (
+        <tr key={r} style={{ borderBottom:`1px solid ${C.border}` }}>
+          {Array.from({ length: cols }).map((_, c) => (
+            <td key={c} style={{ padding:"13px 14px" }}>
+              <Skel w={c === 0 ? "70%" : c === cols-1 ? "40%" : "55%"} />
+            </td>
+          ))}
+        </tr>
+      ))}
+    </tbody>
   );
 };
 
@@ -155,74 +240,70 @@ const Dashboard: React.FC = () => {
   const [users,   setUsers]   = useState<User[]>([]);
   const [subs,    setSubs]    = useState<any[]>([]);
   const [stats,   setStats]   = useState<any>({ total:0, todayCount:0, classAvg:0, passed:0, average:0, failed:0, avgDur:0 });
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    getAllUsers().then(setUsers);
-    getAllSubmissions().then(setSubs);
-    getStats().then(setStats);
+    Promise.all([
+      getAllUsers().then(setUsers),
+      getAllSubmissions().then(setSubs),
+      getStats().then(setStats),
+    ]).finally(() => setLoading(false));
   }, []);
 
   const admins   = users.filter(u => u.role === "admin").length;
   const teachers = users.filter(u => u.role === "teacher").length;
   const students = users.filter(u => u.role === "student").length;
-  const recentSubs = [...subs].sort((a,b) => new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime()).slice(0,6);
+
+  // Admin sees aggregate platform activity only — per-student scores/results
+  // belong to the teacher who owns that student (see TeacherPanel).
+  const now      = new Date();
+  const today    = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const week     = new Date(today.getTime() - 6 * 86400000);
+  const weekSubs = subs.filter(s => new Date(s.submittedAt) >= week).length;
+  const passRate = stats.total > 0 ? Math.round(stats.passed / stats.total * 100) : 0;
 
   return (
     <div>
       <SectionHeading title="Admin Dashboard" sub="Full platform overview — all users, all sessions." />
 
-      <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(190px,1fr))", gap:14, marginBottom:28 }}>
-        <StatCard label="Total Users"     value={users.length}   sub={`${admins} admin · ${teachers} teachers · ${students} students`} Icon={Users}         color={C.accent} />
-        <StatCard label="Total Submissions" value={stats.total}  sub={`${stats.todayCount} today`}             Icon={ClipboardCheck} color={C.blue}   />
-        <StatCard label="Platform Average" value={stats.total > 0 ? `${stats.classAvg}%` : "—"} sub="Across all sessions" Icon={TrendingUp}  color={C.amber}  />
-        <StatCard label="Pass Rate"       value={stats.total > 0 ? `${Math.round(stats.passed/stats.total*100)}%` : "—"} sub="PASS result" Icon={CheckCircle} color="#7c3aed" />
+      <div style={{ display:"flex", flexWrap:"wrap", gap:14, marginBottom:28 }}>
+        <StatCard loading={loading} label="Total Users"     value={users.length}   sub={`${admins} admin · ${teachers} teachers · ${students} students`} Icon={Users}         color={C.accent} />
+        <StatCard loading={loading} label="Total Submissions" value={stats.total}  sub={`${stats.todayCount} today`}             Icon={ClipboardCheck} color={C.blue}   />
+        <StatCard loading={loading} label="Platform Average" value={stats.total > 0 ? `${stats.classAvg}%` : "—"} sub="Across all sessions" Icon={TrendingUp}  color={C.amber}  />
+        <StatCard loading={loading} label="Pass Rate"       value={stats.total > 0 ? `${Math.round(stats.passed/stats.total*100)}%` : "—"} sub="PASS result" Icon={CheckCircle} color="#7c3aed" />
       </div>
 
       <div className="ap-grid-dash" style={{ display:"grid", gridTemplateColumns:"1fr 320px", gap:20 }}>
-        {/* Recent submissions */}
+        {/* Recent activity — aggregate pulse only (no per-student grades) */}
         <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:14,
           overflow:"hidden", boxShadow:`0 1px 4px ${C.shadow}` }}>
           <div style={{ padding:"14px 20px", borderBottom:`1px solid ${C.border}`,
             display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-            <span style={{ color:C.txtPri, fontWeight:700, fontSize:16 }}>Recent Submissions</span>
+            <span style={{ color:C.txtPri, fontWeight:700, fontSize:16 }}>Recent Activity</span>
             <span style={{ color:C.txtMut, fontSize:14 }}>{subs.length} total</span>
           </div>
-          {recentSubs.length === 0 ? (
+          {subs.length === 0 ? (
             <div style={{ padding:"32px 20px", textAlign:"center", color:C.txtMut, fontSize:15 }}>
               No submissions yet.
             </div>
           ) : (
-            <div className="ap-table-wrap"><table style={{ width:"100%", borderCollapse:"collapse" }}>
-              <TableHead cols={["Student","Practical","Score","Result"]} />
-              <tbody>
-                {recentSubs.map((s,i) => (
-                  <tr key={s.id} style={{ background:i%2===0?"transparent":`${C.surface}88` }}>
-                    <td style={{ padding:"10px 14px" }}>
-                      <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-                        <Avatar name={s.studentName} size={26} />
-                        <div>
-                          <div style={{ color:C.txtPri, fontSize:15 }}>{s.studentName}</div>
-                          {s.studentReg && <div style={{ color:C.txtMut, fontSize:12 }}>{s.studentReg}</div>}
-                        </div>
-                      </div>
-                    </td>
-                    <td style={{ padding:"10px 14px", color:C.txtSec, fontSize:14 }}>
-                      {s.practicalId === "vanishing-cream" ? "Vanishing Cream" : "Cold Cream"}
-                    </td>
-                    <td style={{ padding:"10px 14px", color:C.txtPri, fontSize:15, fontWeight:700 }}>
-                      {s.scorePct}%
-                    </td>
-                    <td style={{ padding:"10px 14px" }}>
-                      <span style={{
-                        background: s.result==="PASS" ? `${C.accent}18` : s.result==="AVERAGE" ? `${C.amber}18` : `${C.red}18`,
-                        color: s.result==="PASS" ? C.accent : s.result==="AVERAGE" ? C.amber : C.red,
-                        borderRadius:20, padding:"2px 10px", fontSize:13, fontWeight:700,
-                      }}>{s.result}</span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table></div>
+            <div style={{ padding:"8px 20px 16px" }}>
+              {[
+                { label:"Submissions today",  value:stats.todayCount,                          color:C.blue   },
+                { label:"This week",          value:weekSubs,                                   color:C.blue   },
+                { label:"Pass rate",          value:`${passRate}%`,                             color:C.accent },
+                { label:"Average score",      value:stats.total > 0 ? `${stats.classAvg}%` : "—", color:C.amber  },
+              ].map(m => (
+                <div key={m.label} style={{ display:"flex", justifyContent:"space-between",
+                  alignItems:"center", padding:"12px 0", borderBottom:`1px solid ${C.border}` }}>
+                  <span style={{ color:C.txtSec, fontSize:15 }}>{m.label}</span>
+                  <span style={{ color:m.color, fontWeight:800, fontSize:20, fontFamily:"monospace" }}>{m.value}</span>
+                </div>
+              ))}
+              <div style={{ color:C.txtMut, fontSize:13, marginTop:12, lineHeight:1.5 }}>
+                Aggregate platform activity. Per-student scores and results are available to each student's teacher.
+              </div>
+            </div>
           )}
         </div>
 
@@ -254,27 +335,6 @@ const Dashboard: React.FC = () => {
               </div>
             ))}
           </div>
-
-          <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:14,
-            padding:18, boxShadow:`0 1px 4px ${C.shadow}` }}>
-            <div style={{ color:C.txtPri, fontWeight:700, fontSize:16, marginBottom:14 }}>Result Breakdown</div>
-            {[
-              { label:"Pass",    count:stats.passed,  color:C.accent },
-              { label:"Average", count:stats.average, color:C.amber  },
-              { label:"Fail",    count:stats.failed,  color:C.red    },
-            ].map(r => (
-              <div key={r.label} style={{ display:"flex", justifyContent:"space-between",
-                alignItems:"center", padding:"6px 0", borderBottom:`1px solid ${C.border}` }}>
-                <span style={{ color:C.txtSec, fontSize:15 }}>{r.label}</span>
-                <span style={{ color:r.color, fontWeight:700, fontSize:16 }}>{r.count}</span>
-              </div>
-            ))}
-            <div style={{ borderBottom:"none", display:"flex", justifyContent:"space-between",
-              alignItems:"center", padding:"8px 0 0" }}>
-              <span style={{ color:C.txtMut, fontSize:14 }}>Total</span>
-              <span style={{ color:C.txtPri, fontWeight:800, fontSize:16 }}>{stats.total}</span>
-            </div>
-          </div>
         </div>
       </div>
     </div>
@@ -299,7 +359,12 @@ const UserManager: React.FC = () => {
   const [addOk,        setAddOk]        = useState(false);
 
   const [allUsers, setAllUsers] = useState<User[]>([]);
-  useEffect(() => { getAllUsers().then(setAllUsers); }, [refresh]);
+  const [loading,  setLoading]  = useState(true);
+  const [page, setPage] = useState(0);
+  useEffect(() => {
+    setLoading(true);
+    getAllUsers().then(setAllUsers).finally(() => setLoading(false));
+  }, [refresh]);
 
   const filtered = allUsers.filter(u =>
     (roleFilter === "all" || u.role === roleFilter) &&
@@ -307,6 +372,11 @@ const UserManager: React.FC = () => {
      u.email.toLowerCase().includes(search.toLowerCase()) ||
      (u.regNumber ?? "").toLowerCase().includes(search.toLowerCase()))
   );
+
+  useEffect(() => { setPage(0); }, [search, roleFilter, refresh]);
+  const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const paged = filtered.slice(Math.min(page, pageCount-1) * PAGE_SIZE,
+    Math.min(page, pageCount-1) * PAGE_SIZE + PAGE_SIZE);
 
   const handleToggleSuspend = async (clientId: string) => {
     await toggleSuspendUser(clientId);
@@ -364,7 +434,17 @@ const UserManager: React.FC = () => {
           <div style={{ display:"flex", gap:8 }}>
             <Btn label="Add User" Icon={UserIcon} small onClick={() => { resetForm(); setShowAddUser(v=>!v); }} />
             <Btn label="Refresh"   Icon={RefreshCw} variant="ghost" small onClick={() => setRefresh(r=>r+1)} />
-            <Btn label="Export CSV" Icon={Download} variant="ghost" small />
+            <Btn label="Export CSV" Icon={Download} variant="ghost" small
+              onClick={() => downloadCSV(
+                `users_${new Date().toISOString().slice(0,10)}.csv`,
+                filtered.map(u => ({
+                  fullName:  u.fullName,
+                  regNumber: u.regNumber ?? "",
+                  email:     u.email,
+                  role:      u.role,
+                  status:    u.suspended ? "suspended" : (u.status ?? "active"),
+                })),
+              )} />
           </div>
         } />
 
@@ -467,10 +547,11 @@ const UserManager: React.FC = () => {
 
       <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:14,
         overflow:"hidden", boxShadow:`0 1px 4px ${C.shadow}` }}>
-        <div className="ap-table-wrap"><table style={{ width:"100%", borderCollapse:"collapse" }}>
+        <div className="ap-table-wrap"><table style={{ width:"100%", borderCollapse:"collapse", minWidth:760 }}>
           <TableHead cols={["User","Email","Role","Reg No.","Joined","Status",""]} />
+          {loading ? <SkeletonRows cols={7} /> : (
           <tbody>
-            {filtered.map((u,i) => (
+            {paged.map((u,i) => (
               <tr key={u.clientId} style={{ background:i%2===0?"transparent":`${C.surface}88`,
                 borderBottom:`1px solid ${C.border}`,
                 opacity: u.suspended ? 0.5 : 1 }}>
@@ -535,14 +616,13 @@ const UserManager: React.FC = () => {
               </tr>
             ))}
           </tbody>
+          )}
         </table></div>
-        {filtered.length === 0 && (
+        {!loading && filtered.length === 0 && (
           <div style={{ padding:36, textAlign:"center", color:C.txtMut }}>No users found.</div>
         )}
       </div>
-      <div style={{ color:C.txtMut, fontSize:14, marginTop:10 }}>
-        {filtered.length} of {allUsers.length} users
-      </div>
+      <Pagination page={Math.min(page, pageCount-1)} total={filtered.length} onPage={setPage} unit="users" />
     </div>
   );
 };
@@ -557,13 +637,27 @@ const AdminAnalytics: React.FC = () => {
   const [subs,    setSubs]    = useState<any[]>([]);
   const [log,     setLog]     = useState<any[]>([]);
   const [health,  setHealth]  = useState<"ok"|"degraded"|"unknown">("unknown");
+  const [dbState, setDbState] = useState<string>("unknown");
+  const [errTrend, setErrTrend] = useState<ErrorTrendResult | null>(null);
+  const [funnel,   setFunnel]   = useState<FunnelResult | null>(null);
+  const [atRisk,   setAtRisk]   = useState<AtRiskResult | null>(null);
   const [refresh, setRefresh] = useState(0);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    getAllUsers().then(setUsers);
-    getAllSubmissions().then(setSubs);
-    getAuditLog().then(setLog);
-    fetch("/health").then(r => r.json()).then(d => setHealth(d.status === "OK" ? "ok" : "degraded")).catch(() => setHealth("degraded"));
+    setLoading(true);
+    Promise.all([
+      getAllUsers().then(setUsers),
+      getAllSubmissions().then(setSubs),
+      getAuditLog().then(setLog),
+      getErrorTrend(14).then(setErrTrend),
+      getFunnel().then(setFunnel),
+      getAtRisk().then(setAtRisk),
+      checkHealth().then((h: HealthResult) => {
+        setHealth(h.ok ? "ok" : "degraded");
+        setDbState(h.database);
+      }),
+    ]).finally(() => setLoading(false));
   }, [refresh]);
 
   const now   = new Date();
@@ -580,7 +674,12 @@ const AdminAnalytics: React.FC = () => {
   const avgScore      = subs.length > 0 ? Math.round(subs.reduce((a,s) => a+s.scorePct, 0) / subs.length) : 0;
   const avgDurMin     = subs.length > 0 ? Math.round(subs.reduce((a,s) => a + (s.durationSec||0), 0) / subs.length / 60) : 0;
   const validSubs     = subs.filter(s => s.scorePct >= 0 && s.scorePct <= 100 && ["PASS","AVERAGE","FAIL"].includes(s.result)).length;
-  const integrityPct  = subs.length > 0 ? Math.round((validSubs / subs.length) * 100) : 100;
+  const integrityPct  = subs.length > 0 ? Math.round((validSubs / subs.length) * 100) : 0;
+  // Integrity is only meaningful when the database is connected AND has records.
+  // Showing "100%" with no data (or a dead DB) hides an outage — so we gate it.
+  const dbConnected    = dbState === "connected";
+  const hasRecords     = subs.length > 0;
+  const integrityKnown = dbConnected && hasRecords;
 
   // Activity heatmap — sessions per day last 7 days
   const dailyCounts = Array.from({ length: 7 }, (_, i) => {
@@ -594,9 +693,11 @@ const AdminAnalytics: React.FC = () => {
   const maxDay = Math.max(...dailyCounts.map(d => d.count), 1);
 
   const Section: React.FC<{ title:string; Icon:LucideIcon; color:string; children:React.ReactNode }> = ({ title, Icon:Ic, color, children }) => (
-    <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:14,
-      padding:20, boxShadow:`0 1px 4px ${C.shadow}` }}>
-      <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:18, paddingBottom:12, borderBottom:`1px solid ${C.border}` }}>
+    <div className="vlab-chart-card" style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:14,
+      padding:20, boxShadow:`0 1px 4px ${C.shadow}`, position:"relative", overflow:"hidden" }}>
+      <div style={{ position:"absolute", top:0, left:0, right:0, height:3,
+        background:`linear-gradient(90deg, ${color}, ${color}33)` }} />
+      <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:18, paddingBottom:12, borderBottom:`1px solid ${C.border}` }}>
         <div style={{ width:34, height:34, borderRadius:9, background:`${color}18`,
           display:"flex", alignItems:"center", justifyContent:"center" }}>
           <Ic size={17} color={color} strokeWidth={2} />
@@ -629,11 +730,11 @@ const AdminAnalytics: React.FC = () => {
       />
 
       {/* ── Top KPIs ── */}
-      <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))", gap:14, marginBottom:24 }}>
-        <StatCard label="Total Users"       value={users.length}   sub={`${students.length} students · ${teachers.length} teachers`}         Icon={Users}         color={C.accent} />
-        <StatCard label="Total Sessions"    value={subs.length}    sub={`${todaySubs.length} today · ${weekSubs.length} this week`}           Icon={Activity}      color={C.blue}   />
-        <StatCard label="Platform Score"    value={subs.length > 0 ? `${avgScore}%` : "—"} sub={`${passCount} PASS of ${subs.length}`}       Icon={TrendingUp}    color={C.amber}  />
-        <StatCard label="System"            value={health === "ok" ? "Online" : "Degraded"} sub="MongoDB connected"                          Icon={Server}        color={health === "ok" ? C.accent : C.red} />
+      <div style={{ display:"flex", flexWrap:"wrap", gap:14, marginBottom:24 }}>
+        <StatCard loading={loading} label="Total Users"       value={users.length}   sub={`${students.length} students · ${teachers.length} teachers`}         Icon={Users}         color={C.accent} />
+        <StatCard loading={loading} label="Total Sessions"    value={subs.length}    sub={`${todaySubs.length} today · ${weekSubs.length} this week`}           Icon={Activity}      color={C.blue}   />
+        <StatCard loading={loading} label="Platform Score"    value={subs.length > 0 ? `${avgScore}%` : "—"} sub={`${passCount} PASS of ${subs.length}`}       Icon={TrendingUp}    color={C.amber}  />
+        <StatCard loading={loading} label="System"            value={dbState === "unknown" ? "Offline" : health === "ok" ? "Online" : "Degraded"} sub={dbState === "connected" ? "MongoDB connected" : dbState === "unknown" ? "Server unreachable" : "MongoDB not connected"} Icon={Server}        color={health === "ok" ? C.accent : C.red} />
       </div>
 
       <div className="ap-grid-2col" style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:20, marginBottom:20 }}>
@@ -658,8 +759,14 @@ const AdminAnalytics: React.FC = () => {
               {health === "ok" ? "All systems operational" : "Service degraded"}
             </span>
           </div>
-          <Metric label="API Status"       value={health === "ok" ? "200 OK" : "Error"} color={health === "ok" ? C.accent : C.red} />
-          <Metric label="Database"         value="Connected" sub="MongoDB Atlas" color={C.accent} />
+          <Metric label="API Status"       value={dbState === "unknown" ? "Unreachable" : "200 OK"} color={dbState === "unknown" ? C.red : C.accent} />
+          <Metric label="Database"
+            value={dbState === "connected"    ? "Connected"
+                 : dbState === "disconnected" ? "Not connected"
+                 : dbState === "unknown"      ? "Unreachable"
+                 : dbState.charAt(0).toUpperCase() + dbState.slice(1)}
+            sub="MongoDB Atlas"
+            color={dbConnected ? C.accent : dbState === "connecting" ? C.amber : C.red} />
           <Metric label="Pass Rate"        value={subs.length > 0 ? `${Math.round(passCount/subs.length*100)}%` : "—"} sub="Quality indicator" color={C.accent} />
           <Metric label="Avg Score"        value={avgScore > 0 ? `${avgScore}%` : "—"} sub="Platform-wide" color={C.amber} />
         </Section>
@@ -673,14 +780,18 @@ const AdminAnalytics: React.FC = () => {
 
           {/* 7-day activity heatmap */}
           <div style={{ marginTop:14 }}>
-            <div style={{ color:C.txtMut, fontSize:12, fontWeight:700, letterSpacing:0.8, textTransform:"uppercase", marginBottom:8 }}>7-Day Session Activity</div>
-            <div style={{ display:"flex", gap:6, alignItems:"flex-end", height:60 }}>
+            <div style={{ color:C.txtMut, fontSize:12, fontWeight:700, letterSpacing:0.8, textTransform:"uppercase", marginBottom:10 }}>7-Day Session Activity</div>
+            <div style={{ position:"relative", display:"flex", gap:8, alignItems:"flex-end", height:72 }}>
+              <div className="vlab-chart-grid" style={{ bottom:30, top:2 }}>
+                {[0,1,2].map(i => <span key={i} />)}
+              </div>
               {dailyCounts.map(d => (
-                <div key={d.label} style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center", gap:3 }}>
-                  <div style={{ width:"100%", borderRadius:"3px 3px 0 0",
-                    background: d.count > 0 ? "#7c3aed" : C.border,
-                    height:`${Math.max(4, (d.count / maxDay) * 52)}px`,
-                    minHeight: d.count > 0 ? 6 : 3, transition:"height .3s" }} />
+                <div key={d.label} style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center", gap:4,
+                  height:"100%", justifyContent:"flex-end" }}>
+                  <div className={d.count>0 ? "vlab-col" : undefined} style={{ width:"72%", maxWidth:30, borderRadius:"6px 6px 2px 2px",
+                    background: d.count > 0 ? barFill("#7c3aed") : C.border,
+                    height:`${Math.max((d.count / maxDay) * 100, d.count>0 ? 6 : 3)}%`,
+                    boxShadow: d.count>0 ? "0 3px 10px -2px rgba(124,58,237,0.55)" : "none" }} />
                   <span style={{ color:C.txtMut, fontSize:10 }}>{d.label}</span>
                   <span style={{ color:C.txtSec, fontSize:11, fontWeight:700 }}>{d.count}</span>
                 </div>
@@ -693,19 +804,141 @@ const AdminAnalytics: React.FC = () => {
         <Section title="Data Pipeline & Integrity" Icon={FileCheck} color={C.amber}>
           <Metric label="Total Records"        value={subs.length}     sub="Submission records in DB" color={C.amber} />
           <Metric label="Valid Records"        value={validSubs}       sub="Pass schema validation" />
-          <Metric label="Data Integrity"       value={`${integrityPct}%`} sub="Valid / total records"
-            color={integrityPct >= 98 ? C.accent : integrityPct >= 90 ? C.amber : C.red} />
+          <Metric label="Data Integrity"
+            value={integrityKnown ? `${integrityPct}%` : "—"}
+            sub={!dbConnected ? "Database not connected" : !hasRecords ? "No records yet" : "Valid / total records"}
+            color={!integrityKnown ? C.txtMut : integrityPct >= 98 ? C.accent : integrityPct >= 90 ? C.amber : C.red} />
           <Metric label="Assignment Mode"      value={subs.filter(s=>s.mode==="assignment").length} sub="From assignment codes" />
           <Metric label="Practice Mode"        value={subs.filter(s=>s.mode==="practice").length}   sub="Self-practice sessions" />
-          <div style={{ marginTop:10, padding:"10px 12px",
-            background: integrityPct >= 98 ? `${C.accent}10` : `${C.amber}10`,
-            border:`1px solid ${integrityPct >= 98 ? `${C.accent}33` : `${C.amber}33`}`, borderRadius:8 }}>
-            <span style={{ color:integrityPct >= 98 ? C.accent : C.amber, fontSize:14, fontWeight:700 }}>
-              {integrityPct >= 98 ? "✓ Data pipeline healthy" : "⚠ Some records may need review"}
-            </span>
-          </div>
+          {(() => {
+            // Pick the colour + message from the real state, never a blanket "healthy".
+            const tone = !dbConnected ? C.red : !hasRecords ? C.txtMut : integrityPct >= 98 ? C.accent : C.amber;
+            const msg  = !dbConnected ? "⚠ Cannot verify — database not connected"
+                       : !hasRecords ? "No submission records yet"
+                       : integrityPct >= 98 ? "✓ Data pipeline healthy"
+                       : "⚠ Some records may need review";
+            return (
+              <div style={{ marginTop:10, padding:"10px 12px",
+                background:`${tone}10`, border:`1px solid ${tone}33`, borderRadius:8 }}>
+                <span style={{ color:tone, fontSize:14, fontWeight:700 }}>{msg}</span>
+              </div>
+            );
+          })()}
         </Section>
       </div>
+
+      {/* ── Error & Warning Trend + Funnel + At-Risk (Phase 2/3) ── */}
+      <div className="ap-grid-2col" style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:20, marginBottom:20 }}>
+        <Section title="Error & Warning Trend (14 days)" Icon={AlertTriangle} color={C.red}>
+          {!errTrend || errTrend.series.every(d => d.warning + d.error === 0) ? (
+            <div style={{ color:C.txtMut, fontSize:14 }}>No errors or warnings recorded in this window. ✓</div>
+          ) : (
+            <>
+              <div style={{ position:"relative", display:"flex", gap:4, alignItems:"flex-end", height:96, marginBottom:12 }}>
+                <div className="vlab-chart-grid">
+                  {[0,1,2,3].map(i => <span key={i} />)}
+                </div>
+                {(() => {
+                  const max = Math.max(...errTrend.series.map(d => d.warning + d.error), 1);
+                  return errTrend.series.map(d => {
+                    const tot = d.warning + d.error;
+                    return (
+                      <div key={d.date} title={`${d.date}: ${d.error} errors, ${d.warning} warnings`}
+                        style={{ flex:1, display:"flex", flexDirection:"column-reverse", height:"100%",
+                          justifyContent:"flex-start" }}>
+                        <div className={tot>0 ? "vlab-col" : undefined} style={{ display:"flex", flexDirection:"column-reverse",
+                          height:`${Math.max(tot/max*100, tot>0?5:0)}%`, borderRadius:"5px 5px 2px 2px", overflow:"hidden" }}>
+                          <div style={{ background:barFill(C.red),   height:`${tot>0 ? d.error/tot*100 : 0}%` }} />
+                          <div style={{ background:barFill(C.amber), height:`${tot>0 ? d.warning/tot*100 : 0}%` }} />
+                        </div>
+                      </div>
+                    );
+                  });
+                })()}
+              </div>
+              <div style={{ display:"flex", gap:8, marginBottom:12 }}>
+                <span className="vlab-legend-pill" style={{ background:`${C.red}1a`, color:C.red }}>
+                  <span className="vlab-legend-dot" style={{ background:C.red }} />Errors
+                </span>
+                <span className="vlab-legend-pill" style={{ background:`${C.amber}1a`, color:C.amber }}>
+                  <span className="vlab-legend-dot" style={{ background:C.amber }} />Warnings
+                </span>
+              </div>
+              {errTrend.byStage.slice(0, 4).map(s => (
+                <div key={s.stage} style={{ display:"flex", justifyContent:"space-between",
+                  padding:"7px 0", borderTop:`1px solid ${C.border}` }}>
+                  <span style={{ color:C.txtSec, fontSize:14, fontWeight:600 }}>{s.stage}</span>
+                  <span style={{ color:C.txtPri, fontSize:14, fontWeight:600 }}>
+                    <span style={{ color:C.red }}>{s.error} ✗</span> · <span style={{ color:C.amber }}>{s.warning} ⚠</span>
+                  </span>
+                </div>
+              ))}
+            </>
+          )}
+        </Section>
+
+        <Section title="Completion Funnel" Icon={Filter} color="#7c3aed">
+          {!funnel || funnel.funnel.length === 0 ? (
+            <div style={{ color:C.txtMut, fontSize:14 }}>No funnel data yet.</div>
+          ) : (() => {
+            const top = funnel.funnel[0]?.count || 1;
+            const shades = ["#7c3aed", "#8b5cf6", "#a78bfa", "#c4b5fd"];
+            return funnel.funnel.map((f, i) => {
+              const prev = i > 0 ? funnel.funnel[i-1].count : f.count;
+              const conv = prev > 0 ? Math.round(f.count/prev*100) : 0;
+              const col  = shades[Math.min(i, shades.length-1)];
+              return (
+                <div key={f.stage} style={{ marginBottom:14 }}>
+                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:6 }}>
+                    <span style={{ color:C.txtSec, fontSize:14, fontWeight:600 }}>{f.stage}</span>
+                    <span style={{ display:"flex", alignItems:"center", gap:8 }}>
+                      <span style={{ color:C.txtPri, fontSize:16, fontWeight:800, fontFamily:"monospace" }}>{f.count}</span>
+                      {i > 0 && (
+                        <span style={{ fontSize:11, fontWeight:700, color:col, background:`${col}22`,
+                          borderRadius:20, padding:"2px 8px" }}>{conv}%</span>
+                      )}
+                    </span>
+                  </div>
+                  <div className="vlab-hbar-track" style={{ height:16, background:C.surface, borderRadius:8, overflow:"hidden", border:`1px solid ${C.border}`, boxShadow:`inset 0 1px 2px ${C.shadow}` }}>
+                    <div className="vlab-hbar" style={{ width:`${Math.max(2, f.count/top*100)}%`, height:"100%", background:barFill(col), borderRadius:8, boxShadow:`0 0 12px -1px ${col}99` }} />
+                  </div>
+                </div>
+              );
+            });
+          })()}
+        </Section>
+      </div>
+
+      {/* ── At-Risk Students (Phase 3 + CSV export Phase 4) ── */}
+      <Section title={`At-Risk Students${atRisk ? ` (${atRisk.flaggedCount} of ${atRisk.total})` : ""}`}
+        Icon={AlertCircle} color={C.red}>
+        <div style={{ display:"flex", justifyContent:"flex-end", marginBottom:8 }}>
+          <Btn label="Export CSV" Icon={Download} variant="ghost" small
+            onClick={() => downloadCSV(`at-risk_${new Date().toISOString().slice(0,10)}.csv`,
+              (atRisk?.students ?? []).map(s => ({
+                Name:s.name, Reg:s.regNumber ?? "", Email:s.email, Severity:s.severity,
+                Attempts:s.attempts, "Avg Score (%)":s.avgScore, Fails:s.failCount,
+                "Idle Days":s.idleDays ?? "", Reasons:s.reasons.join("; "),
+              })))} />
+        </div>
+        {!atRisk || atRisk.students.length === 0 ? (
+          <div style={{ color:C.txtMut, fontSize:14 }}>No students currently flagged. 🎉</div>
+        ) : atRisk.students.slice(0, 12).map(s => (
+          <div key={s.studentId} style={{ display:"flex", alignItems:"center", gap:10,
+            padding:"9px 0", borderBottom:`1px solid ${C.border}` }}>
+            <div style={{ flex:1, minWidth:0 }}>
+              <div style={{ color:C.txtPri, fontSize:15, fontWeight:600 }}>{s.name}</div>
+              <div style={{ color:C.txtMut, fontSize:12 }}>{s.reasons.join(" · ")}</div>
+            </div>
+            <span style={{ color: s.severity==="high"?C.red:s.severity==="medium"?C.amber:C.txtSec,
+              fontWeight:700, fontSize:13,
+              background:`${s.severity==="high"?C.red:s.severity==="medium"?C.amber:C.txtSec}18`,
+              borderRadius:20, padding:"2px 10px", textTransform:"uppercase", letterSpacing:0.4 }}>
+              {s.severity}
+            </span>
+          </div>
+        ))}
+      </Section>
     </div>
   );
 };
@@ -718,10 +951,43 @@ const AdminSettings: React.FC = () => {
   const [maintenance, setMaintenance] = useState(false);
   const [openReg,     setOpenReg]     = useState(true);
   const [maxStudents, setMaxStudents] = useState("500");
+  const [inviteCode,  setInviteCode]  = useState("VLAB-ADMIN-2026");
   const [saved,       setSaved]       = useState(false);
+  const [saving,      setSaving]      = useState(false);
+  const [saveError,   setSaveError]   = useState<string | null>(null);
   const [totalUsers,  setTotalUsers]  = useState(0);
 
   useEffect(() => { getAllUsers().then(us => setTotalUsers(us.length)); }, []);
+
+  // Load persisted settings on mount.
+  useEffect(() => {
+    getSettings().then(s => {
+      if (!s) return;
+      setMaintenance(s.maintenanceMode);
+      setOpenReg(s.openRegistration);
+      setMaxStudents(String(s.maxStudents));
+      setInviteCode(s.adminInviteCode);
+    });
+  }, []);
+
+  const handleSave = async () => {
+    setSaving(true); setSaveError(null);
+    try {
+      const n = parseInt(maxStudents, 10);
+      await updateSettings({
+        maintenanceMode:  maintenance,
+        openRegistration: openReg,
+        maxStudents:      Number.isFinite(n) && n > 0 ? n : 500,
+        adminInviteCode:  inviteCode.trim(),
+      });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2500);
+    } catch (err) {
+      setSaveError((err as Error).message || "Failed to save settings");
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const Toggle: React.FC<{v:boolean;set:(x:boolean)=>void}> = ({v,set}) => (
     <div onClick={()=>set(!v)} style={{ width:44, height:24, borderRadius:12, cursor:"pointer",
@@ -780,7 +1046,7 @@ const AdminSettings: React.FC = () => {
   };
 
   return (
-    <div style={{ maxWidth:1200 }}>
+    <div>
       <SectionHeading title="System Settings" sub="Global platform configuration managed by the super admin." />
 
       {/* Cards flow horizontally on laptop screens and wrap/stack on narrow screens */}
@@ -801,9 +1067,10 @@ const AdminSettings: React.FC = () => {
           <Toggle v={openReg} set={setOpenReg} />
         </Row>
         <Row label="Admin Invite Code" sub="Secret code required to create admin accounts">
-          <code style={{ background:C.surface, border:`1px solid ${C.border2}`,
-            color:C.accent, borderRadius:6, padding:"5px 12px", fontSize:15,
-            letterSpacing:1.5, fontWeight:700 }}>VLAB-ADMIN-2026</code>
+          <input value={inviteCode} onChange={e => setInviteCode(e.target.value)}
+            style={{ width:170, background:C.surface, border:`1px solid ${C.border2}`,
+              color:C.accent, borderRadius:6, padding:"5px 12px", fontSize:15,
+              letterSpacing:1.5, fontWeight:700, fontFamily:"monospace", textAlign:"center" }} />
         </Row>
       </Block>
 
@@ -840,13 +1107,15 @@ const AdminSettings: React.FC = () => {
       </div>{/* end cards flex */}
 
       <div style={{ display:"flex", gap:10, alignItems:"center" }}>
-        <button onClick={() => { setSaved(true); setTimeout(()=>setSaved(false),2500); }}
+        <button onClick={handleSave} disabled={saving}
           style={{ background:C.accent, color:"white", border:"none", borderRadius:8,
-            padding:"10px 20px", fontSize:16, fontWeight:700, cursor:"pointer",
+            padding:"10px 20px", fontSize:16, fontWeight:700,
+            cursor:saving?"default":"pointer", opacity:saving?0.7:1,
             display:"flex", alignItems:"center", gap:6 }}>
-          <CheckCircle size={15} strokeWidth={2.5} /> Save Changes
+          <CheckCircle size={15} strokeWidth={2.5} /> {saving ? "Saving…" : "Save Changes"}
         </button>
         {saved && <span style={{ color:C.accent, fontSize:15, fontWeight:600 }}>✓ Saved</span>}
+        {saveError && <span style={{ color:C.red, fontSize:15, fontWeight:600 }}>{saveError}</span>}
       </div>
     </div>
   );
@@ -862,8 +1131,13 @@ const AuditLog: React.FC = () => {
   const [actionFilter, setActionFilter] = useState("all");
   const [refresh,    setRefresh]    = useState(0);
   const [log,        setLog]        = useState<any[]>([]);
+  const [loading,    setLoading]    = useState(true);
+  const [page,       setPage]       = useState(0);
 
-  useEffect(() => { getAuditLog().then(setLog); }, [refresh]);
+  useEffect(() => {
+    setLoading(true);
+    getAuditLog().then(setLog).finally(() => setLoading(false));
+  }, [refresh]);
 
   const actionColor: Record<string,string> = {
     user_registered:      C.accent,
@@ -884,6 +1158,11 @@ const AuditLog: React.FC = () => {
      e.actorName.toLowerCase().includes(search.toLowerCase()) ||
      e.action.toLowerCase().includes(search.toLowerCase()))
   );
+
+  useEffect(() => { setPage(0); }, [search, roleFilter, actionFilter, refresh]);
+  const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const safePage  = Math.min(page, pageCount - 1);
+  const paged     = filtered.slice(safePage * PAGE_SIZE, safePage * PAGE_SIZE + PAGE_SIZE);
 
   // Most active users — count events per actor
   const userActivity = Array.from(
@@ -971,7 +1250,17 @@ const AuditLog: React.FC = () => {
         </select>
       </div>
 
-      {log.length === 0 ? (
+      {loading ? (
+        <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:14,
+          overflow:"hidden", boxShadow:`0 1px 4px ${C.shadow}` }}>
+          <div className="ap-table-wrap">
+          <table style={{ width:"100%", borderCollapse:"collapse", minWidth:720 }}>
+            <TableHead cols={["Time","Action","Actor","Role","Detail"]} />
+            <SkeletonRows cols={5} />
+          </table>
+          </div>
+        </div>
+      ) : log.length === 0 ? (
         <div style={{ background:C.card, border:`2px dashed ${C.border2}`, borderRadius:14,
           padding:"40px 20px", textAlign:"center", color:C.txtMut }}>
           <Activity size={30} style={{ marginBottom:10, opacity:0.3 }} />
@@ -981,10 +1270,10 @@ const AuditLog: React.FC = () => {
         <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:14,
           overflow:"hidden", boxShadow:`0 1px 4px ${C.shadow}` }}>
           <div className="ap-table-wrap">
-          <table style={{ width:"100%", borderCollapse:"collapse" }}>
+          <table style={{ width:"100%", borderCollapse:"collapse", minWidth:720 }}>
             <TableHead cols={["Time","Action","Actor","Role","Detail"]} />
             <tbody>
-              {filtered.map((e, i) => (
+              {paged.map((e, i) => (
                 <tr key={`${e.id ?? i}`} style={{ background:i%2===0?"transparent":`${C.surface}88`,
                   borderBottom:`1px solid ${C.border}` }}>
                   <td style={{ padding:"10px 14px", color:C.txtMut, fontSize:13, whiteSpace:"nowrap" }}>
@@ -1004,7 +1293,7 @@ const AuditLog: React.FC = () => {
                     </div>
                   </td>
                   <td style={{ padding:"10px 14px" }}><RoleBadge role={e.actorRole} /></td>
-                  <td style={{ padding:"10px 14px", color:C.txtSec, fontSize:14 }}>{e.detail}</td>
+                  <td className="ap-wrap" style={{ padding:"10px 14px", color:C.txtSec, fontSize:14 }}>{e.detail}</td>
                 </tr>
               ))}
             </tbody>
@@ -1015,9 +1304,9 @@ const AuditLog: React.FC = () => {
           )}
         </div>
       )}
-      <div style={{ color:C.txtMut, fontSize:14, marginTop:10 }}>
-        Showing {filtered.length} of {log.length} log entries
-      </div>
+      {log.length > 0 && (
+        <Pagination page={safePage} total={filtered.length} onPage={setPage} unit="events" />
+      )}
     </div>
   );
 };
@@ -1030,14 +1319,23 @@ const TeacherApprovals: React.FC = () => {
   const { C } = useTheme();
   const [refresh,     setRefresh]     = useState(0);
   const [allTeachers, setAllTeachers] = useState<User[]>([]);
+  const [loading,     setLoading]     = useState(true);
+  const [page,        setPage]        = useState(0);
 
   useEffect(() => {
-    getAllUsers().then(us => setAllTeachers(us.filter(u => u.role === "teacher")));
+    setLoading(true);
+    getAllUsers()
+      .then(us => setAllTeachers(us.filter(u => u.role === "teacher")))
+      .finally(() => setLoading(false));
   }, [refresh]);
 
   const pending  = allTeachers.filter(u => u.status === "pending");
   const rejected = allTeachers.filter(u => u.status === "rejected");
   const approved = allTeachers.filter(u => (u.status ?? "active") === "active");
+
+  const apprPageCount = Math.max(1, Math.ceil(approved.length / PAGE_SIZE));
+  const apprPage      = Math.min(page, apprPageCount - 1);
+  const approvedPaged = approved.slice(apprPage * PAGE_SIZE, apprPage * PAGE_SIZE + PAGE_SIZE);
 
   const handleApprove = async (clientId: string) => {
     await approveTeacher(clientId);
@@ -1048,6 +1346,35 @@ const TeacherApprovals: React.FC = () => {
     await rejectTeacher(clientId);
     setRefresh(r => r + 1);
   };
+
+  // First load — show shimmer placeholders for the stats strip and the table so
+  // the page never flashes a misleading "No pending teachers" before data lands.
+  if (loading) {
+    return (
+      <div>
+        <SectionHeading title="Teacher Approvals"
+          sub="Review and approve teacher registrations before they can access the system." />
+        <div style={{ display:"flex", gap:12, marginBottom:24, flexWrap:"wrap" }}>
+          {[0,1,2].map(i => (
+            <div key={i} style={{ background:C.card, border:`1px solid ${C.border}`,
+              borderRadius:12, padding:"14px 20px", flex:"1 1 140px" }}>
+              <Skel w="35%" h={28} />
+              <Skel w="60%" h={12} style={{ marginTop:10 }} />
+            </div>
+          ))}
+        </div>
+        <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:14,
+          overflow:"hidden", boxShadow:`0 1px 4px ${C.shadow}` }}>
+          <div className="ap-table-wrap">
+            <table style={{ width:"100%", borderCollapse:"collapse", minWidth:560 }}>
+              <TableHead cols={["Teacher","Email","Joined","Status"]} />
+              <SkeletonRows cols={4} />
+            </table>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div>
@@ -1207,10 +1534,10 @@ const TeacherApprovals: React.FC = () => {
           </div>
           <div style={{ background:C.card, border:`1px solid ${C.border}`,
             borderRadius:14, overflow:"hidden" }}>
-            <div className="ap-table-wrap"><table style={{ width:"100%", borderCollapse:"collapse" }}>
+            <div className="ap-table-wrap"><table style={{ width:"100%", borderCollapse:"collapse", minWidth:560 }}>
               <TableHead cols={["Teacher","Email","Joined","Status"]} />
               <tbody>
-                {approved.map((u, i) => (
+                {approvedPaged.map((u, i) => (
                   <tr key={u.clientId} style={{ background:i%2===0?"transparent":`${C.surface}88`,
                     borderBottom:`1px solid ${C.border}` }}>
                     <td style={{ padding:"11px 14px" }}>
@@ -1233,6 +1560,7 @@ const TeacherApprovals: React.FC = () => {
               </tbody>
             </table></div>
           </div>
+          <Pagination page={apprPage} total={approved.length} onPage={setPage} unit="teachers" />
         </>
       )}
     </div>
@@ -1264,15 +1592,19 @@ interface Props { onLogout: () => void; }
 const AdminPanel: React.FC<Props> = ({ onLogout }) => {
   const [isDark,       setIsDark]       = useState(getStoredTheme() === "dark");
   const [section,      setSection]      = useState<Section>("dashboard");
-  const [sbOpen,       setSbOpen]       = useState(window.innerWidth >= 768);
+  const [sbOpen,       setSbOpen]       = useState(window.innerWidth >= 1024);
   const [isMobile,     setIsMobile]     = useState(window.innerWidth < 768);
   const [pendingCount, setPendingCount] = useState(0);
 
   useEffect(() => {
     const handleResize = () => {
-      const mobile = window.innerWidth < 768;
+      const w = window.innerWidth;
+      const mobile = w < 768;
       setIsMobile(mobile);
-      if (!mobile) setSbOpen(true);
+      // Auto-collapse: off-canvas on phones, icon-rail on tablets, expanded on desktop.
+      if (mobile)        setSbOpen(false);
+      else if (w < 1024) setSbOpen(false);
+      else               setSbOpen(true);
     };
     window.addEventListener("resize", handleResize);
     return () => window.removeEventListener("resize", handleResize);
@@ -1489,8 +1821,12 @@ const AdminPanel: React.FC<Props> = ({ onLogout }) => {
 
       {/* ── Responsive helpers ── */}
       <style>{`
+        /* Tables never compress or clip — they scroll horizontally on narrow screens. */
+        .ap-table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+        /* Cells never wrap (the scrollbar handles overflow); only long free-text may wrap. */
+        .ap-table-wrap td, .ap-table-wrap th { white-space: nowrap; }
+        .ap-table-wrap .ap-wrap { white-space: normal; min-width: 220px; }
         @media (max-width: 640px) {
-          .ap-table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
           .ap-grid-2col  { grid-template-columns: 1fr !important; }
           .ap-grid-dash  { grid-template-columns: 1fr !important; }
           .ap-hide-sm    { display: none !important; }

@@ -2,7 +2,6 @@ const express    = require('express');
 const { body, validationResult } = require('express-validator');
 const Submission = require('../models/Submission');
 const Assignment = require('../models/Assignment');
-const User       = require('../models/User');
 const { authenticate, requireRole } = require('../middleware/auth');
 
 const router = express.Router();
@@ -10,7 +9,7 @@ router.use(authenticate);
 
 // ── GET /api/submissions ──────────────────────────────────────────────────────
 // Students → own submissions only
-// Teachers → practice submissions (all) + assignment submissions for their own codes only
+// Teachers → assignment submissions for their own codes only (practice is never shown)
 // Admins   → everything, with optional studentId filter
 router.get('/', async (req, res) => {
   try {
@@ -28,17 +27,11 @@ router.get('/', async (req, res) => {
       const teacherAssignments = await Assignment.find({ teacherId: req.user.id }).select('token');
       const teacherTokens = teacherAssignments.map(a => a.token).filter(Boolean);
 
-      // Collect student IDs enrolled in this teacher's class
-      const enrolledStudents = await User.find({ assignedTeacherId: req.user.id }).select('clientId');
-      const enrolledIds = enrolledStudents.map(u => u.clientId);
-
-      // Only show:
-      //  - assignment submissions that used THIS teacher's codes
-      //  - practice submissions from students enrolled in THIS teacher's class
-      query.$or = [
-        { mode: 'assignment', token: { $in: teacherTokens } },
-        { mode: 'practice',   studentId: { $in: enrolledIds } },
-      ];
+      // Teachers deal only with assignment data. Practice (self-practice) sessions
+      // are private to the student and are never surfaced to teachers — so we show
+      // only assignment submissions made against THIS teacher's own codes.
+      query.mode  = 'assignment';
+      query.token = { $in: teacherTokens };
       if (studentId) query.studentId = studentId;
     } else if (studentId) {
       // Admin with optional filter

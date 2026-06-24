@@ -5,6 +5,13 @@ interface Props {
   practicalId: string;
   onStart: () => void;
   onBack: () => void;
+  /** Self-practice, 2nd visit onward: let the student choose how much cream to make. */
+  showAmountPicker?: boolean;
+  /** Base batch size (g) for this practical — the default when no amount is chosen. */
+  baseGrams?: number;
+  /** Chosen amount (g), or null to use the base recipe. */
+  targetGrams?: number | null;
+  onTargetGramsChange?: (g: number | null) => void;
 }
 
 const SECTIONS = [
@@ -79,7 +86,11 @@ const PredField: React.FC<{ q:string; value:string; onChange:(v:string)=>void }>
 );
 
 /* ── main component ─────────────────────────────────────────────────────────── */
-const PreLabNotebook: React.FC<Props> = ({ practicalId, onStart, onBack }) => {
+const PreLabNotebook: React.FC<Props> = ({
+  practicalId, onStart, onBack,
+  showAmountPicker = false, baseGrams = 100,
+  targetGrams = null, onTargetGramsChange,
+}) => {
   const [activeIdx, setActiveIdx]     = useState(0);
   const [pred1, setPred1] = useState("");
   const [pred2, setPred2] = useState("");
@@ -614,6 +625,70 @@ const PreLabNotebook: React.FC<Props> = ({ practicalId, onStart, onBack }) => {
           <div className="nb-section-body">
             {renderContent()}
           </div>
+
+          {/* Amount-of-cream picker — self-practice, 2nd visit onward, last section only */}
+          {isLast && showAmountPicker && (() => {
+            const effective = targetGrams ?? baseGrams;
+            const presets   = [
+              { label: `${Math.round(baseGrams / 2)} g`, val: Math.round(baseGrams / 2) },
+              { label: `${baseGrams} g (base)`,          val: baseGrams },
+              { label: `${baseGrams * 2} g`,             val: baseGrams * 2 },
+              { label: `${baseGrams * 3} g`,             val: baseGrams * 3 },
+            ];
+            const accent = isColdCream ? "#8b5cf6" : "#3b82f6";
+            return (
+              <div style={{ margin:"0 0 16px", background:"#0d1b2e",
+                border:`1px solid ${isColdCream ? "#5b21b6" : "#1e3a5f"}`,
+                borderRadius:12, padding:"16px 18px" }}>
+                <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:6 }}>
+                  <span style={{ fontSize:18 }}>⚖️</span>
+                  <div style={{ color:"white", fontWeight:800, fontSize:14 }}>
+                    Choose how much cream to prepare
+                  </div>
+                </div>
+                <div style={{ color:"#94a3b8", fontSize:12, lineHeight:1.55, marginBottom:12 }}>
+                  Since you've done this practical before, you can scale the batch. The target
+                  reagent amounts will be recalculated to your chosen quantity, and you can
+                  compare what you add against the target as you work.
+                </div>
+
+                {/* Preset buttons */}
+                <div style={{ display:"flex", gap:8, flexWrap:"wrap", marginBottom:12 }}>
+                  {presets.map(p => {
+                    const active = effective === p.val;
+                    return (
+                      <button key={p.val} onClick={() => onTargetGramsChange?.(p.val)}
+                        style={{ padding:"7px 14px", borderRadius:8, cursor:"pointer",
+                          fontSize:12, fontWeight:700,
+                          border:`1.5px solid ${active ? accent : "#334155"}`,
+                          background: active ? (isColdCream ? "rgba(139,92,246,0.2)" : "rgba(59,130,246,0.2)") : "#0b1322",
+                          color: active ? (isColdCream ? "#c4b5fd" : "#93c5fd") : "#94a3b8" }}>
+                        {p.label}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Custom amount */}
+                <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+                  <label style={{ color:"#64748b", fontSize:12, fontWeight:600 }}>Custom:</label>
+                  <input type="number" min={10} max={baseGrams * 5} step={1} value={effective}
+                    onChange={e => {
+                      const n = Math.round(Number(e.target.value));
+                      if (Number.isFinite(n) && n > 0)
+                        onTargetGramsChange?.(Math.max(10, Math.min(baseGrams * 5, n)));
+                    }}
+                    style={{ width:90, background:"#0b1322", border:"1.5px solid #334155",
+                      borderRadius:8, color:"white", padding:"7px 10px", fontSize:13,
+                      fontWeight:700, fontFamily:"monospace", outline:"none" }} />
+                  <span style={{ color:"#64748b", fontSize:12 }}>grams</span>
+                  <span style={{ marginLeft:"auto", color:"#475569", fontSize:11 }}>
+                    scale ×{(effective / baseGrams).toFixed(2)}
+                  </span>
+                </div>
+              </div>
+            );
+          })()}
 
           {/* Navigation footer */}
           <div className="nb-footer">
