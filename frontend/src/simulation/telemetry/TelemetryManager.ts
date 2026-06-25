@@ -12,7 +12,7 @@ export interface TelemetryConfig {
 export class TelemetryManager {
   private config: TelemetryConfig;
   private eventQueue: TelemetryEvent[] = [];
-  private flushTimer: NodeJS.Timeout | null = null;
+  private flushTimer: ReturnType<typeof setTimeout> | null = null;
   private isOnline: boolean = navigator.onLine;
 
   constructor(config: TelemetryConfig) {

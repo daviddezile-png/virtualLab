@@ -14,11 +14,24 @@ const router = express.Router();
 // ─────────────────────────────────────────────────────────────────────────────
 
 // Resolve which students the requester may see.
-//   admin   → null  (means "everyone")
-//   teacher → array of clientIds for students enrolled in their class
-async function resolveScope(user) {
-  if (user.role === 'admin') return null;
-  const students = await User.find({ assignedTeacherId: user.id, role: 'student' }).select('clientId');
+//   admin   → null  (means "everyone")  unless a classId filter is given
+//   teacher → array of clientIds for their students (optionally one class)
+// An optional ?classId= query param narrows the scope to a single class. For a
+// teacher it is intersected with their own students so they can't read another
+// teacher's class.
+async function resolveScope(req) {
+  const { role, id } = req.user;
+  const classId = (req.query.classId || '').trim();
+
+  if (role === 'admin') {
+    if (!classId) return null;                         // everyone
+    const students = await User.find({ assignedClassId: classId, role: 'student' }).select('clientId');
+    return students.map(s => s.clientId);
+  }
+
+  const filter = { assignedTeacherId: id, role: 'student' };
+  if (classId) filter.assignedClassId = classId;        // own students, one class
+  const students = await User.find(filter).select('clientId');
   return students.map(s => s.clientId);
 }
 
@@ -71,7 +84,7 @@ router.get('/heatmap', async (req, res) => {
     const hours      = useHours ? Math.min(hoursParam, 168) : null;
     const days       = Math.min(parseInt(req.query.days) || 30, 180);
     const since      = useHours ? new Date(Date.now() - hours * 3600000) : daysAgo(days);
-    const ids        = await resolveScope(req.user);
+    const ids        = await resolveScope(req);
 
     const query = scoped(
       { action: 'lab_milestone', createdAt: { $gte: since } },
@@ -109,7 +122,7 @@ router.get('/heatmap', async (req, res) => {
 router.get('/activity', async (req, res) => {
   try {
     const days  = Math.min(parseInt(req.query.days) || 14, 90);
-    const ids   = await resolveScope(req.user);
+    const ids   = await resolveScope(req);
     const since = daysAgo(days);
 
     const query = scoped(
@@ -144,7 +157,7 @@ router.get('/activity', async (req, res) => {
 router.get('/error-trend', async (req, res) => {
   try {
     const days  = Math.min(parseInt(req.query.days) || 14, 90);
-    const ids   = await resolveScope(req.user);
+    const ids   = await resolveScope(req);
     const since = daysAgo(days);
 
     const query = scoped(
@@ -185,7 +198,7 @@ router.get('/error-trend', async (req, res) => {
 // ─────────────────────────────────────────────────────────────────────────────
 router.get('/funnel', async (req, res) => {
   try {
-    const ids = await resolveScope(req.user);
+    const ids = await resolveScope(req);
 
     // Registered = students in scope.
     const registered = ids === null
@@ -223,7 +236,7 @@ router.get('/funnel', async (req, res) => {
 // ─────────────────────────────────────────────────────────────────────────────
 router.get('/at-risk', async (req, res) => {
   try {
-    const ids = await resolveScope(req.user);
+    const ids = await resolveScope(req);
 
     const userQuery = ids === null
       ? { role: 'student', status: 'active' }
@@ -306,7 +319,7 @@ router.get('/at-risk', async (req, res) => {
 router.get('/item-analysis', async (req, res) => {
   try {
     const { practicalId } = req.query;
-    const ids = await resolveScope(req.user);
+    const ids = await resolveScope(req);
 
     const ansQuery = scoped({}, ids, 'studentId');
     if (practicalId) ansQuery.practicalId = practicalId;

@@ -18,7 +18,6 @@ interface BeakerProps {
 }
 
 const BeakerComponent: React.FC<BeakerProps> = ({
-  id,
   name,
   x,
   y,
@@ -26,12 +25,8 @@ const BeakerComponent: React.FC<BeakerProps> = ({
   height,
   volume,
   contents,
-  temperature,
   color,
-  isDraggable = false,
   isHovered = false,
-  onDoubleClick,
-  onPositionChange,
 }) => {
   const drawBeaker = (ctx: CanvasRenderingContext2D) => {
     // Draw beaker body

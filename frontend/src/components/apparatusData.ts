@@ -17,6 +17,9 @@ export interface Apparatus {
     pouringProgress?: number;
     liquidColor?: string;
     lidColor?: string;
+    // Where a removed cap is parked on the bench/shelf so it stays visible
+    // instead of vanishing (set when the lid is taken off, cleared when replaced).
+    lidOff?: { x: number; y: number; w: number } | null;
     isOn?: boolean;
     temperature?: number;
     targetTemperature?: number;

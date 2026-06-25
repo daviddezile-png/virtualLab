@@ -58,7 +58,7 @@ class MockNode implements Node {
     }
   }
   
-  animateTo(props: any, options?: any): void {
+  animateTo(_props: any, _options?: any): void {
     // Mock animation
   }
   
@@ -92,15 +92,15 @@ class MockSprite extends MockNode implements Sprite {
     this.height = height;
   }
   
-  setStroke(color?: string): void {
+  setStroke(_color?: string): void {
     // Mock implementation
   }
-  
-  setLineWidth(width: number): void {
+
+  setLineWidth(_width: number): void {
     // Mock implementation
   }
-  
-  setOpacity(opacity: number): void {
+
+  setOpacity(_opacity: number): void {
     // Mock implementation
   }
   
@@ -128,11 +128,7 @@ export class ThermometerNode extends MockNode {
   private mercurySprite: MockSprite;
   private temperatureLabel: MockLabel;
   private scaleLabels: MockLabel[] = [];
-  private minTemp: number = 0;
-  private maxTemp: number = 100;
-  private width: number = 30;
-  private height: number = 200;
-  
+
   // Position properties for layout
   public centerX: number = 0;
   public centerY: number = 0;
@@ -369,9 +365,7 @@ export class ThermometerNode extends MockNode {
     }
   }
 
-  public setTemperatureRange(min: number, max: number): void {
-    this.minTemp = min;
-    this.maxTemp = max;
+  public setTemperatureRange(_min: number, _max: number): void {
     this.updateDisplay();
   }
 

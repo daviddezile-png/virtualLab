@@ -162,13 +162,16 @@ function App() {
       // Cache in localStorage so the pre-lab page and lab canvas can read it
       // without an extra API call.
       try { localStorage.setItem(`vlab_timer_${assignment.token}`, String(t)); } catch { /* ignore */ }
-      // Already expired before even reaching the pre-lab? Lock immediately.
+      // Already expired before even reaching the lab? Lock immediately.
       if (Date.now() - t >= assignment.timeLimitMinutes * 60 * 1000) {
         setLabExpired(true);
       }
     }
 
-    setAppState("pre-lab");
+    // Assignment mode skips the pre-lab notebook — the student enters the lab
+    // directly. No protocol walkthrough or prediction notebook.
+    logLabStarted(assignment.practicalId, "assignment");
+    setAppState("lab");
   };
 
   // Called when student clicks "Start Lab" from the pre-lab notebook

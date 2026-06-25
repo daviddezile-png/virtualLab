@@ -1,4 +1,4 @@
-import { BeakerState, Ingredient } from '../model/types';
+import { BeakerState } from '../model/types';
 
 // Mock SceneryStack types for demonstration - replace with actual imports
 interface Node {
@@ -58,7 +58,7 @@ class MockNode implements Node {
     }
   }
   
-  animateTo(props: any, options?: any): void {
+  animateTo(_props: any, _options?: any): void {
     // Mock animation
   }
   
@@ -92,15 +92,15 @@ class MockSprite extends MockNode implements Sprite {
     this.height = height;
   }
   
-  setStroke(color?: string): void {
+  setStroke(_color?: string): void {
     // Mock implementation
   }
-  
-  setLineWidth(width: number): void {
+
+  setLineWidth(_width: number): void {
     // Mock implementation
   }
-  
-  setOpacity(opacity: number): void {
+
+  setOpacity(_opacity: number): void {
     // Mock implementation
   }
   
@@ -192,7 +192,6 @@ export class BeakerNode extends MockNode {
     const gradient = ctx.createLinearGradient(0, 0, 0, 100);
     
     // Color based on phase and temperature
-    const temp = this.beakerState.temperature.current;
     let color1, color2;
 
     if (this.beakerState.id === 'oil_phase') {

@@ -2,6 +2,7 @@ const express    = require('express');
 const { body, validationResult } = require('express-validator');
 const Submission = require('../models/Submission');
 const Assignment = require('../models/Assignment');
+const User       = require('../models/User');
 const { authenticate, requireRole } = require('../middleware/auth');
 
 const router = express.Router();
@@ -13,8 +14,16 @@ router.use(authenticate);
 // Admins   → everything, with optional studentId filter
 router.get('/', async (req, res) => {
   try {
-    const { practicalId, result, mode, studentId } = req.query;
+    const { practicalId, result, mode, studentId, classId } = req.query;
     const query = {};
+
+    // Optional class filter (teachers/admins): restrict to students enrolled in
+    // the given class. Resolved up-front so it composes with the role scoping below.
+    let classStudentIds = null;
+    if (classId && req.user.role !== 'student') {
+      const inClass = await User.find({ assignedClassId: classId, role: 'student' }).select('clientId');
+      classStudentIds = inClass.map(s => s.clientId);
+    }
 
     if (req.user.role === 'student') {
       // Students can only see their own
@@ -41,6 +50,13 @@ router.get('/', async (req, res) => {
     if (practicalId) query.practicalId = practicalId;
     if (result)      query.result      = result;
     if (mode)        query.mode        = mode;
+
+    // Intersect with the class filter if one was requested.
+    if (classStudentIds !== null) {
+      query.studentId = query.studentId
+        ? (classStudentIds.includes(query.studentId) ? query.studentId : '__none__')
+        : { $in: classStudentIds.length ? classStudentIds : ['__none__'] };
+    }
 
     const submissions = await Submission.find(query).sort({ submittedAt: -1 });
     res.json({ submissions });

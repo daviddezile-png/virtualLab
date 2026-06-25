@@ -22,6 +22,8 @@ export interface User {
   lastLogin?:            string;
   assignedTeacherId?:    string | null;
   assignedTeacherName?:  string | null;
+  assignedClassId?:      string | null;
+  assignedClassName?:    string | null;
 }
 
 export interface AuthResult {
@@ -124,10 +126,11 @@ export const getAllUsers = async (): Promise<User[]> => {
   } catch { return []; }
 };
 
-// Teacher + Admin — list of active students only
-export const getStudents = async (): Promise<User[]> => {
+// Teacher + Admin — list of active students only, optionally one class
+export const getStudents = async (classId?: string): Promise<User[]> => {
   try {
-    const res = await apiGet<{ users: User[] }>("/api/users/students");
+    const q = classId ? `?classId=${encodeURIComponent(classId)}` : "";
+    const res = await apiGet<{ users: User[] }>(`/api/users/students${q}`);
     return res.users;
   } catch { return []; }
 };

@@ -77,35 +77,42 @@ const EMPTY_FUNNEL: FunnelResult = { funnel: [] };
 const EMPTY_ATRISK: AtRiskResult = { total: 0, flaggedCount: 0, students: [] };
 const EMPTY_ITEMS: ItemAnalysisResult = { totalAnswers: 0, items: [] };
 
-export const getHeatmap = async (period: HeatmapPeriod = { days: 30 }): Promise<HeatmapResult> => {
+// Append an optional class filter to an existing query string ("" or "a=b").
+const withClass = (qs: string, classId?: string): string => {
+  const cls = classId ? `classId=${encodeURIComponent(classId)}` : "";
+  const parts = [qs, cls].filter(Boolean);
+  return parts.length ? `?${parts.join("&")}` : "";
+};
+
+export const getHeatmap = async (period: HeatmapPeriod = { days: 30 }, classId?: string): Promise<HeatmapResult> => {
   const qs = period.hours ? `hours=${period.hours}` : `days=${period.days ?? 30}`;
-  try { return await apiGet(`/api/analytics/heatmap?${qs}`); }
+  try { return await apiGet(`/api/analytics/heatmap${withClass(qs, classId)}`); }
   catch { return EMPTY_HEATMAP; }
 };
 
-export const getActivity = async (days = 14): Promise<ActivityResult> => {
-  try { return await apiGet(`/api/analytics/activity?days=${days}`); }
+export const getActivity = async (days = 14, classId?: string): Promise<ActivityResult> => {
+  try { return await apiGet(`/api/analytics/activity${withClass(`days=${days}`, classId)}`); }
   catch { return EMPTY_ACTIVITY; }
 };
 
-export const getErrorTrend = async (days = 14): Promise<ErrorTrendResult> => {
-  try { return await apiGet(`/api/analytics/error-trend?days=${days}`); }
+export const getErrorTrend = async (days = 14, classId?: string): Promise<ErrorTrendResult> => {
+  try { return await apiGet(`/api/analytics/error-trend${withClass(`days=${days}`, classId)}`); }
   catch { return EMPTY_ERROR; }
 };
 
-export const getFunnel = async (): Promise<FunnelResult> => {
-  try { return await apiGet(`/api/analytics/funnel`); }
+export const getFunnel = async (classId?: string): Promise<FunnelResult> => {
+  try { return await apiGet(`/api/analytics/funnel${withClass("", classId)}`); }
   catch { return EMPTY_FUNNEL; }
 };
 
-export const getAtRisk = async (): Promise<AtRiskResult> => {
-  try { return await apiGet(`/api/analytics/at-risk`); }
+export const getAtRisk = async (classId?: string): Promise<AtRiskResult> => {
+  try { return await apiGet(`/api/analytics/at-risk${withClass("", classId)}`); }
   catch { return EMPTY_ATRISK; }
 };
 
-export const getItemAnalysis = async (practicalId?: string): Promise<ItemAnalysisResult> => {
-  const q = practicalId ? `?practicalId=${encodeURIComponent(practicalId)}` : "";
-  try { return await apiGet(`/api/analytics/item-analysis${q}`); }
+export const getItemAnalysis = async (practicalId?: string, classId?: string): Promise<ItemAnalysisResult> => {
+  const qs = practicalId ? `practicalId=${encodeURIComponent(practicalId)}` : "";
+  try { return await apiGet(`/api/analytics/item-analysis${withClass(qs, classId)}`); }
   catch { return EMPTY_ITEMS; }
 };
 

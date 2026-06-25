@@ -364,7 +364,7 @@ const EvaluationPanel: React.FC<Props> = ({
   const persistSubmission = async (
     rawScore: number, predictedPH: number, predictedVisc: number,
     stabilityStr: string, pc: number, wc: number, ts: number,
-    liveVisc: number, livePH: number, forceFail: boolean,
+    _liveVisc: number, _livePH: number, forceFail: boolean,
   ) => {
     if (submittedRef.current) return; // already successfully saved this session
 

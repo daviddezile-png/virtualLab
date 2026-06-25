@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { findAssignment, isCodeExpired, Assignment } from "../utils/assignmentStore";
 import { getCurrentUser, logoutUser } from "../utils/userStore";
-import { isInviteCode, redeemClassInvite, getMyTeacher } from "../utils/classInviteStore";
+import { isInviteCode, redeemClassInvite, getMyClass } from "../utils/classInviteStore";
 
 interface Practical {
   id: string;
@@ -167,10 +167,10 @@ const LabSelection: React.FC<Props> = ({ onSelect, onTeacherPanel, onAssignment 
 
   const currentUser = getCurrentUser();
 
-  // Load the student's current assigned teacher on mount
+  // Load the student's current class (falls back to teacher name) on mount
   useEffect(() => {
     if (currentUser?.role === "student") {
-      getMyTeacher().then(r => setAssignedTeacher(r.assignedTeacherName ?? null));
+      getMyClass().then(r => setAssignedTeacher(r.assignedClassName ?? r.assignedTeacherName ?? null));
     }
   }, []);
 
@@ -184,17 +184,18 @@ const LabSelection: React.FC<Props> = ({ onSelect, onTeacherPanel, onAssignment 
       // ── Class invitation code (CLS-XXXXXX) ───────────────────────────────
       if (isInviteCode(raw)) {
         const result = await redeemClassInvite(raw);
+        const label = result.className ?? `${result.teacherName}'s class`;
         if (result.alreadyAssigned) {
-          setTokenError(`You are already in ${result.teacherName}'s class.`);
+          setTokenError(`You are already in ${label}.`);
           return;
         }
         if (result.success) {
-          setAssignedTeacher(result.teacherName);
+          setAssignedTeacher(result.className ?? result.teacherName);
           setTokenInput("");
-          setInviteSuccess({ teacherName: result.teacherName });
+          setInviteSuccess({ teacherName: label });
           return;
         }
-        setTokenError("Invalid invitation code. Ask your teacher for the correct code.");
+        setTokenError("Invalid class code. Ask your teacher for the correct code.");
         return;
       }
 

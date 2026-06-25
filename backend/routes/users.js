@@ -32,12 +32,17 @@ router.get('/', requireRole('admin'), async (req, res) => {
 // ── GET /api/users/students ── teacher + admin can list students ──────────────
 router.get('/students', requireRole('teacher', 'admin'), async (req, res) => {
   try {
-    const { search } = req.query;
+    const { search, classId } = req.query;
     const query = { role: 'student', status: 'active', suspended: { $ne: true } };
 
     // Teachers only see students who joined their class via invitation code
     if (req.user.role === 'teacher') {
       query.assignedTeacherId = req.user.id;
+    }
+
+    // Optional class filter (a ClassInvite _id). Narrows to one class.
+    if (classId) {
+      query.assignedClassId = classId;
     }
 
     if (search) {
@@ -50,7 +55,7 @@ router.get('/students', requireRole('teacher', 'admin'), async (req, res) => {
 
     const users = await User.find(query)
       .sort({ createdAt: -1 })
-      .select('clientId role fullName email regNumber status createdAt lastLogin assignedTeacherId assignedTeacherName');
+      .select('clientId role fullName email regNumber status createdAt lastLogin assignedTeacherId assignedTeacherName assignedClassId assignedClassName');
     res.json({ users });
   } catch (err) {
     res.status(500).json({ error: 'Failed to fetch students' });

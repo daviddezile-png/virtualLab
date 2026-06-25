@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import {
   FlaskConical, Sun, Moon, ArrowLeft, Mail, Lock, User as UserIcon,
   Hash, GraduationCap, Users, Eye, EyeOff, AlertCircle, CheckCircle,
-  ArrowRight,
+  ArrowRight, LucideIcon,
 } from "lucide-react";
 import { User, ThemeMode, registerUser, loginUser } from "../utils/userStore";
 
@@ -23,7 +23,7 @@ const DARK = {
   greenHi:  "#1e40af",
   greenBg:  "rgba(29,78,216,0.12)",
   red:      "#ef4444",
-} as const;
+};
 
 const LIGHT = {
   bg:       "#ffffff",
@@ -39,7 +39,7 @@ const LIGHT = {
   greenHi:  "#1d4ed8",
   greenBg:  "rgba(37,99,235,0.08)",
   red:      "#dc2626",
-} as const;
+};
 
 type Colors = typeof DARK;
 type Role   = "teacher" | "student";
@@ -50,7 +50,7 @@ type Mode   = "signin" | "signup";
 // ─────────────────────────────────────────────────────────────────────────────
 interface FieldProps {
   C:            Colors;
-  Icon:         React.FC<{ size?: number; strokeWidth?: number; color?: string }>;
+  Icon:         LucideIcon;
   label:        string;
   type?:        string;
   value:        string;

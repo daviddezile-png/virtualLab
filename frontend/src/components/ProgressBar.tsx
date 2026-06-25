@@ -11,7 +11,6 @@ interface ProgressBarProps {
 
 export const ProgressBar: React.FC<ProgressBarProps> = ({
   currentStep,
-  simulationState,
   stepProgress = {},
   showLabels = true,
   size = "medium",

@@ -1,6 +1,5 @@
 // Example usage of the Virtual Vanishing Cream Simulation
 import { SimulationModel, SimulationStep, IngredientType } from './model';
-import { TelemetryManager } from './telemetry';
 
 // Initialize the simulation
 const simulation = new SimulationModel({

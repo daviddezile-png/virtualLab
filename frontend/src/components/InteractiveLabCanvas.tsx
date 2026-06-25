@@ -1,6 +1,5 @@
 import React, { useRef, useEffect, useState, useCallback } from "react";
 import { SimulationStep } from "../simulation/model";
-import ApparatusDetailModal from "./ApparatusDetailModal";
 import ProtocolSidebar from "./ProtocolSidebar";
 import EvaluationPanel from "./EvaluationPanel";
 import { getInitialApparatus, getInitialApparatusColdCream, Apparatus } from "./apparatusData";
@@ -44,13 +43,49 @@ const shadeColor = (col: string, amt: number): string => {
 // dips into wide-mouth solid reagent jars.
 const CONTAINABLE_TYPES = ["stirringrod", "thermometer", "phmeter", "viscositygauge", "spatula"];
 const CONTAINER_TYPES   = ["beaker", "cylinder"];
-// Heavy bench items that scrape audibly when dragged across the table top.
-const SLIDE_SOUND_TYPES = ["beaker", "container", "bottle", "hotplate", "icebucket", "weightbalance"];
-// Items whose base "knocks" the bench when set down (glassware containers only).
-const DROP_SOUND_TYPES  = ["beaker", "container", "bottle"];
+// Glassware that produces a "clink" at the moment it touches a beaker — both the
+// glass containers carried into one another AND the slim glass instruments (rod,
+// thermometer, pH/viscosity probes) as their glass meets the beaker on the way in.
+const COLLISION_SOUND_TYPES = ["beaker", "cylinder", "container", "stirringrod", "thermometer", "phmeter", "viscositygauge"];
+// Items whose base "knocks"/slides on the bench when set down. Kept for the
+// glassware containers plus the hot-plate, ice-bath and measuring cylinder.
+const DROP_SOUND_TYPES  = ["beaker", "container", "bottle", "cylinder", "hotplate", "icebucket"];
+// Apparatus that still plays the tactile "click" pick-up sound when grabbed.
+// Only the beaker, measuring cylinder and containers click; everything else
+// (hot-plate, ice-bath, instruments, …) is picked up silently.
+const GRAB_SOUND_TYPES  = ["beaker", "cylinder", "container"];
+// Apparatus that produces a small friction "scrape" while slid along the bench
+// (only on the table surface, never in the air): glassware, reagent containers,
+// the hot-plate and the digital balance.
+const SLIDE_SOUND_TYPES = ["beaker", "cylinder", "container", "bottle", "hotplate", "weightbalance"];
 
 // Maximum solid (grams) a spatula blade can hold in a single scoop.
 const MAX_SPATULA_LOAD = 30;
+
+// Angle the loaded spatula is tilted up while carried through the air, so the
+// solid is cradled against the blade rather than spilled. Shared by the drawing
+// code and the pour-detection so the two always agree.
+const CARRY_TILT = (80 * Math.PI) / 180;
+
+// Where a spatula's blade tip actually sits on screen. While carried, the blade
+// is tilted up about the grip (see drawSpatula), which swings it left and up
+// from the upright bounding box. Pour detection MUST use this point, or the user
+// aims the visible blade at the beaker mouth while the test runs against the
+// box centre — far to the lower-right — and nothing is ever deposited.
+const spatulaBladeTip = (
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  carried: boolean,
+): { cx: number; bot: number } => {
+  const cx = x + w / 2;
+  const bottom = y + h;
+  if (!carried) return { cx, bot: bottom };
+  const pivotY = y + h * 0.16;        // grip pivot used by drawSpatula's rotate
+  const dy = bottom - pivotY;
+  return { cx: cx - dy * Math.sin(CARRY_TILT), bot: pivotY + dy * Math.cos(CARRY_TILT) };
+};
 
 // True when a spatula's blade tip (the "chopping head") is aimed into a
 // container's mouth — i.e. over the top opening and near the rim, the only spot
@@ -784,33 +819,61 @@ const drawBottle = (
   ctx.fillStyle = "rgba(255,255,255,0.16)";
   ctx.fillRect(x + w * 0.18, bodyTopY + 4, w * 0.08, (bodyBotY - bodyTopY) - 12);
 
-  // 3. Neck closure — screw cap (lid on) or open glass rim (lid off)
+  // 3. Neck closure — SOLID jars get a coloured screw COVER, LIQUID bottles get
+  //    a translucent ground-GLASS lid/stopper. (lid off → open glass rim)
   if (hasLid) {
-    const capGrad = ctx.createLinearGradient(cx - capW / 2, 0, cx + capW / 2, 0);
-    capGrad.addColorStop(0,   shadeColor(lidColor, -28));
-    capGrad.addColorStop(0.5, lidColor);
-    capGrad.addColorStop(1,   shadeColor(lidColor, -40));
-    ctx.fillStyle = capGrad;
-    ctx.strokeStyle = "rgba(0,0,0,0.22)";
-    ctx.lineWidth = 0.8;
-    ctx.beginPath();
-    ctx.roundRect(cx - capW / 2, y, capW, capH + 3, 3);
-    ctx.fill();
-    ctx.stroke();
-    // Knurled ribs on the cap (screw-cap grip)
-    ctx.strokeStyle = "rgba(0,0,0,0.18)";
-    ctx.lineWidth = 0.7;
-    for (let rx = cx - capW / 2 + 2.5; rx < cx + capW / 2 - 1; rx += 2.6) {
+    if (isSolid) {
+      // ── Coloured screw cover — solid reagent jars ──
+      const capGrad = ctx.createLinearGradient(cx - capW / 2, 0, cx + capW / 2, 0);
+      capGrad.addColorStop(0,   shadeColor(lidColor, -28));
+      capGrad.addColorStop(0.5, lidColor);
+      capGrad.addColorStop(1,   shadeColor(lidColor, -40));
+      ctx.fillStyle = capGrad;
+      ctx.strokeStyle = "rgba(0,0,0,0.22)";
+      ctx.lineWidth = 0.8;
       ctx.beginPath();
-      ctx.moveTo(rx, y + 2);
-      ctx.lineTo(rx, y + capH + 1.5);
+      ctx.roundRect(cx - capW / 2, y, capW, capH + 3, 3);
+      ctx.fill();
       ctx.stroke();
+      // Knurled ribs on the cap (screw-cap grip)
+      ctx.strokeStyle = "rgba(0,0,0,0.18)";
+      ctx.lineWidth = 0.7;
+      for (let rx = cx - capW / 2 + 2.5; rx < cx + capW / 2 - 1; rx += 2.6) {
+        ctx.beginPath();
+        ctx.moveTo(rx, y + 2);
+        ctx.lineTo(rx, y + capH + 1.5);
+        ctx.stroke();
+      }
+      // Cap top highlight
+      ctx.fillStyle = "rgba(255,255,255,0.28)";
+      ctx.beginPath();
+      ctx.roundRect(cx - capW / 2 + 2, y + 1, capW * 0.4, 2.5, 1);
+      ctx.fill();
+    } else {
+      // ── Glass lid / ground-glass stopper — liquid reagent bottles ──
+      const lx = cx - capW / 2;
+      const glassCap = ctx.createLinearGradient(lx, 0, lx + capW, 0);
+      glassCap.addColorStop(0,   "rgba(200,224,244,0.58)");
+      glassCap.addColorStop(0.5, "rgba(238,247,255,0.42)");
+      glassCap.addColorStop(1,   "rgba(188,214,238,0.62)");
+      ctx.fillStyle = glassCap;
+      ctx.strokeStyle = "rgba(255,255,255,0.85)";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.roundRect(lx, y, capW, capH + 3, 3);
+      ctx.fill();
+      ctx.stroke();
+      // Bright vertical glass highlight streak
+      ctx.fillStyle = "rgba(255,255,255,0.5)";
+      ctx.beginPath();
+      ctx.roundRect(lx + capW * 0.2, y + 1.5, capW * 0.15, capH, 1.5);
+      ctx.fill();
+      // Soft top sheen
+      ctx.fillStyle = "rgba(255,255,255,0.32)";
+      ctx.beginPath();
+      ctx.roundRect(lx + 2, y + 1, capW * 0.45, 2.5, 1);
+      ctx.fill();
     }
-    // Cap top highlight
-    ctx.fillStyle = "rgba(255,255,255,0.28)";
-    ctx.beginPath();
-    ctx.roundRect(cx - capW / 2 + 2, y + 1, capW * 0.4, 2.5, 1);
-    ctx.fill();
   } else {
     // Open ground-glass neck rim
     ctx.fillStyle = "rgba(210,232,250,0.5)";
@@ -840,6 +903,85 @@ const drawBottle = (
     ctx.font = "6px Arial";
     ctx.fillText("SOLID", cx, labelY + 22);
   }
+  ctx.restore();
+};
+
+// A removed screw cap lying on the surface (table or shelf) beside its bottle,
+// so opening a container leaves the lid visibly set down rather than vanishing.
+// `lx` is the cap's left edge, `surfaceY` the surface it rests on, `w` its width.
+const drawDetachedLid = (
+  ctx: CanvasRenderingContext2D,
+  lx: number,
+  surfaceY: number,
+  w: number,
+  color: string,
+  isSolid: boolean = false,
+) => {
+  const h    = Math.max(w * 0.5, 9);
+  const topY = surfaceY - h;
+  ctx.save();
+
+  // Contact shadow on the surface
+  ctx.fillStyle = "rgba(0,0,0,0.18)";
+  ctx.beginPath();
+  ctx.ellipse(lx + w / 2, surfaceY + 1, w * 0.55, 3, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  if (isSolid) {
+    // ── Coloured screw cover (solid jar) — same colour as the jar's lid ──
+    const grad = ctx.createLinearGradient(lx, 0, lx + w, 0);
+    grad.addColorStop(0,   shadeColor(color, -34));
+    grad.addColorStop(0.5, color);
+    grad.addColorStop(1,   shadeColor(color, -44));
+    ctx.fillStyle = grad;
+    ctx.strokeStyle = "rgba(0,0,0,0.25)";
+    ctx.lineWidth = 0.8;
+    ctx.beginPath();
+    ctx.roundRect(lx, topY, w, h, 3);
+    ctx.fill();
+    ctx.stroke();
+
+    // Knurled grip ribs
+    ctx.strokeStyle = "rgba(0,0,0,0.18)";
+    ctx.lineWidth = 0.7;
+    for (let rx = lx + 2.5; rx < lx + w - 1; rx += 2.6) {
+      ctx.beginPath();
+      ctx.moveTo(rx, topY + 2);
+      ctx.lineTo(rx, topY + h - 2);
+      ctx.stroke();
+    }
+
+    // Top highlight
+    ctx.fillStyle = "rgba(255,255,255,0.25)";
+    ctx.beginPath();
+    ctx.roundRect(lx + 2, topY + 1, w * 0.4, 2.5, 1);
+    ctx.fill();
+  } else {
+    // ── Translucent glass lid / stopper (liquid bottle) ──
+    const grad = ctx.createLinearGradient(lx, 0, lx + w, 0);
+    grad.addColorStop(0,   "rgba(200,224,244,0.58)");
+    grad.addColorStop(0.5, "rgba(238,247,255,0.42)");
+    grad.addColorStop(1,   "rgba(188,214,238,0.62)");
+    ctx.fillStyle = grad;
+    ctx.strokeStyle = "rgba(255,255,255,0.85)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.roundRect(lx, topY, w, h, 3);
+    ctx.fill();
+    ctx.stroke();
+
+    // Bright vertical glass highlight
+    ctx.fillStyle = "rgba(255,255,255,0.5)";
+    ctx.beginPath();
+    ctx.roundRect(lx + w * 0.2, topY + 1.5, w * 0.15, h - 3, 1.5);
+    ctx.fill();
+    // Soft top sheen
+    ctx.fillStyle = "rgba(255,255,255,0.32)";
+    ctx.beginPath();
+    ctx.roundRect(lx + 2, topY + 1, w * 0.4, 2.5, 1);
+    ctx.fill();
+  }
+
   ctx.restore();
 };
 
@@ -1340,7 +1482,7 @@ const drawThermometer = (
   w: number,
   h: number,
   readingTemperature: number = 25,
-  isMeasuring: boolean = false,
+  _isMeasuring: boolean = false,
 ) => {
   ctx.save();
 
@@ -1424,9 +1566,11 @@ const drawStirringRod = (
   const rodW = Math.max(w * 0.42, 5);
   const rodCX = x + w / 2;
 
-  // Oscillate when stirring
+  // Oscillate when stirring. The 0.40 rad/frame factor (~3.8 Hz at 60 fps) is
+  // kept in lock-step with STIR_HZ in soundManager.buildStirring so the rod and
+  // the swish/knock sound move at the same speed — bump both together.
   if (isStirring) {
-    const tilt = Math.sin(frame * 0.24) * 0.13;
+    const tilt = Math.sin(frame * 0.40) * 0.13;
     ctx.translate(rodCX, y + h * 0.45);
     ctx.rotate(tilt);
     ctx.translate(-rodCX, -(y + h * 0.45));
@@ -1925,8 +2069,6 @@ interface InteractiveLabCanvasProps {
 }
 
 const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
-  currentStep,
-  onApparatusClick,
   practicalId = "vanishing-cream",
   assignment = null,
   practiceTargetGrams = null,
@@ -1954,6 +2096,7 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
   const dragLiftedRef  = useRef(false);                                 // true once the dragged item has been off the table (in the air)
   const lastMovePosRef = useRef<{ x: number; y: number } | null>(null); // previous move client coords → drag speed
   const dragTypeRef    = useRef<string | null>(null);                   // type of the currently dragged apparatus (for sound gating)
+  const collidingRef   = useRef<Set<string>>(new Set());                // beaker ids the airborne dragged item currently overlaps (rising-edge clink)
   // ── Touch interaction state ───────────────────────────────────────────────
   const touchStartRef     = useRef<{ clientX: number; clientY: number; x: number; y: number; time: number } | null>(null);
   const longPressTimerRef = useRef<number | null>(null);  // pending long-press → context menu
@@ -1978,10 +2121,9 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
 
   // Snapshot target beaker composition when a pour starts, so we can diff at pour-end
   const pourStartRef = useRef<Record<string, Record<string, number>>>({});
-  const [selectedApparatus, setSelectedApparatus] = useState<Apparatus | null>(
+  const [, setSelectedApparatus] = useState<Apparatus | null>(
     null,
   );
-  const [showDetailModal, setShowDetailModal] = useState(false);
   const [moveMenu, setMoveMenu] = useState<{ id: string; x: number; y: number } | null>(null);
   const [showProtocolSidebar, setShowProtocolSidebar] = useState(false);
   const [dragging, setDragging] = useState<{
@@ -2023,6 +2165,25 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
   );
 
   const [apparatus, setApparatus] = useState<Apparatus[]>(() => initialApparatusFor());
+
+  // Toggle a container's lid. When the lid comes OFF we park it on whichever
+  // surface the container is resting on (shelf if it's up on the shelf, else the
+  // table), beside the container, so the cap stays visible — like physically
+  // setting it down. Replacing the lid clears that parked cap.
+  const toggleLid = useCallback(
+    (a: Apparatus, putLidOn: boolean): Apparatus => {
+      if (putLidOn) return { ...a, data: { ...a.data, hasLid: true, lidOff: null } };
+      const onShelf  = Math.abs((a.y + a.height) - shelfY) < 25;
+      const surfaceY = onShelf ? shelfY : TABLE_Y;
+      const lidW     = Math.max(a.width * 0.5, 16);
+      // Park the cap just to the right of the container; flip to the left if that
+      // would run off the edge of the canvas.
+      let lidX = a.x + a.width + 6;
+      if (lidX + lidW > canvasSize.width) lidX = a.x - lidW - 6;
+      return { ...a, data: { ...a.data, hasLid: false, lidOff: { x: lidX, y: surfaceY, w: lidW } } };
+    },
+    [shelfY, TABLE_Y, canvasSize.width],
+  );
 
   // latestApparatusRef mirrors apparatus without using setApparatus as a snapshot vehicle
   const latestApparatusRef = useRef<Apparatus[]>(apparatus);
@@ -2334,6 +2495,15 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
       // Dragged item (and its contents, if it is a container) on top
       if (dragId) { const d = apparatus.find((a) => a.id === dragId); if (d) pushItem(d); }
 
+      // Detached caps — any open container that had its lid removed shows the cap
+      // parked on its surface, so the lid doesn't simply disappear. Drawn before
+      // the apparatus so a vessel set over it still reads as in front.
+      apparatus.forEach((a) => {
+        const off = a.data?.lidOff;
+        if (off && !a.data?.hasLid)
+          drawDetachedLid(ctx, off.x, off.y, off.w, a.data?.lidColor || "#64748b", !!a.data?.isSolid);
+      });
+
       renderOrder.forEach((item) => {
         const { x: origX, y: origY, width, height, type, name, id } = item;
 
@@ -2500,20 +2670,21 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
                    bladeCX  >= a.x && bladeCX  <= a.x + a.width &&
                    bladeBot >= a.y && bladeBot <= a.y + a.height,
           );
+          // A loaded blade lifted clear of the solid jar is being carried and so
+          // is drawn tilted up. Test the pour against where the blade is actually
+          // drawn (the tilted tip), not the upright bounding box.
+          const carrying = load > 0 && !overSolid;
+          const tip = spatulaBladeTip(x, y, width, height, carrying);
           const overBeaker = apparatus.some(
             (a) => (a.type === "beaker" || a.type === "cylinder") &&
-                   bladeOverMouth(bladeCX, bladeBot, a),
+                   bladeOverMouth(tip.cx, tip.bot, a),
           );
           const action: "idle" | "chop" | "tip" =
             isActive && load === 0 && overSolid ? "chop" :
             isActive && load > 0  && overBeaker ? "tip"  : "idle";
-          // Carrying chopped chemical through the air → hold at a realistic
-          // incline.  Stay upright while the blade is inside a container so it
-          // never pokes through the wall.
-          const carrying  = load > 0 && !overSolid && !overBeaker;
           // Hold the blade well inclined (≥80°) while carrying so the scoop is
           // tipped up and the solid is cradled against the blade, not spilled.
-          const tiltAngle = carrying ? (80 * Math.PI) / 180 : 0;
+          const tiltAngle = carrying ? CARRY_TILT : 0;
           drawSpatula(ctx, x, y, width, height, load, action, tiltAngle);
         } else if (type === "weightbalance") {
           // Platform top matches drawWeightBalance: y + h*0.60 - 8
@@ -3252,12 +3423,35 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
           }
         } else if (p.data?.isPouring && !curr.data?.isPouring &&
                    (curr.type === "beaker" || curr.type === "cylinder")) {
-          // Beaker/cylinder-to-beaker mix completed — give a positive mixing confirmation
-          if (curr.type === "beaker")
+          // Beaker/cylinder-to-beaker transfer completed.  Only call this a phase
+          // COMBINATION when the target beaker NOW genuinely holds BOTH an oil-phase
+          // and an aqueous-phase component.  Pouring a single liquid into a beaker is
+          // just a transfer, not a mix — claiming "phases combined" there would be a
+          // false alert, so we report the transfer truthfully instead.
+          const tid     = p.data?.pouringTargetId ?? "";
+          const tgt     = apparatus.find((a) => a.id === tid);
+          const comp    = (tgt?.data?.composition ?? {}) as Record<string, number>;
+          const present = (v?: number) => (v ?? 0) > 0.02;
+          // Oil phase = stearic acid / liquid paraffin / beeswax (incl. un-melted solids).
+          const hasOil =
+            present(comp.stearicAcid) || present(comp.liquidParaffin) || present(comp.beeswax) ||
+            present(tgt?.data?.solidStearicGrams) || present(tgt?.data?.solidBeeswaxGrams);
+          // Aqueous phase = water / borax / glycerin / KOH-triethanolamine.
+          const hasAqueous =
+            present(comp.water) || present(comp.borax) || present(comp.glycerin) || present(comp.koh);
+
+          if (hasOil && hasAqueous) {
             addNotif("Phases combined ✓", "success", "Continue stirring to complete emulsification");
-          logLabMilestone(practicalId, "Oil and aqueous phases combined in mixing beaker");
+            logLabMilestone(practicalId, "Oil and aqueous phases combined in mixing beaker");
+          } else if (tgt) {
+            // Single-phase transfer — say what actually happened, not "combined".
+            addNotif(`Liquid transferred into ${tgt.name}`, "info",
+              hasOil ? "Oil phase only — add the aqueous phase to combine"
+                     : hasAqueous ? "Aqueous phase only — add the oil phase to combine"
+                     : undefined);
+          }
           // Always clean up the snapshot to prevent orphan entries
-          delete pourStartRef.current[p.data?.pouringTargetId ?? ""];
+          delete pourStartRef.current[tid];
         }
       }
 
@@ -3267,7 +3461,13 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
         const currT = curr.data?.liquidTemperature ?? 25;
         const name  = curr.name;
 
-        if (prevT < 70 && currT >= 70 && hit(`melt-${curr.id}`)) {
+        // Only announce melting when the beaker ACTUALLY contains stearic acid —
+        // either still solid, or already melted into the composition.  A beaker of
+        // plain water crossing 70°C must not claim "stearic acid melting".
+        const hasStearic =
+          (p.data?.solidStearicGrams ?? 0) > 0 || (curr.data?.solidStearicGrams ?? 0) > 0 ||
+          (p.data?.composition?.stearicAcid ?? 0) > 0 || (curr.data?.composition?.stearicAcid ?? 0) > 0;
+        if (prevT < 70 && currT >= 70 && hasStearic && hit(`melt-${curr.id}`)) {
           addNotif(`${name} — stearic acid melting`, "info", "Solid turning to liquid at 70°C ✓");
           logLabMilestone(practicalId, `${name} reached 70°C — stearic acid melting`);
         }
@@ -3346,8 +3546,17 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
 
       // ── Stirring rod ───────────────────────────────────────────────────────
       if (curr.type === "stirringrod" && !p.data?.isStirring && curr.data?.isStirring) {
-        addNotif("Stirring in progress", "info", "Hold for at least 30 seconds for full emulsification");
-        logLabMilestone(practicalId, "Stirring started — mixing phases");
+        // Only claim "emulsification" when actually stirring a beaker that HAS content.
+        // Stirring an empty (or off-target) beaker shouldn't promise an emulsion.
+        const stgt   = apparatus.find((a) => a.id === curr.data?.stirringTargetId);
+        const scomp  = (stgt?.data?.composition ?? {}) as Record<string, number>;
+        const hasContent =
+          Object.values(scomp).some((v) => (v ?? 0) > 0.02) ||
+          (stgt?.data?.solidStearicGrams ?? 0) > 0 || (stgt?.data?.solidBeeswaxGrams ?? 0) > 0;
+        if (hasContent) {
+          addNotif("Stirring in progress", "info", "Hold for at least 30 seconds for full emulsification");
+          logLabMilestone(practicalId, "Stirring started — mixing phases");
+        }
       }
     });
 
@@ -3456,9 +3665,12 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
     dragOnTableRef.current = Math.abs(clicked.y + clicked.height - TABLE_Y) < 2;
     dragLiftedRef.current  = !dragOnTableRef.current;
     dragTypeRef.current    = clicked.type;
+    collidingRef.current   = new Set();   // fresh collision tracking for this drag
     lastMovePosRef.current = { x: clientX, y: clientY };
     setDragging(dragState);
-    soundManager.grab();   // tactile pick-up sound for any apparatus on the table
+    // Tactile pick-up "click" — only for the beaker, measuring cylinder and
+    // containers; other apparatus (hot-plate, ice-bath, instruments) are silent.
+    if (GRAB_SOUND_TYPES.includes(clicked.type)) soundManager.grab();
     if (kind === "mouse") {
       window.addEventListener("mousemove", handleMouseMove);
       window.addEventListener("mouseup", handleMouseUp);
@@ -3487,17 +3699,35 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
         const dym = e.clientY - dragStartRef.current.y;
         if (Math.hypot(dxm, dym) > 4) dragMovedRef.current = true;
       }
-      // Friction of the apparatus sliding across the table while it's dragged —
-      // only for the heavy bench items, only while in contact with the table
-      // surface (dragOnTableRef, updated by the previous move's position update),
-      // and skipped during hold-to-stir (the rod hasn't lifted into a drag yet).
-      // Speed of the pointer drives the scrape volume so it reflects the motion.
-      if (dragMovedRef.current && !holdStirRef.current && dragOnTableRef.current) {
-        const draggedType = dragTypeRef.current;
-        if (draggedType && SLIDE_SOUND_TYPES.includes(draggedType)) {
-          const last = lastMovePosRef.current;
-          const speed = last ? Math.hypot(e.clientX - last.x, e.clientY - last.y) : 0;
-          soundManager.slide(speed / 22);   // ~22 px/move ≈ full intensity
+      // Per-tick pointer travel — drives both the airborne "clink" loudness and
+      // the on-bench sliding "scrape" level.
+      const prevPos = lastMovePosRef.current;
+      const moveSpeed = prevPos ? Math.hypot(e.clientX - prevPos.x, e.clientY - prevPos.y) : 0;
+      // Glass "clink" when a beaker / cylinder / container is carried through the
+      // air and knocks into a beaker — not while sliding along the bench. Gated on
+      // dragOnTableRef (false ⇒ airborne) and fired on the rising edge of each
+      // overlap so a single bump rings once, not every move tick. Pointer speed
+      // scales the loudness so a gentle nudge is softer than a hard knock.
+      if (
+        dragMovedRef.current && !holdStirRef.current && !dragOnTableRef.current &&
+        dragTypeRef.current && COLLISION_SOUND_TYPES.includes(dragTypeRef.current)
+      ) {
+        const apps = latestApparatusRef.current;
+        const me = apps.find((a) => a.id === drag.id);
+        if (me) {
+          const nowHit = new Set<string>();
+          for (const b of apps) {
+            if (b.type !== "beaker" || b.id === drag.id) continue;
+            if (b.data?.containedInId === drag.id || me.data?.containedInId === b.id) continue;
+            const overlap =
+              me.x < b.x + b.width && me.x + me.width > b.x &&
+              me.y < b.y + b.height && me.y + me.height > b.y;
+            if (!overlap) continue;
+            nowHit.add(b.id);
+            if (!collidingRef.current.has(b.id))
+              soundManager.clink(0.4 + Math.min(1, moveSpeed / 18) * 0.6);
+          }
+          collidingRef.current = nowHit;
         }
       }
       lastMovePosRef.current = { x: e.clientX, y: e.clientY };
@@ -3607,11 +3837,23 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
         }
         return moved;
       });
+
+      // Sliding friction "scrape" — only while the item is actually resting on
+      // and moving along the table (dragOnTableRef was refreshed above), never
+      // while it is lifted through the air. Limited to bench-able apparatus.
+      if (
+        dragMovedRef.current && dragOnTableRef.current && moveSpeed > 0.6 &&
+        dragTypeRef.current && SLIDE_SOUND_TYPES.includes(dragTypeRef.current)
+      ) {
+        soundManager.slide(moveSpeed);
+      }
     },
     [TABLE_Y, shelfY, canvasSize, NAV_BAR_HEIGHT],   // dragging removed — we read from ref instead
   );
 
   const handleMouseUp = useCallback(() => {
+    // Any in-progress sliding scrape ends the instant the item is set down.
+    soundManager.endSlide();
     // Release hold-to-stir (a press with no real drag → pure stir).
     if (holdStirRef.current) {
       const { rodId, targetId } = holdStirRef.current;
@@ -3716,9 +3958,12 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
 
       // Spatula drop — auto-scoop from bottle OR auto-deposit into beaker
       if (dragged && dragged.type === "spatula") {
-        const bladeCX = dragged.x + dragged.width / 2;
-        const bladeY  = dragged.y + dragged.height;
         const currentLoad = dragged.data?.spatulaLoad ?? 0;
+        // Upright tip for the empty-blade scoop test; tilted tip (matching how a
+        // carried, loaded blade is drawn) for the deposit test.
+        const uprightCX = dragged.x + dragged.width / 2;
+        const uprightY  = dragged.y + dragged.height;
+        const carriedTip = spatulaBladeTip(dragged.x, dragged.y, dragged.width, dragged.height, currentLoad > 0);
 
         if (currentLoad > 0) {
           // Loaded — deposit only when the blade (chopping head) is aimed into
@@ -3726,7 +3971,7 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
           const beakerTarget = apparatus.find(
             (a) =>
               (a.type === "beaker" || a.type === "cylinder") &&
-              bladeOverMouth(bladeCX, bladeY, a),
+              bladeOverMouth(carriedTip.cx, carriedTip.bot, a),
           );
           if (beakerTarget) {
             const grams = currentLoad;
@@ -3753,8 +3998,8 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
               (a.id === "container-stearic-acid" || a.id === "container-beeswax") &&
               a.data?.isSolid &&
               (a.data?.currentVolume ?? 0) > 0 &&
-              bladeCX >= a.x && bladeCX <= a.x + a.width &&
-              bladeY  >= a.y && bladeY  <= a.y + a.height,
+              uprightCX >= a.x && uprightCX <= a.x + a.width &&
+              uprightY  >= a.y && uprightY  <= a.y + a.height,
           );
           if (solidContainer) {
             const density   = solidContainer.data?.density ?? 0.847;
@@ -3778,6 +4023,7 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
     dragOnTableRef.current = false;
     dragLiftedRef.current = false;
     dragTypeRef.current = null;
+    collidingRef.current = new Set();
     lastMovePosRef.current = null;
     setDragging(null);
     window.removeEventListener("mousemove", handleMouseMove);
@@ -4637,7 +4883,11 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
           const item = apparatus.find((a) => a.id === showLidModal.id);
           if (!item) return null;
           const isOpen = !item.data?.hasLid;  // true = currently open (no lid on)
-          const lidColor = item.data?.lidColor || "#3b82f6";
+          const isSolid = !!item.data?.isSolid;
+          const lidColor = item.data?.lidColor || "#3b82f6";  // button theming (hex)
+          // Solid jars show a coloured screw cover; liquid bottles a glass lid.
+          const lidSwatch = isSolid ? lidColor : "rgba(210,232,250,0.65)";
+          const lidBorder = isSolid ? lidColor : "rgba(255,255,255,0.7)";
           const liquidColor = item.data?.liquidColor || "rgba(56,189,248,0.5)";
 
           return (
@@ -4662,13 +4912,13 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
                         borderRadius:4, background:liquidColor, border:"1.5px solid rgba(255,255,255,0.18)" }} />
                       <div style={{ position:"absolute", bottom:34, left:9, right:9, height:12,
                         borderRadius:"2px 2px 0 0",
-                        background: isOpen ? "rgba(255,255,255,0.05)" : lidColor,
-                        border: isOpen ? "1.5px dashed #475569" : `1.5px solid ${lidColor}` }} />
-                      {/* Lid sitting to the side if open */}
+                        background: isOpen ? "rgba(255,255,255,0.05)" : lidSwatch,
+                        border: isOpen ? "1.5px dashed #475569" : `1.5px solid ${lidBorder}` }} />
+                      {/* Lid sitting to the side if open — glass for liquids, cover for solids */}
                       {isOpen && (
                         <div style={{ position:"absolute", top:0, right:-12, width:18, height:10,
-                          borderRadius:3, background:lidColor, border:`1px solid ${lidColor}`,
-                          opacity:0.8, transform:"rotate(-15deg)" }} />
+                          borderRadius:3, background:lidSwatch, border:`1px solid ${lidBorder}`,
+                          opacity:0.85, transform:"rotate(-15deg)" }} />
                       )}
                     </div>
 
@@ -4700,8 +4950,7 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
                   <button
                     onClick={() => {
                       setApparatus(prev =>
-                        prev.map(a => a.id === item.id
-                          ? { ...a, data: { ...a.data, hasLid: isOpen } } : a)
+                        prev.map(a => a.id === item.id ? toggleLid(a, isOpen) : a)
                       );
                       setShowLidModal(null);
                     }}
@@ -4768,8 +5017,7 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
                   onMouseLeave={e => (e.currentTarget.style.background = "transparent")}
                   onClick={() => {
                     setApparatus((prev) =>
-                      prev.map((a) => a.id === item.id
-                        ? { ...a, data: { ...a.data, hasLid: isOpen } } : a)
+                      prev.map((a) => a.id === item.id ? toggleLid(a, isOpen) : a)
                     );
                     setLidContextMenu(null);
                   }}
@@ -4827,11 +5075,6 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
         // Fixed apparatus cannot be moved
         const FIXED = new Set(["hot-plate-1","ice-bucket","weight-balance"]);
         if (FIXED.has(item.id)) return null;
-
-        // Original positions from initial state
-        const origList = initialApparatusFor();
-        const orig = origList.find(a => a.id === item.id);
-        const shelfPos = orig ? { x: orig.x, y: orig.y } : { x: item.x, y: shelfY - item.height };
 
         // Table position: centre the item on the right half of the table
         const tablePos = { x: item.x, y: TABLE_Y - item.height };
@@ -5478,8 +5721,7 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
             onClick={e => {
               e.stopPropagation();
               setApparatus(prev =>
-                prev.map(a => a.id === hovered.id
-                  ? { ...a, data: { ...a.data, hasLid: true } } : a)
+                prev.map(a => a.id === hovered.id ? toggleLid(a, true) : a)
               );
             }}
             style={{

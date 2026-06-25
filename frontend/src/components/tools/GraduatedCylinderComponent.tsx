@@ -18,7 +18,6 @@ interface GraduatedCylinderProps {
 }
 
 const GraduatedCylinderComponent: React.FC<GraduatedCylinderProps> = ({
-  id,
   name,
   x,
   y,
@@ -26,12 +25,7 @@ const GraduatedCylinderComponent: React.FC<GraduatedCylinderProps> = ({
   height,
   volume,
   contents,
-  temperature,
-  measurements,
-  isDraggable = false,
   isHovered = false,
-  onDoubleClick,
-  onPositionChange,
 }) => {
   const drawCylinder = (ctx: CanvasRenderingContext2D) => {
     // Draw cylinder body

@@ -64,6 +64,17 @@ const userSchema = new mongoose.Schema(
       type:    String,
       default: null,
     },
+    // Students only — the specific class they enrolled into (a ClassInvite _id).
+    // A student belongs to one class at a time; redeeming a new class code moves
+    // them. The teacher is always derivable from the class.
+    assignedClassId: {
+      type:    String,
+      default: null,
+    },
+    assignedClassName: {
+      type:    String,
+      default: null,
+    },
   },
   { timestamps: true }
 );

@@ -4,8 +4,7 @@ import {
   IngredientType,
   SimulationState,
   SimulationError,
-  BeakerState,
-  TemperatureData
+  BeakerState
 } from './types';
 import { AxonProperties } from './AxonProperties';
 import { TelemetryManager } from '../telemetry/TelemetryManager';
@@ -232,7 +231,7 @@ export class SimulationModel {
         tempDiff <= 5
       ) {
         // Clear any previous temperature mismatch errors
-        this.state.errors = this.state.errors.filter(e => e.code !== 'temperature_mismatch');
+        this.state.errors = this.state.errors.filter(e => e.type !== 'temperature_mismatch');
       }
     }
 
@@ -431,7 +430,7 @@ export class SimulationModel {
     }, 1000);
   }
 
-  private stopTemperatureSimulation(beakerId: string): void {
+  private stopTemperatureSimulation(_beakerId: string): void {
     // Temperature simulation will stop automatically when is_heating/is_cooling is false
   }
 

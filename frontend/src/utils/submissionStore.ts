@@ -36,9 +36,10 @@ export interface StatsResult {
   avgDur:     number;
 }
 
-export const getAllSubmissions = async (): Promise<LabSubmission[]> => {
+export const getAllSubmissions = async (classId?: string): Promise<LabSubmission[]> => {
   try {
-    const res = await apiGet<{ submissions: LabSubmission[] }>("/api/submissions");
+    const q = classId ? `?classId=${encodeURIComponent(classId)}` : "";
+    const res = await apiGet<{ submissions: LabSubmission[] }>(`/api/submissions${q}`);
     return res.submissions;
   } catch { return []; }
 };
@@ -52,9 +53,9 @@ export const avgScore = (subs: LabSubmission[]): number => {
   return Math.round(subs.reduce((acc, s) => acc + s.scorePct, 0) / subs.length);
 };
 
-export const getStats = async (): Promise<StatsResult> => {
+export const getStats = async (classId?: string): Promise<StatsResult> => {
   try {
-    const all        = await getAllSubmissions();
+    const all        = await getAllSubmissions(classId);
     const total      = all.length;
     const passed     = all.filter(s => s.result === "PASS").length;
     const average    = all.filter(s => s.result === "AVERAGE").length;

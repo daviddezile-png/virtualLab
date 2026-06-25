@@ -20,7 +20,6 @@ const SECTIONS = [
   { id: "predictions", num: 3, label: "PREDICTIONS" },
   { id: "protocol",    num: 4, label: "PROTOCOL"    },
 ] as const;
-type SectionId = typeof SECTIONS[number]["id"];
 
 /* ── tiny helpers ──────────────────────────────────────────────────────────── */
 const Bullet: React.FC<{ text: string; icon?: string }> = ({ text, icon }) => (

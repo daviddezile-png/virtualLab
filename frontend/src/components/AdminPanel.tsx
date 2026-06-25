@@ -3,9 +3,9 @@ import {
   LayoutDashboard, Users, ClipboardCheck,
   BarChart2, Settings, LogOut, Sun, Moon, Menu, Search,
   Trash2, Shield, Activity, TrendingUp, CheckCircle, AlertCircle,
-  GraduationCap, User as UserIcon, Key,
-  RefreshCw, Download, Lock, Unlock, Clock, Award, Database,
-  AlertTriangle, ChevronRight, LucideIcon, Wifi, Server,
+  GraduationCap, User as UserIcon,
+  RefreshCw, Download, Lock, Unlock, Award, Database,
+  AlertTriangle, ChevronRight, LucideIcon, Server,
   UserCheck, BarChart, FileCheck, Filter,
 } from "lucide-react";
 import {
@@ -1165,15 +1165,15 @@ const AuditLog: React.FC = () => {
   const paged     = filtered.slice(safePage * PAGE_SIZE, safePage * PAGE_SIZE + PAGE_SIZE);
 
   // Most active users — count events per actor
-  const userActivity = Array.from(
-    log.reduce((map, e) => {
-      const key = e.actorName;
-      const cur = map.get(key) ?? { name: key, role: e.actorRole, count: 0 };
-      cur.count += 1;
-      map.set(key, cur);
-      return map;
-    }, new Map<string, { name:string; role:string; count:number }>())
-  ).map(([, v]) => v).sort((a, b) => b.count - a.count).slice(0, 6);
+  const activityMap = new Map<string, { name:string; role:string; count:number }>();
+  for (const e of log) {
+    const key = e.actorName;
+    const cur = activityMap.get(key) ?? { name: key, role: e.actorRole, count: 0 };
+    cur.count += 1;
+    activityMap.set(key, cur);
+  }
+  const userActivity = Array.from(activityMap.values())
+    .sort((a, b) => b.count - a.count).slice(0, 6);
 
   const formatTime = (iso: string) => {
     const d = new Date(iso);

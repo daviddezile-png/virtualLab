@@ -1,4 +1,4 @@
-import { SimulationModel, SimulationStep, IngredientType } from './simulation/model';
+import { SimulationModel, SimulationStep } from './simulation/model';
 import { BeakerNode } from './simulation/view/BeakerNode';
 import { ThermometerNode } from './simulation/view/ThermometerNode';
 
@@ -187,16 +187,8 @@ export class MainSim {
     this.stateChangeListeners.forEach(callback => callback(state));
   }
 
-  private notifyError(error: any): void {
-    this.errorListeners.forEach(callback => callback(error));
-  }
-
-  private notifyStepComplete(step: any, score: number, feedback: string[]): void {
-    this.stepCompleteListeners.forEach(callback => callback(step, score, feedback));
-  }
-
   private async loadImage(src: string): Promise<HTMLImageElement> {
-    return new Promise((resolve, reject) => {
+    return new Promise((resolve) => {
       const img = new Image();
       img.onload = () => resolve(img);
       img.onerror = () => {

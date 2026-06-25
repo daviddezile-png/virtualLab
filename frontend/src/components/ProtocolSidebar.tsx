@@ -77,24 +77,6 @@ const SvgCylinder: React.FC = () => (
   </svg>
 );
 
-const SvgBottle: React.FC<{ color: string; label: string }> = ({ color, label }) => (
-  <svg width="52" height="90" viewBox="0 0 52 90">
-    {/* body */}
-    <rect x="8" y="30" width="36" height="50" rx="4" fill={color} stroke="#64748b" strokeWidth="1.5"/>
-    {/* liquid */}
-    <rect x="9" y="48" width="34" height="31" rx="3" fill={color.replace("0.9","0.6").replace("0.95","0.7")} opacity="0.8"/>
-    {/* neck */}
-    <rect x="16" y="12" width="20" height="20" rx="2" fill={color} stroke="#64748b" strokeWidth="1.5"/>
-    {/* cap */}
-    <rect x="14" y="4" width="24" height="10" rx="3" fill="#334155" stroke="#475569" strokeWidth="1"/>
-    {/* label strip */}
-    <rect x="10" y="52" width="32" height="18" rx="2" fill="rgba(255,255,255,0.12)"/>
-    <text x="26" y="63" textAnchor="middle" fontSize="6" fill="white" fontWeight="bold">{label}</text>
-    {/* base */}
-    <rect x="6" y="78" width="40" height="5" rx="2" fill={color} stroke="#64748b" strokeWidth="1"/>
-  </svg>
-);
-
 const SvgHotPlate: React.FC = () => (
   <svg width="80" height="60" viewBox="0 0 80 60">
     {/* base */}
@@ -294,15 +276,6 @@ const ResultRow: React.FC<{ label: string; value: string; unit?: string; pass?: 
     </div>
   );
 };
-
-// ── Material table row ─────────────────────────────────────────────────────────
-const MatRow: React.FC<{ item: string; qty: string; note?: string }> = ({ item, qty, note }) => (
-  <div style={{ display: "flex", gap: 10, padding: "6px 0", borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
-    <span style={{ flex: 2, color: "#e2e8f0", fontSize: 12 }}>{item}</span>
-    <span style={{ flex: 1, color: "#60a5fa", fontSize: 12, fontFamily: "monospace", fontWeight: 700 }}>{qty}</span>
-    {note && <span style={{ flex: 2, color: "#64748b", fontSize: 11 }}>{note}</span>}
-  </div>
-);
 
 // ── Main component ─────────────────────────────────────────────────────────────
 const ProtocolSidebar: React.FC<Props> = ({ isOpen, onClose, apparatus, practicalId = "vanishing-cream" }) => {
@@ -923,7 +896,7 @@ const ProtocolSidebar: React.FC<Props> = ({ isOpen, onClose, apparatus, practica
 
         {/* Section dots */}
         <div style={{ display: "flex", gap: 5 }}>
-          {SECTIONS.map((s, i) => (
+          {SECTIONS.map((s) => (
             <button key={s.id} onClick={() => setActiveSection(s.id)}
               style={{ width: 8, height: 8, borderRadius: "50%", border: "none", cursor: "pointer", padding: 0,
                 background: s.id === activeSection ? "#3b82f6" : "#334155" }} />

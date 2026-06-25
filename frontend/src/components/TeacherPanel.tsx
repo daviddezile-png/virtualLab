@@ -1,31 +1,32 @@
 import React, { useState, useContext, createContext, useEffect } from "react";
 import {
-  LayoutDashboard, TestTubes, ClipboardList, Users, BarChart2,
-  ClipboardCheck, Settings, ArrowLeft, Sun, Moon, Menu,
-  Plus, Download, Trash2, Search, Upload, Copy, Eye,
-  GripVertical, TrendingUp, Award, Clock, FileText, Bell,
-  FlaskConical, FlaskRound, Beaker, User, BookOpen, Shield,
+  LayoutDashboard, ClipboardList, Users, BarChart2,
+  ClipboardCheck, Settings, Sun, Moon, Menu,
+  Plus, Download, Trash2, Search, Copy,
+  GripVertical, TrendingUp, Award, Clock, Bell,
+  FlaskConical, FlaskRound, Beaker, User,
   LogOut, CheckCircle, AlertCircle, Activity, UserPlus, Filter,
   Save, RefreshCw, LucideIcon, Key, Hash, Calculator, Zap,
-  UserCheck, UserX, ListChecks,
+  UserCheck, UserX, ListChecks, Pencil, Archive,
 } from "lucide-react";
 import {
   Assignment, PracticalId, BASE_RECIPES,
   getAllAssignments, saveAssignment, deleteAssignment, generateToken, isCodeExpired,
 } from "../utils/assignmentStore";
-import { getStudents, getUserCounts, registerUser, User as StoreUser } from "../utils/userStore";
+import { getStudents, registerUser, User as StoreUser } from "../utils/userStore";
 import { getAllSubmissions, getStats, LabSubmission, StatsResult } from "../utils/submissionStore";
 import {
   getAllQuestions, saveQuestion, deleteQuestion,
   QAQuestion, QAPractical, getAllAnswers, QAAnswer,
 } from "../utils/qaStore";
 import {
-  ClassInvite, getClassInvites, generateClassInvite, deleteClassInvite,
+  ClassInvite, getClassInvites, createClass, deleteClassInvite, updateClass,
 } from "../utils/classInviteStore";
 import {
   getHeatmap, getFunnel, getAtRisk, getItemAnalysis, downloadCSV,
   HeatmapResult, FunnelResult, AtRiskResult, ItemAnalysisResult,
 } from "../utils/analyticsStore";
+import { copyToClipboard } from "../utils/clipboard";
 
 // Selectable time windows for the step heatmap — hours-based or days-based.
 const HEATMAP_PERIODS = [
@@ -67,7 +68,7 @@ const DARK = {
   purple:    "#a78bfa",
   shadow:    "rgba(0,0,0,0.55)",
   headerBg:  "rgba(8,15,30,0.98)",
-} as const;
+};
 
 const LIGHT = {
   bg:        "#f1f5f9",
@@ -87,7 +88,7 @@ const LIGHT = {
   purple:    "#7c3aed",
   shadow:    "rgba(0,0,0,0.10)",
   headerBg:  "rgba(255,255,255,0.98)",
-} as const;
+};
 
 type Theme = typeof DARK;
 
@@ -307,6 +308,46 @@ const Avatar: React.FC<{ name:string; size?:number }> = ({ name, size=32 }) => (
 );
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Class filter — shared across Dashboard, Students, Tracking and Analytics so a
+// teacher can scope every view to one cohort. Archived classes are included so
+// graduated cohorts can still be reviewed.
+// ─────────────────────────────────────────────────────────────────────────────
+const useClasses = (): ClassInvite[] => {
+  const [classes, setClasses] = useState<ClassInvite[]>([]);
+  useEffect(() => { getClassInvites(true).then(setClasses); }, []);
+  return classes;
+};
+
+const ClassFilter: React.FC<{
+  classes: ClassInvite[];
+  value:   string;
+  onChange: (id: string) => void;
+}> = ({ classes, value, onChange }) => {
+  const { C } = useTheme();
+  return (
+    <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+      <Users size={15} color={C.txtMut} strokeWidth={2} />
+      <select value={value} onChange={e => onChange(e.target.value)}
+        style={{ background:C.card, color:C.txtPri, border:`1px solid ${C.border2}`,
+          borderRadius:8, padding:"7px 12px", fontSize:14, fontWeight:600, cursor:"pointer",
+          maxWidth:240 }}>
+        <option value="">All my classes</option>
+        {classes.map(c => {
+          // Older codes predate the class `name` field — fall back to the code
+          // (or a placeholder) so a class never renders as a blank row.
+          const label = c.name?.trim() || c.token || "Unnamed class";
+          return (
+            <option key={c._id} value={c._id}>
+              {label}{c.year ? ` (${c.year})` : ""}{c.archived ? " — archived" : ""}
+            </option>
+          );
+        })}
+      </select>
+    </div>
+  );
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Dashboard
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -330,22 +371,25 @@ const Dashboard: React.FC<{ onNavigate?: (s: Section) => void }> = ({ onNavigate
   });
   const [allSubs, setAllSubs]   = useState<LabSubmission[]>([]);
   const [students, setStudents] = useState<StoreUser[]>([]);
+  const [classId, setClassId]   = useState("");
+  const classes = useClasses();
   const [refresh, setRefresh]   = useState(0);
   const [qaSpin, setQaSpin]     = useState(false);
   const [loading, setLoading]   = useState(true);
 
   useEffect(() => {
+    const cls = classId || undefined;
     setLoading(true);
     Promise.all([
-      getStats().then(setStats),
-      getAllSubmissions().then(subs =>
+      getStats(cls).then(setStats),
+      getAllSubmissions(cls).then(subs =>
         setAllSubs(subs.slice().sort((a, b) =>
           new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime()
         ))
       ),
-      getStudents().then(users => setStudents(users.filter(u => u.role === "student"))),
+      getStudents(cls).then(users => setStudents(users.filter(u => u.role === "student"))),
     ]).finally(() => setLoading(false));
-  }, [refresh]);
+  }, [refresh, classId]);
 
   const exportAnalytics = () => downloadCSV(
     `dashboard-analytics_${new Date().toISOString().slice(0,10)}.csv`,
@@ -370,7 +414,8 @@ const Dashboard: React.FC<{ onNavigate?: (s: Section) => void }> = ({ onNavigate
 
   return (
     <div>
-      <SectionHeading title="Dashboard" sub="Real-time overview of your lab sessions." />
+      <SectionHeading title="Dashboard" sub="Real-time overview of your lab sessions."
+        action={<ClassFilter classes={classes} value={classId} onChange={setClassId} />} />
 
       <div style={{ display:"flex", flexWrap:"wrap", gap:14, marginBottom:28 }}>
         <StatCard loading={loading} label="Registered Students" value={students.length} sub="Self-registered accounts"   Icon={Users}         accent={C.accent} />
@@ -530,8 +575,9 @@ const AssignmentsTab: React.FC = () => {
     setRefresh(r => r + 1);
   };
 
-  const handleCopy = (token: string) => {
-    navigator.clipboard.writeText(token).catch(() => {});
+  const handleCopy = async (token: string) => {
+    const ok = await copyToClipboard(token);
+    if (!ok) return;
     setCopiedToken(token);
     setTimeout(() => setCopiedToken(null), 2000);
   };
@@ -1242,16 +1288,18 @@ const Students: React.FC = () => {
   const [addOk,       setAddOk]       = useState(false);
 
   const [allStudents, setAllStudents] = useState<StoreUser[]>([]);
+  const [classId,     setClassId]     = useState("");
+  const classes = useClasses();
   const [loading,     setLoading]     = useState(true);
   const [page, setPage] = useState(0);
 
   useEffect(() => {
     // role guard: even if the API ever misbehaved, never show non-students here
     setLoading(true);
-    getStudents()
+    getStudents(classId || undefined)
       .then(users => setAllStudents(users.filter(u => u.role === "student")))
       .finally(() => setLoading(false));
-  }, [refresh]);
+  }, [refresh, classId]);
 
   const filtered = allStudents.filter(u =>
     u.fullName.toLowerCase().includes(search.toLowerCase()) ||
@@ -1298,7 +1346,8 @@ const Students: React.FC = () => {
         title="Students"
         sub={`${allStudents.length} student${allStudents.length !== 1 ? "s" : ""} joined your class via invitation code.`}
         action={
-          <div style={{ display:"flex", gap:8 }}>
+          <div style={{ display:"flex", gap:8, alignItems:"center", flexWrap:"wrap" }}>
+            <ClassFilter classes={classes} value={classId} onChange={setClassId} />
             <Btn label="Add Student" Icon={UserPlus} small
               onClick={() => { resetForm(); setShowAdd(v => !v); }} />
             <Btn label="Refresh" Icon={RefreshCw} variant="ghost" small
@@ -1471,7 +1520,7 @@ const Students: React.FC = () => {
 // Telemetry & decision-aid insights — step heatmap, completion funnel,
 // at-risk students and Q&A item analysis. All from real backend analytics.
 // ─────────────────────────────────────────────────────────────────────────────
-const TelemetryInsights: React.FC = () => {
+const TelemetryInsights: React.FC<{ classId?: string }> = ({ classId }) => {
   const { C } = useTheme();
   const [heatmap, setHeatmap] = useState<HeatmapResult | null>(null);
   const [funnel,  setFunnel]  = useState<FunnelResult | null>(null);
@@ -1482,17 +1531,18 @@ const TelemetryInsights: React.FC = () => {
   const [refresh, setRefresh] = useState(0);
 
   const heatPreset = HEATMAP_PERIODS.find(p => p.key === heatPeriod) ?? HEATMAP_PERIODS[3];
+  const cls = classId || undefined;
 
   useEffect(() => {
-    getFunnel().then(setFunnel);
-    getAtRisk().then(setAtRisk);
-  }, [refresh]);
+    getFunnel(cls).then(setFunnel);
+    getAtRisk(cls).then(setAtRisk);
+  }, [refresh, cls]);
   useEffect(() => {
-    getHeatmap(heatPreset.period).then(setHeatmap);
-  }, [heatPeriod, refresh]);
+    getHeatmap(heatPreset.period, cls).then(setHeatmap);
+  }, [heatPeriod, refresh, cls]);
   useEffect(() => {
-    getItemAnalysis(itemPractical || undefined).then(setItems);
-  }, [itemPractical, refresh]);
+    getItemAnalysis(itemPractical || undefined, cls).then(setItems);
+  }, [itemPractical, refresh, cls]);
 
   const Card: React.FC<{ title: string; Icon: LucideIcon; color: string;
     action?: React.ReactNode; children: React.ReactNode }> =
@@ -1688,6 +1738,8 @@ const TelemetryInsights: React.FC = () => {
 const Analytics: React.FC = () => {
   const { C } = useTheme();
   const [pFilter,  setPFilter]  = useState("all");
+  const [classId,  setClassId]  = useState("");          // "" = all of my classes
+  const classes = useClasses();
   const [refresh,  setRefresh]  = useState(0);
   const [allSubs,  setAllSubs]  = useState<LabSubmission[]>([]);
   const [stats,    setStats]    = useState<StatsResult>({
@@ -1695,9 +1747,10 @@ const Analytics: React.FC = () => {
   });
 
   useEffect(() => {
-    getAllSubmissions().then(setAllSubs);
-    getStats().then(setStats);
-  }, [refresh]);
+    const cls = classId || undefined;
+    getAllSubmissions(cls).then(setAllSubs);
+    getStats(cls).then(setStats);
+  }, [refresh, classId]);
 
   const filtered = pFilter === "all" ? allSubs : allSubs.filter(s => s.practicalId === pFilter);
 
@@ -1737,7 +1790,7 @@ const Analytics: React.FC = () => {
       <SectionHeading title="Analytics" sub="Real performance data from student lab sessions."
         action={<Btn label="Refresh" Icon={RefreshCw} variant="ghost" small onClick={() => setRefresh(r => r + 1)} />} />
 
-      <div style={{ display:"flex", gap:8, marginBottom:24 }}>
+      <div style={{ display:"flex", gap:8, marginBottom:24, flexWrap:"wrap", alignItems:"center" }}>
         {["all","vanishing-cream","cold-cream"].map(f => (
           <button key={f} onClick={() => setPFilter(f)} style={{
             padding:"7px 16px", borderRadius:8, cursor:"pointer", fontWeight:600,
@@ -1746,6 +1799,11 @@ const Analytics: React.FC = () => {
             color: pFilter===f ? "white" : C.txtSec,
           }}>{f==="all"?"All Practicals":f.replace("-"," ").replace(/\b\w/g,(c:string)=>c.toUpperCase())}</button>
         ))}
+
+        {/* Class filter — scopes every chart on this page (and Telemetry below) */}
+        <div style={{ marginLeft:"auto" }}>
+          <ClassFilter classes={classes} value={classId} onChange={setClassId} />
+        </div>
       </div>
 
       <div style={{ display:"flex", flexWrap:"wrap", gap:14, marginBottom:28 }}>
@@ -1860,7 +1918,7 @@ const Analytics: React.FC = () => {
         </>
       )}
 
-      <TelemetryInsights />
+      <TelemetryInsights classId={classId} />
     </div>
   );
 };
@@ -1904,7 +1962,9 @@ const Submissions: React.FC = () => {
   const [tokenFilter,     setTokenFilter]     = useState("all");
   const [resultFilter,    setResultFilter]    = useState<"all"|"PASS"|"AVERAGE"|"FAIL">("all");
   const [search,          setSearch]          = useState("");
+  const [classId,         setClassId]         = useState("");
   const [refresh,         setRefresh]         = useState(0);
+  const classes = useClasses();
 
   const [allSubs,      setAllSubs]      = useState<LabSubmission[]>([]);
   const [assignments,  setAssignments]  = useState<Assignment[]>([]);
@@ -1912,16 +1972,17 @@ const Submissions: React.FC = () => {
   const [page,         setPage]         = useState(0);
 
   useEffect(() => {
+    const cls = classId || undefined;
     setLoading(true);
     Promise.all([
-      getAllSubmissions().then(subs =>
+      getAllSubmissions(cls).then(subs =>
         setAllSubs(subs.slice().sort((a, b) =>
           new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime()
         ))
       ),
       getAllAssignments().then(setAssignments),
     ]).finally(() => setLoading(false));
-  }, [refresh]);
+  }, [refresh, classId]);
 
   const filtered = allSubs.filter(s =>
     (practicalFilter === "all" || s.practicalId === practicalFilter) &&
@@ -1931,7 +1992,7 @@ const Submissions: React.FC = () => {
      (s.studentReg ?? "").toLowerCase().includes(search.toLowerCase()))
   );
 
-  useEffect(() => { setPage(0); }, [search, practicalFilter, tokenFilter, resultFilter, refresh]);
+  useEffect(() => { setPage(0); }, [search, practicalFilter, tokenFilter, resultFilter, classId, refresh]);
   const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const safePage  = Math.min(page, pageCount - 1);
   const paged     = filtered.slice(safePage * PAGE_SIZE, safePage * PAGE_SIZE + PAGE_SIZE);
@@ -1965,6 +2026,9 @@ const Submissions: React.FC = () => {
               color:C.txtPri, borderRadius:8, padding:"8px 12px 8px 34px",
               fontSize:15, boxSizing:"border-box", outline:"none" }} />
         </div>
+
+        {/* Class dropdown */}
+        <ClassFilter classes={classes} value={classId} onChange={setClassId} />
 
         {/* Practical dropdown */}
         <select value={practicalFilter} onChange={e => setPracticalFilter(e.target.value)}
@@ -2092,21 +2156,24 @@ const AssignmentTracking: React.FC = () => {
   const [allSubs,     setAllSubs]     = useState<LabSubmission[]>([]);
   const [students,    setStudents]    = useState<StoreUser[]>([]);
   const [search,      setSearch]      = useState("");
+  const [classId,     setClassId]     = useState("");
+  const classes = useClasses();
   const [refresh,     setRefresh]     = useState(0);
   const [loading,     setLoading]     = useState(true);
 
   useEffect(() => {
+    const cls = classId || undefined;
     setLoading(true);
     Promise.all([
       getAllAssignments(),
-      getAllSubmissions(),
-      getStudents().then(users => users.filter(u => u.role === "student")),
+      getAllSubmissions(cls),
+      getStudents(cls).then(users => users.filter(u => u.role === "student")),
     ]).then(([asg, subs, studs]) => {
       setAssignments(asg);
       setAllSubs(subs);
       setStudents(studs);
     }).finally(() => setLoading(false));
-  }, [refresh]);
+  }, [refresh, classId]);
 
   // Newest assignment first
   const ordered = assignments.slice().sort((a, b) =>
@@ -2124,8 +2191,11 @@ const AssignmentTracking: React.FC = () => {
         title="Assignment Tracking"
         sub="See who completed each assignment and who hasn't — grouped per assignment code."
         action={
-          <Btn label="Refresh" Icon={RefreshCw} variant="ghost" small
-            onClick={() => setRefresh(r => r + 1)} />
+          <div style={{ display:"flex", gap:8, alignItems:"center", flexWrap:"wrap" }}>
+            <ClassFilter classes={classes} value={classId} onChange={setClassId} />
+            <Btn label="Refresh" Icon={RefreshCw} variant="ghost" small
+              onClick={() => setRefresh(r => r + 1)} />
+          </div>
         }
       />
 
@@ -2369,36 +2439,59 @@ const SettingsPanel: React.FC = () => {
   const [teacherEmail,setTeacherEmail]= useState<string>(stored.teacherEmail ?? "teacher@school.edu");
   const [saved,       setSaved]       = useState(false);
 
-  // ── Class invitation codes ───────────────────────────────────────────────────
-  const [invites,      setInvites]      = useState<ClassInvite[]>([]);
-  const [generating,   setGenerating]   = useState(false);
-  const [generateErr,  setGenerateErr]  = useState<string | null>(null);
-  const [copiedInvite, setCopiedInvite] = useState<string | null>(null);
-  const [invRefresh,   setInvRefresh]   = useState(0);
+  // ── Classes & enrollment codes ───────────────────────────────────────────────
+  const [invites,       setInvites]      = useState<ClassInvite[]>([]);
+  const [newClassName,  setNewClassName] = useState("");
+  const [newClassYear,  setNewClassYear] = useState("");
+  const [generating,    setGenerating]   = useState(false);
+  const [generateErr,   setGenerateErr]  = useState<string | null>(null);
+  const [copiedInvite,  setCopiedInvite] = useState<string | null>(null);
+  const [showArchived,  setShowArchived] = useState(false);
+  const [invRefresh,    setInvRefresh]   = useState(0);
 
-  useEffect(() => { getClassInvites().then(setInvites); }, [invRefresh]);
+  useEffect(() => { getClassInvites(showArchived).then(setInvites); }, [invRefresh, showArchived]);
 
-  const handleGenerateInvite = async () => {
+  const handleCreateClass = async () => {
+    const name = newClassName.trim();
+    if (!name) { setGenerateErr("Enter a class name first (e.g. \"Biology Yr1 2026\")."); return; }
     setGenerating(true);
     setGenerateErr(null);
     try {
-      await generateClassInvite();
+      await createClass(name, newClassYear.trim());
+      setNewClassName("");
+      setNewClassYear("");
       setInvRefresh(r => r + 1);
     } catch (err: unknown) {
-      setGenerateErr((err as Error).message ?? "Failed to generate code. Please try again.");
+      setGenerateErr((err as Error).message ?? "Failed to create class. Please try again.");
     } finally {
       setGenerating(false);
     }
   };
 
-  const handleCopyInvite = (token: string) => {
-    navigator.clipboard.writeText(token).catch(() => {});
+  const handleCopyInvite = async (token: string) => {
+    const ok = await copyToClipboard(token);
+    if (!ok) return;
     setCopiedInvite(token);
     setTimeout(() => setCopiedInvite(null), 2000);
   };
 
+  const handleArchiveToggle = async (inv: ClassInvite) => {
+    if (!inv._id) return;
+    await updateClass(inv._id, { archived: !inv.archived });
+    setInvRefresh(r => r + 1);
+  };
+
+  const handleRenameClass = async (inv: ClassInvite) => {
+    if (!inv._id) return;
+    const name = window.prompt("Rename class", inv.name)?.trim();
+    if (!name || name === inv.name) return;
+    await updateClass(inv._id, { name });
+    setInvRefresh(r => r + 1);
+  };
+
   const handleDeleteInvite = async (id: string) => {
     if (!id) return;
+    if (!window.confirm("Delete this class? Enrolled students will be unassigned. Consider archiving instead to keep its history.")) return;
     await deleteClassInvite(id);
     setInvRefresh(r => r + 1);
   };
@@ -2449,7 +2542,7 @@ const SettingsPanel: React.FC = () => {
 
   return (
     <div style={{ maxWidth:1200 }}>
-      <SectionHeading title="Settings" sub="Configure lab behaviour, grading, and class invitation codes." />
+      <SectionHeading title="Settings" sub="Manage your classes and enrollment codes, plus lab behaviour and grading." />
 
       {/* Cards flow horizontally on laptop screens and wrap/stack on narrow screens */}
       <div style={{ display:"flex", flexWrap:"wrap", gap:18, alignItems:"stretch", marginBottom:18 }}>
@@ -2460,27 +2553,46 @@ const SettingsPanel: React.FC = () => {
 
         <div style={{ color:C.txtPri, fontWeight:700, fontSize:16, marginBottom:6,
           display:"flex", alignItems:"center", gap:8 }}>
-          <UserPlus size={16} color={C.accent} strokeWidth={2} /> Class Invitation Codes
+          <UserPlus size={16} color={C.accent} strokeWidth={2} /> Classes & Enrollment Codes
         </div>
         <p style={{ color:C.txtSec, fontSize:14, lineHeight:1.6, margin:"0 0 16px" }}>
-          Generate a code and share it with students. When they enter it on the lab page they will be
-          assigned to your class and can then use your assignment codes.
+          Create a class for each cohort (e.g. a new academic year or a different group). Each class
+          gets its own code — share it with those students so they enroll into that class. You can then
+          filter Analytics by class. Archive a class when its students graduate to keep its history.
         </p>
 
-        {/* Generate button */}
-        <button
-          onClick={handleGenerateInvite}
-          disabled={generating}
-          style={{
-            display:"flex", alignItems:"center", gap:8,
-            marginBottom: generateErr ? 8 : 16,
-            background: generating ? C.surface : C.accent, color:"white", border:"none",
-            borderRadius:9, padding:"10px 18px", fontSize:15, fontWeight:700,
-            cursor: generating ? "not-allowed" : "pointer",
-          }}>
-          <Key size={15} strokeWidth={2} />
-          {generating ? "Generating…" : "Generate New Code"}
-        </button>
+        {/* Create-class form */}
+        <div style={{ display:"flex", flexWrap:"wrap", gap:8, alignItems:"center",
+          marginBottom: generateErr ? 8 : 16 }}>
+          <input
+            value={newClassName}
+            onChange={e => setNewClassName(e.target.value)}
+            onKeyDown={e => { if (e.key === "Enter") handleCreateClass(); }}
+            placeholder="Class name (e.g. Biology Yr1 2026)"
+            style={{ flex:"2 1 220px", background:C.surface, border:`1px solid ${C.border2}`,
+              color:C.txtPri, borderRadius:8, padding:"9px 12px", fontSize:15, outline:"none" }}
+          />
+          <input
+            value={newClassYear}
+            onChange={e => setNewClassYear(e.target.value)}
+            onKeyDown={e => { if (e.key === "Enter") handleCreateClass(); }}
+            placeholder="Year (optional)"
+            style={{ flex:"1 1 100px", width:100, background:C.surface, border:`1px solid ${C.border2}`,
+              color:C.txtPri, borderRadius:8, padding:"9px 12px", fontSize:15, outline:"none" }}
+          />
+          <button
+            onClick={handleCreateClass}
+            disabled={generating}
+            style={{
+              display:"flex", alignItems:"center", gap:8,
+              background: generating ? C.surface : C.accent, color:"white", border:"none",
+              borderRadius:9, padding:"10px 18px", fontSize:15, fontWeight:700,
+              cursor: generating ? "not-allowed" : "pointer", whiteSpace:"nowrap",
+            }}>
+            <Key size={15} strokeWidth={2} />
+            {generating ? "Creating…" : "Create Class"}
+          </button>
+        </div>
         {generateErr && (
           <div style={{ display:"flex", alignItems:"center", gap:6, marginBottom:16,
             color:C.red, fontSize:14, fontWeight:600 }}>
@@ -2488,34 +2600,47 @@ const SettingsPanel: React.FC = () => {
           </div>
         )}
 
-        {/* Invite list */}
+        {/* Show-archived toggle */}
+        <label style={{ display:"flex", alignItems:"center", gap:7, marginBottom:14,
+          color:C.txtMut, fontSize:13, cursor:"pointer", userSelect:"none" }}>
+          <input type="checkbox" checked={showArchived}
+            onChange={e => setShowArchived(e.target.checked)} />
+          Show archived classes
+        </label>
+
+        {/* Class list */}
         {invites.length === 0 ? (
           <div style={{ background:C.surface, border:`2px dashed ${C.border2}`, borderRadius:10,
             padding:"20px 16px", textAlign:"center", color:C.txtMut, fontSize:15 }}>
             <UserPlus size={24} style={{ marginBottom:8, opacity:0.3 }} />
-            <div>No invitation codes yet. Generate one above and share it with your students.</div>
+            <div>No classes yet. Create one above and share its code with your students.</div>
           </div>
         ) : (
           <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
             {invites.map(inv => (
-              <div key={inv._id} style={{ background:C.surface, border:`1px solid ${C.border}`,
-                borderRadius:10, padding:"12px 16px",
+              <div key={inv._id} style={{ background:C.surface,
+                border:`1px solid ${inv.archived ? C.border2 : C.border}`,
+                borderRadius:10, padding:"12px 16px", opacity: inv.archived ? 0.65 : 1,
                 display:"flex", alignItems:"center", gap:12, flexWrap:"wrap" }}>
 
-                {/* Token */}
-                <code style={{ flex:1, color:C.accent, fontWeight:800, fontSize:19,
-                  letterSpacing:2, fontFamily:"monospace" }}>
-                  {inv.token}
-                </code>
+                {/* Name + code */}
+                <div style={{ flex:"1 1 180px", minWidth:0 }}>
+                  <div style={{ color:C.txtPri, fontWeight:700, fontSize:15,
+                    display:"flex", alignItems:"center", gap:8, flexWrap:"wrap" }}>
+                    {inv.name?.trim() || <span style={{ color:C.txtMut, fontStyle:"italic" }}>Unnamed class</span>}
+                    {inv.year && <span style={{ color:C.txtMut, fontWeight:600, fontSize:13 }}>· {inv.year}</span>}
+                    {inv.archived && <span style={{ background:`${C.amber}22`, color:C.amber,
+                      borderRadius:6, padding:"1px 7px", fontSize:11, fontWeight:700 }}>Archived</span>}
+                  </div>
+                  <code style={{ color:C.accent, fontWeight:800, fontSize:16,
+                    letterSpacing:2, fontFamily:"monospace" }}>
+                    {inv.token}
+                  </code>
+                </div>
 
                 {/* Use count */}
                 <span style={{ color:C.txtMut, fontSize:13, whiteSpace:"nowrap" }}>
                   {inv.useCount} student{inv.useCount !== 1 ? "s" : ""} joined
-                </span>
-
-                {/* Created date */}
-                <span style={{ color:C.txtMut, fontSize:13, whiteSpace:"nowrap" }}>
-                  {new Date(inv.createdAt ?? "").toLocaleDateString()}
                 </span>
 
                 {/* Copy */}
@@ -2531,8 +2656,25 @@ const SettingsPanel: React.FC = () => {
                     : <><Copy size={12} strokeWidth={2} /> Copy</>}
                 </button>
 
+                {/* Rename */}
+                <button onClick={() => handleRenameClass(inv)} title="Rename class" style={{
+                  background:"transparent", border:`1px solid ${C.border2}`, color:C.txtMut,
+                  borderRadius:7, padding:"5px 8px", cursor:"pointer", display:"flex", alignItems:"center",
+                }}>
+                  <Pencil size={13} strokeWidth={2} />
+                </button>
+
+                {/* Archive / unarchive */}
+                <button onClick={() => handleArchiveToggle(inv)}
+                  title={inv.archived ? "Unarchive" : "Archive"} style={{
+                  background:"transparent", border:`1px solid ${C.border2}`, color:C.txtMut,
+                  borderRadius:7, padding:"5px 8px", cursor:"pointer", display:"flex", alignItems:"center",
+                }}>
+                  <Archive size={13} strokeWidth={2} />
+                </button>
+
                 {/* Delete */}
-                <button onClick={() => inv._id && handleDeleteInvite(inv._id)} style={{
+                <button onClick={() => inv._id && handleDeleteInvite(inv._id)} title="Delete class" style={{
                   background:`${C.red}10`, border:"none", color:C.red,
                   borderRadius:7, padding:"5px 8px", cursor:"pointer",
                   display:"flex", alignItems:"center",

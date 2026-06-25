@@ -47,7 +47,6 @@ const CountdownTimer: React.FC<Props> = ({ timeLimitMinutes, sessionStartAt, onE
 
   const mins = Math.floor(remaining / 60);
   const secs = remaining % 60;
-  const pct  = remaining / totalSeconds;
 
   // Colour thresholds
   const isCritical = remaining <= 60;          // ≤ 1 min  → red

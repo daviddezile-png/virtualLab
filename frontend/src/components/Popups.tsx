@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { SimulationError, SimulationStep } from "../simulation/model";
+import { SimulationStep } from "../simulation/model";
 
 interface ErrorPopupProps {
   isOpen: boolean;
@@ -36,32 +36,6 @@ export const ErrorPopup: React.FC<ErrorPopupProps> = ({
   };
 
   if (!isOpen || !isVisible) return null;
-
-  const getSeverityColor = (severity: string): string => {
-    switch (severity) {
-      case "critical":
-        return "bg-red-100 border-red-400 text-red-800";
-      case "error":
-        return "bg-orange-100 border-orange-400 text-orange-800";
-      case "warning":
-        return "bg-yellow-100 border-yellow-400 text-yellow-800";
-      default:
-        return "bg-gray-100 border-gray-400 text-gray-800";
-    }
-  };
-
-  const getIcon = (severity: string): string => {
-    switch (severity) {
-      case "critical":
-        return "🚨";
-      case "error":
-        return "❌";
-      case "warning":
-        return "⚠️";
-      default:
-        return "ℹ️";
-    }
-  };
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">

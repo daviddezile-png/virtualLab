@@ -2,10 +2,9 @@
 // virtual lab feels physical (no audio asset files; works fully offline).
 //
 // Three continuous *loops* (boiling, stirring, pouring) are toggled on/off as
-// the matching simulation state starts and stops, plus a movement-driven
-// *slide* (friction of apparatus dragged across the table) and one-shot
-// *grab* / *drop* / *click* effects.  Everything routes through a single master
-// gain so the whole lab can be muted at once.
+// the matching simulation state starts and stops, plus one-shot
+// *grab* / *drop* / *clink* / *click* effects.  Everything routes through a
+// single master gain so the whole lab can be muted at once.
 //
 // Browsers suspend an AudioContext until the first user gesture; every public
 // method resumes it, and all of ours are reached via a click/drag, so the
@@ -24,10 +23,10 @@ class SoundManager {
   private master: GainNode | null = null;
   private noiseBuffer: AudioBuffer | null = null;
   private loops: Partial<Record<LoopName, Loop>> = {};
-  // Gesture-driven friction loop — kept alive by repeated slide() calls and
-  // auto-faded out shortly after the dragging pointer stops moving.
-  private sliding: { gain: GainNode; nodes: AudioNode[]; bp: BiquadFilterNode; stopTimer: number | null } | null = null;
   private muted = false;
+  // Persistent friction "scrape" bed for apparatus sliding on the bench. It is
+  // kept silent (gain 0) when idle and only swells while the item is moving.
+  private friction: { gain: GainNode; fadeTimer: number } | null = null;
 
   // ── Context bootstrap ─────────────────────────────────────────────────────
   private ensure(): AudioContext | null {
@@ -116,7 +115,9 @@ class SoundManager {
   }
 
   private loopLevel(name: LoopName): number {
-    return name === "boiling" ? 0.5 : name === "pouring" ? 0.26 : 0.32;
+    // Pouring kept gentle — the soft trickle of water settling into a glass,
+    // not a hard splashing jet.
+    return name === "boiling" ? 0.5 : name === "pouring" ? 0.16 : 0.32;
   }
 
   // ── Loop builders ─────────────────────────────────────────────────────────
@@ -157,91 +158,145 @@ class SoundManager {
     return { nodes: [src, lp, bed], gain, stopTimers: [timer] };
   }
 
-  // Stirring: airy band-passed noise swept by a slow LFO → rhythmic swish.
+  // Stirring: a glass rod worked round a beaker of liquid. Two layers, both
+  // locked to the *visual* rod speed so the sound and the animation agree:
+  //   • a soft, dark water "swish" that swells once per stir sweep, and
+  //   • a gentle glassy "knock" each cycle as the rod brushes the beaker wall.
+  //
+  // The on-screen rod tilts as sin(frame * 0.40) advanced once per animation
+  // frame (~60 fps) → 0.40·60 = 24 rad/s → ~3.8 Hz full back-and-forth, a
+  // ~262 ms cycle. The audio is tuned to that so the swish/knock keep pace with
+  // the rod. STIR_HZ / STIR_MS below ARE that visual cadence — keep them in sync
+  // if the rod's 0.40 factor in InteractiveLabCanvas ever changes.
   private buildStirring(ctx: AudioContext, gain: GainNode): Loop {
+    const STIR_HZ = 3.8;             // full back-and-forth sweeps per second
+    const STIR_MS = 1000 / STIR_HZ;  // ms per stir cycle (~263 ms)
+
+    // Water swish bed — dark band-passed noise (liquid, not airy hiss).
     const src = ctx.createBufferSource();
     src.buffer = this.noise(ctx);
     src.loop = true;
     const bp = ctx.createBiquadFilter();
     bp.type = "bandpass";
-    bp.frequency.value = 850;
-    bp.Q.value = 1.4;
+    bp.frequency.value = 540;        // lower → wet, watery rather than papery
+    bp.Q.value = 1.1;
+    const lp = ctx.createBiquadFilter();
+    lp.type = "lowpass";
+    lp.frequency.value = 1100;       // roll off the dry top-end swish
     const swish = ctx.createGain();
-    swish.gain.value = 0.18;
-    src.connect(bp).connect(swish).connect(gain);
+    swish.gain.value = 0.14;
+    src.connect(bp).connect(lp).connect(swish).connect(gain);
     src.start();
 
-    // LFO modulates the swish amplitude (~2.2 Hz) for the back-and-forth motion
+    // The swish swells once per visible sweep — modulated at the rod's own rate
+    // so the rhythm of the sound tracks the rod instead of racing it.
     const lfo = ctx.createOscillator();
-    lfo.frequency.value = 2.2;
+    lfo.frequency.value = STIR_HZ;
     const lfoGain = ctx.createGain();
-    lfoGain.gain.value = 0.16;
+    lfoGain.gain.value = 0.12;
     lfo.connect(lfoGain).connect(swish.gain);
     lfo.start();
 
-    return { nodes: [src, bp, swish, lfo, lfoGain], gain, stopTimers: [] };
-  }
-
-  // Pouring: the sound of a drink / water being poured into a glass. A soft,
-  // dark liquid stream (heavily low-passed noise — no hissy top end) carries a
-  // steady run of rounded "glug" bubbles whose pitch drifts upward, the way a
-  // filling vessel rises in tone as it fills.
-  private buildPouring(ctx: AudioContext, gain: GainNode): Loop {
-    // Liquid stream bed — narrow, dark noise so it reads as flowing water, not air.
-    const src = ctx.createBufferSource();
-    src.buffer = this.noise(ctx);
-    src.loop = true;
-    const bp = ctx.createBiquadFilter();
-    bp.type = "bandpass";
-    bp.frequency.value = 480;
-    bp.Q.value = 0.9;
-    const lp = ctx.createBiquadFilter();   // roll off all the harsh hiss
-    lp.type = "lowpass";
-    lp.frequency.value = 900;
-    lp.Q.value = 0.5;
-    const body = ctx.createGain();
-    body.gain.value = 0.32;
-    src.connect(bp).connect(lp).connect(body).connect(gain);
-    src.start();
-
-    // Slow swell so the stream breathes instead of sitting flat.
-    const lfo = ctx.createOscillator();
-    lfo.type = "sine";
-    lfo.frequency.value = 1.6;
-    const lfoGain = ctx.createGain();
-    lfoGain.gain.value = 0.12;
-    lfo.connect(lfoGain).connect(body.gain);
-    lfo.start();
-
-    // Rising pitch as the glass fills — climbs over a few seconds, then resets,
-    // so a sustained pour keeps sounding like liquid rising in the vessel.
-    let fill = 0;
-    // Rounded "glug" bubbles — the gulping voice of liquid pouring into a glass.
-    const glug = () => {
+    // Glassy knock — the rounded tip tapping the beaker wall on each pass. A
+    // short mid sine "tock" with a tiny noise tick, soft so it sits under the
+    // swish as a rhythmic click rather than a bell.
+    const knock = () => {
       const now = ctx.currentTime;
       const osc = ctx.createOscillator();
       const og = ctx.createGain();
       osc.type = "sine";
-      const base = 150 + fill * 240;                 // pitch rises as it "fills"
-      const f = base + Math.random() * 60;
+      const f = 780 + Math.random() * 220;            // slight per-tap variation
       osc.frequency.setValueAtTime(f, now);
-      osc.frequency.exponentialRampToValueAtTime(f * 1.6, now + 0.05);
+      osc.frequency.exponentialRampToValueAtTime(f * 0.85, now + 0.05);
       og.gain.setValueAtTime(0.0001, now);
-      og.gain.exponentialRampToValueAtTime(0.22, now + 0.012);
-      og.gain.exponentialRampToValueAtTime(0.0001, now + 0.1);
+      og.gain.exponentialRampToValueAtTime(0.14, now + 0.004);
+      og.gain.exponentialRampToValueAtTime(0.0001, now + 0.09);
       osc.connect(og).connect(gain);
       osc.start(now);
-      osc.stop(now + 0.12);
-      fill = fill >= 1 ? 0 : fill + 0.04;            // climb, then start over
+      osc.stop(now + 0.1);
+
+      // Tiny contact tick — the hard "click" of glass on glass before the tock.
+      const tk = ctx.createBufferSource();
+      tk.buffer = this.noise(ctx);
+      const hp = ctx.createBiquadFilter();
+      hp.type = "highpass";
+      hp.frequency.value = 2400;
+      const tg = ctx.createGain();
+      tg.gain.setValueAtTime(0.0001, now);
+      tg.gain.exponentialRampToValueAtTime(0.05, now + 0.001);
+      tg.gain.exponentialRampToValueAtTime(0.0001, now + 0.015);
+      tk.connect(hp).connect(tg).connect(gain);
+      tk.start(now);
+      tk.stop(now + 0.02);
     };
-    // A steady, fairly dense stream of glugs — that classic "glug-glug" pour.
+    // One knock per stir cycle, jittered a touch so it never sounds metronomic.
     const timer = window.setInterval(() => {
-      const n = 1 + Math.floor(Math.random() * 2);
+      window.setTimeout(knock, Math.random() * 40);
+    }, STIR_MS);
+
+    return { nodes: [src, bp, lp, swish, lfo, lfoGain], gain, stopTimers: [timer] };
+  }
+
+  // Pouring water INTO a glass of water. The earlier version leaned on a steady
+  // band of noise, which read as a falling stream / distant waterfall. Real
+  // pouring into a vessel is dominated instead by *burbling* — a busy run of
+  // rounded glugs and plips bubbling through the liquid — over only a whisper of
+  // trickle. So here the noise stream is dialled right back to a faint underlay
+  // and the glug layer is made denser and bubblier, with the pitch rising as the
+  // glass fills.
+  private buildPouring(ctx: AudioContext, gain: GainNode): Loop {
+    // Faint trickle underlay — just enough body to glue the glugs together. Kept
+    // dark and quiet so it never becomes a hissy "stream".
+    const src = ctx.createBufferSource();
+    src.buffer = this.noise(ctx);
+    src.loop = true;
+    const bp = ctx.createBiquadFilter();
+    bp.type = "bandpass";
+    bp.frequency.value = 300;
+    bp.Q.value = 0.7;
+    const lp = ctx.createBiquadFilter();
+    lp.type = "lowpass";
+    lp.frequency.value = 480;
+    lp.Q.value = 0.4;
+    const body = ctx.createGain();
+    body.gain.value = 0.06;                // barely there — no waterfall hiss
+    src.connect(bp).connect(lp).connect(body).connect(gain);
+    src.start();
+
+    // Rising pitch as the glass fills — climbs over a few seconds, then resets,
+    // so a sustained pour keeps sounding like liquid rising in the vessel.
+    let fill = 0;
+    // Rounded "glug" — the wet bloop of water folding into water. Sine with a
+    // soft attack and a quick upward chirp, low-passed so each one is mellow.
+    const glug = () => {
+      const now = ctx.currentTime;
+      const osc = ctx.createOscillator();
+      const og = ctx.createGain();
+      const lp2 = ctx.createBiquadFilter();   // soften each bubble's edge
+      lp2.type = "lowpass";
+      lp2.frequency.value = 1000;
+      osc.type = "sine";
+      const base = 150 + fill * 170;                 // pitch rises as it "fills"
+      const f = base + Math.random() * 50;
+      osc.frequency.setValueAtTime(f, now);
+      osc.frequency.exponentialRampToValueAtTime(f * 1.5, now + 0.05);
+      og.gain.setValueAtTime(0.0001, now);
+      og.gain.exponentialRampToValueAtTime(0.11, now + 0.02);    // soft attack
+      og.gain.exponentialRampToValueAtTime(0.0001, now + 0.13);  // gentle tail
+      osc.connect(og).connect(lp2).connect(gain);
+      osc.start(now);
+      osc.stop(now + 0.15);
+      fill = fill >= 1 ? 0 : fill + 0.03;            // climb, then start over
+    };
+    // A busy, irregular burble — several overlapping glugs every beat so it
+    // reads as water bubbling into a glass, not a thin metronomic drip.
+    const timer = window.setInterval(() => {
+      const n = 2 + Math.floor(Math.random() * 3);   // 2–4 glugs per beat
       for (let i = 0; i < n; i++) window.setTimeout(glug, Math.random() * 120);
-    }, 140);
+    }, 130);
 
     return {
-      nodes: [src, bp, lp, body, lfo, lfoGain],
+      nodes: [src, bp, lp, body],
       gain,
       stopTimers: [timer],
     };
@@ -333,68 +388,96 @@ class SoundManager {
     osc.stop(now + 0.1);
   }
 
-  // Friction of apparatus sliding across the table. Called on every drag-move
-  // tick while the pointer is actually moving: the first call spins up a soft
-  // gritty scrape loop, each subsequent call keeps it alive, and it auto-fades
-  // out shortly after movement stops (so a paused-but-held item is silent).
-  //
-  // `intensity` (0..1) reflects how fast the item is moving — a slow nudge is a
-  // faint scrape, a quick drag is louder and a touch brighter, so the sound
-  // tracks the actual motion rather than playing flat-out the whole time.
-  slide(intensity = 1) {
+  // Glass-on-glass "clink": fired when a beaker / measuring cylinder / container
+  // is carried through the air and knocks into a beaker. A pair of bright,
+  // fast-decaying inharmonic tones (the ring of struck glass) over a tiny noise
+  // tick for the initial contact. `intensity` (0..1) scales the loudness so a
+  // gentle tap is softer than a hard knock.
+  clink(intensity = 1) {
     const ctx = this.ensure();
     if (!ctx || !this.master) return;
-    const i = Math.max(0, Math.min(1, intensity));
+    const now = ctx.currentTime;
+    const i = Math.max(0.25, Math.min(1, intensity));
 
-    if (!this.sliding) {
-      const sg = ctx.createGain();
-      sg.gain.value = 0;
-      sg.connect(this.master);
+    // Two detuned, inharmonic partials give the glassy "ting" its character.
+    const partials = [
+      { f: 2600, g: 0.22 },
+      { f: 3870, g: 0.12 },
+    ];
+    for (const p of partials) {
+      const osc = ctx.createOscillator();
+      const g = ctx.createGain();
+      osc.type = "sine";
+      const f = p.f * (0.97 + Math.random() * 0.06);   // slight per-hit variation
+      osc.frequency.setValueAtTime(f, now);
+      osc.frequency.exponentialRampToValueAtTime(f * 0.96, now + 0.18);
+      g.gain.setValueAtTime(0.0001, now);
+      g.gain.exponentialRampToValueAtTime(p.g * i, now + 0.003);
+      g.gain.exponentialRampToValueAtTime(0.0001, now + 0.2);
+      osc.connect(g).connect(this.master);
+      osc.start(now);
+      osc.stop(now + 0.22);
+    }
 
-      // Mid-band noise, low-passed → a dry "shhk" scrape rather than hiss.
+    // Tiny high noise tick — the hard moment of contact before the ring.
+    const src = ctx.createBufferSource();
+    src.buffer = this.noise(ctx);
+    const hp = ctx.createBiquadFilter();
+    hp.type = "highpass";
+    hp.frequency.value = 3000;
+    const ng = ctx.createGain();
+    ng.gain.setValueAtTime(0.0001, now);
+    ng.gain.exponentialRampToValueAtTime(0.16 * i, now + 0.001);
+    ng.gain.exponentialRampToValueAtTime(0.0001, now + 0.02);
+    src.connect(hp).connect(ng).connect(this.master);
+    src.start(now);
+    src.stop(now + 0.03);
+  }
+
+  // Sliding friction: a small, dry "scrape" played while a piece of apparatus is
+  // dragged ALONG the bench (never in the air). Driven by drag speed — call it on
+  // each move tick and it swells with the motion, then fades itself out shortly
+  // after the movement stops. `speed` is the per-tick pointer travel in px.
+  slide(speed: number) {
+    const ctx = this.ensure();
+    if (!ctx || !this.master) return;
+
+    if (!this.friction) {
+      // Low, woody noise → reads as a base scraping over a hard table top.
       const src = ctx.createBufferSource();
       src.buffer = this.noise(ctx);
       src.loop = true;
       const bp = ctx.createBiquadFilter();
       bp.type = "bandpass";
-      bp.frequency.value = 1200;
+      bp.frequency.value = 260;
       bp.Q.value = 0.8;
       const lp = ctx.createBiquadFilter();
       lp.type = "lowpass";
-      lp.frequency.value = 2600;
-      const body = ctx.createGain();
-      body.gain.value = 0.5;
-      src.connect(bp).connect(lp).connect(body).connect(sg);
+      lp.frequency.value = 480;
+      const gain = ctx.createGain();
+      gain.gain.value = 0;
+      src.connect(bp).connect(lp).connect(gain).connect(this.master);
       src.start();
-
-      this.sliding = { gain: sg, nodes: [src, bp, lp, body], bp, stopTimer: null };
+      this.friction = { gain, fadeTimer: 0 };
     }
 
-    const s = this.sliding;
-    // Level rises with speed; faster drags also brighten the scrape a touch.
-    s.gain.gain.setTargetAtTime(0.03 + 0.13 * i, ctx.currentTime, 0.03);
-    s.bp.frequency.setTargetAtTime(1000 + 900 * i, ctx.currentTime, 0.05);
-    if (s.stopTimer) clearTimeout(s.stopTimer);
-    s.stopTimer = window.setTimeout(() => this.slideStop(), 90);
+    const f = this.friction;
+    // Subtle: a slow slide barely whispers, a quick one is still soft.
+    const level = Math.min(0.1, 0.015 + Math.min(speed, 24) * 0.0045);
+    f.gain.gain.setTargetAtTime(level, ctx.currentTime, 0.03);
+    // Re-arm the fade-out; if no further move ticks arrive the scrape dies away.
+    if (f.fadeTimer) clearTimeout(f.fadeTimer);
+    f.fadeTimer = window.setTimeout(() => {
+      if (this.friction && this.ctx)
+        this.friction.gain.gain.setTargetAtTime(0, this.ctx.currentTime, 0.06);
+    }, 90);
   }
 
-  private slideStop() {
-    const s = this.sliding;
-    if (!s || !this.ctx) return;
-    this.sliding = null;
-    if (s.stopTimer) clearTimeout(s.stopTimer);
-    s.gain.gain.setTargetAtTime(0, this.ctx.currentTime, 0.06);
-    window.setTimeout(() => {
-      s.nodes.forEach((n) => {
-        try {
-          (n as AudioScheduledSourceNode).stop?.();
-        } catch {
-          /* not a source node */
-        }
-        n.disconnect();
-      });
-      s.gain.disconnect();
-    }, 250);
+  // Stop the sliding scrape immediately (called when a drag is released).
+  endSlide() {
+    if (!this.friction || !this.ctx) return;
+    if (this.friction.fadeTimer) clearTimeout(this.friction.fadeTimer);
+    this.friction.gain.gain.setTargetAtTime(0, this.ctx.currentTime, 0.06);
   }
 
   // Normal mechanical push-button click for the hot-plate power button: a short
