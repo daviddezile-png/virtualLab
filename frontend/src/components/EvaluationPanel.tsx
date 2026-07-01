@@ -14,6 +14,9 @@ interface Props {
   practicalId?:    string;
   assignment?:     Assignment | null;
   sessionStartAt?: number | null;
+  /** When the session timer expires the panel auto-submits whatever data has
+   *  been collected so far, even if the student never clicked Submit. */
+  labExpired?:     boolean;
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -228,6 +231,26 @@ function readColdCreamLabState(apparatus: Apparatus[]): ColdCreamInput {
   };
 }
 
+// ── Good-practice check: reagent bottles left open ────────────────────────────
+// A student who unscrews a reagent bottle/jar to dispense but forgets to put the
+// lid back on by the end of the practical loses a small mark. Only containers
+// that ORIGINALLY had a lid (bottles/jars with a lidColor) are counted — beakers
+// are open vessels and are never penalised.
+export function countOpenLids(apparatus: Apparatus[]): number {
+  return apparatus.filter(a =>
+    (a.type === "bottle" || a.type === "container") &&
+    !a.data?.hasLid &&
+    !!a.data?.lidColor,
+  ).length;
+}
+
+// Marks deducted (on the 18-point engine scale) for each reagent bottle left
+// open, capped so a slip in good practice stays a minor deduction.
+const LID_PENALTY_PER_BOTTLE = 1;
+const LID_PENALTY_CAP        = 2;
+const lidPenaltyFor = (openLids: number) =>
+  Math.min(openLids * LID_PENALTY_PER_BOTTLE, LID_PENALTY_CAP);
+
 // ── Section title ─────────────────────────────────────────────────────────────
 const SectionTitle: React.FC<{ children: React.ReactNode }> = ({ children }) => (
   <div style={{ color:"#475569", fontSize:10, fontWeight:700, letterSpacing:2,
@@ -240,7 +263,7 @@ const SectionTitle: React.FC<{ children: React.ReactNode }> = ({ children }) => 
 );
 
 // ── Checklist builders (module-level so they can be called inside handleEvaluate) ─
-const buildChecklist = (r: EvaluationResult, f: FormulationInput, measuredVisc: number, measuredPH: number) => {
+const buildChecklist = (r: EvaluationResult, f: FormulationInput, measuredVisc: number, measuredPH: number, openLids: number) => {
   const td = Math.abs(f.oil_phase_temperature - f.aqueous_phase_temperature);
   const dispVisc = r.predicted_viscosity;
   const dispPH   = r.predicted_pH;
@@ -288,10 +311,14 @@ const buildChecklist = (r: EvaluationResult, f: FormulationInput, measuredVisc: 
     { label:`Viscosity${measuredVisc>0 ? ` (gauge: ${measuredVisc} cP)` : ""}`,
       got:`${dispVisc} cP`, target:"1100–1800 cP",
       status:(dispVisc>=1100&&dispVisc<=1800?"pass":dispVisc>=800&&dispVisc<=2200?"warn":"fail") as "pass"|"warn"|"fail" },
+    { label:"Good Practice — Bottles Closed",
+      got: openLids>0 ? `${openLids} left open` : "All closed",
+      target:"All closed",
+      status:(openLids>0 ? "warn" : "pass") as "pass"|"warn"|"fail" },
   ];
 };
 
-const buildColdCreamChecklist = (r: ColdCreamResult, f: ColdCreamInput, measuredVisc: number, measuredPH: number) => {
+const buildColdCreamChecklist = (r: ColdCreamResult, f: ColdCreamInput, measuredVisc: number, measuredPH: number, openLids: number) => {
   const td = Math.abs(f.oil_phase_temperature - f.aqueous_phase_temperature);
   const p  = r.percentages;
   return [
@@ -323,6 +350,10 @@ const buildColdCreamChecklist = (r: ColdCreamResult, f: ColdCreamInput, measured
     { label:`Viscosity${measuredVisc>0?` (gauge: ${measuredVisc} cP)`:""}`,
       got:`${r.predicted_viscosity} cP`, target:"2000–6000 cP",
       status:(r.predicted_viscosity>=2000&&r.predicted_viscosity<=6000?"pass":r.predicted_viscosity>=1500&&r.predicted_viscosity<=7000?"warn":"fail") as "pass"|"warn"|"fail" },
+    { label:"Good Practice — Bottles Closed",
+      got: openLids>0 ? `${openLids} left open` : "All closed",
+      target:"All closed",
+      status:(openLids>0 ? "warn" : "pass") as "pass"|"warn"|"fail" },
   ];
 };
 
@@ -332,6 +363,7 @@ const EvaluationPanel: React.FC<Props> = ({
   practicalId = "vanishing-cream",
   assignment  = null,
   sessionStartAt = null,
+  labExpired = false,
 }) => {
   const isColdCream = practicalId === "cold-cream";
   // Only blocks a SECOND save attempt after the first one SUCCEEDS.
@@ -357,8 +389,6 @@ const EvaluationPanel: React.FC<Props> = ({
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen]);
-
-  if (!isOpen) return null;
 
   // ── Shared submission helper ───────────────────────────────────────────────
   const persistSubmission = async (
@@ -414,6 +444,8 @@ const EvaluationPanel: React.FC<Props> = ({
     const phMeter   = apparatus.find(a => a.type === "phmeter");
     const liveVisc  = Math.round(viscGauge?.data?.viscosityReading ?? 0);
     const livePH    = Math.round((phMeter?.data?.phReading ?? 7.0) * 100) / 100;
+    const openLids  = countOpenLids(apparatus);
+    const penalty   = lidPenaltyFor(openLids);
     setGaugeVisc(liveVisc);
     setMeterPH(livePH);
 
@@ -423,10 +455,10 @@ const EvaluationPanel: React.FC<Props> = ({
       try {
         const r  = evaluateColdCream(ccLive);
         setCcResult(r);
-        const cl = buildColdCreamChecklist(r, ccLive, liveVisc, livePH);
+        const cl = buildColdCreamChecklist(r, ccLive, liveVisc, livePH, openLids);
         const pc = cl.filter(i => i.status === "pass").length;
         const wc = cl.filter(i => i.status === "warn").length;
-        await persistSubmission(r.score, r.predicted_pH, r.predicted_viscosity, r.stability, pc, wc, 13, liveVisc, livePH, ccLive.mixing_order !== "aqueous_to_oil");
+        await persistSubmission(Math.max(0, r.score - penalty), r.predicted_pH, r.predicted_viscosity, r.stability, pc, wc, 14, liveVisc, livePH, ccLive.mixing_order !== "aqueous_to_oil");
       } catch { /* no ingredients added yet */ }
     } else {
       const live = readLabState(apparatus);
@@ -434,22 +466,47 @@ const EvaluationPanel: React.FC<Props> = ({
       try {
         const r  = evaluateFormulation(live);
         setResult(r);
-        const cl = buildChecklist(r, live, liveVisc, livePH);
+        const cl = buildChecklist(r, live, liveVisc, livePH, openLids);
         const pc = cl.filter(i => i.status === "pass").length;
         const wc = cl.filter(i => i.status === "warn").length;
-        await persistSubmission(r.score, r.predicted_pH, r.predicted_viscosity, r.stability, pc, wc, 14, liveVisc, livePH, live.mixing_order !== "aqueous_to_oil");
+        await persistSubmission(Math.max(0, r.score - penalty), r.predicted_pH, r.predicted_viscosity, r.stability, pc, wc, 15, liveVisc, livePH, live.mixing_order !== "aqueous_to_oil");
       } catch { /* no ingredients yet */ }
     }
   };
 
+  // Auto-submit whatever has been collected the instant the session timer
+  // expires — the student does not need to have opened the panel or clicked
+  // Submit. The persist helper's submittedRef guard prevents a double save if
+  // they had already submitted manually.
+  useEffect(() => {
+    if (labExpired && !submittedRef.current) { void handleEvaluate(); }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [labExpired]);
+
+  if (!isOpen) return null;
+
   const activeResult = isColdCream ? ccResult : result;
 
+  const openLidCount = countOpenLids(apparatus);
+  const scorePenalty = lidPenaltyFor(openLidCount);
+  // Engine score after the good-practice deduction (18-point scale).
+  const penalizedScore = Math.max(0, (activeResult?.score ?? 0) - scorePenalty);
+
+  // Engine feedback plus our good-practice reminder, so leaving a reagent bottle
+  // open surfaces in "What to fix" and never gets masked by the congratulations.
+  const combinedFeedback: string[] = [
+    ...(activeResult?.feedback ?? []),
+    ...(openLidCount > 0
+      ? [`You left ${openLidCount} reagent bottle${openLidCount > 1 ? "s" : ""} open — always replace the lid after dispensing (−${scorePenalty} mark${scorePenalty > 1 ? "s" : ""}).`]
+      : []),
+  ];
+
   const checklist  = isColdCream
-    ? (ccResult ? buildColdCreamChecklist(ccResult, ccForm, gaugeVisc, meterPH) : [])
-    : (result   ? buildChecklist(result, form, gaugeVisc, meterPH) : []);
+    ? (ccResult ? buildColdCreamChecklist(ccResult, ccForm, gaugeVisc, meterPH, openLidCount) : [])
+    : (result   ? buildChecklist(result, form, gaugeVisc, meterPH, openLidCount) : []);
   const passCount  = checklist.filter(i => i.status==="pass").length;
   const warnCount  = checklist.filter(i => i.status==="warn").length;
-  const totalSteps = isColdCream ? 13 : 14;
+  const totalSteps = isColdCream ? 14 : 15;
 
   // Two distinct procedural situations, kept separate so the result text matches
   // what the student actually did:
@@ -490,7 +547,7 @@ const EvaluationPanel: React.FC<Props> = ({
         <div style={{ padding:"14px 24px", borderBottom:"1px solid #1e293b",
           background:"#080f1e", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
           <div>
-            <div style={{ color:"white", fontWeight:800, fontSize:18 }}>Lab Evaluation</div>
+            <div style={{ color:"white", fontWeight:800, fontSize:18 }}>Submit Lab Result</div>
             <div style={{ color:"#64748b", fontSize:12 }}>
               {isColdCream ? "Cold Cream (W/O)" : "Vanishing Cream (O/W)"} — auto-read from your lab session
             </div>
@@ -560,7 +617,7 @@ const EvaluationPanel: React.FC<Props> = ({
             {!hasIngredients && (
               <div style={{ background:"#2d0a0a", border:"1px solid #7f1d1d", borderRadius:8,
                 padding:"10px 12px", color:"#fca5a5", fontSize:12, marginBottom:12 }}>
-                No ingredients detected yet. Add chemicals to the beakers and complete the procedure before evaluating.
+                No ingredients detected yet. Add chemicals to the beakers and complete the procedure before submitting.
               </div>
             )}
 
@@ -577,7 +634,7 @@ const EvaluationPanel: React.FC<Props> = ({
                 letterSpacing:1,
                 boxShadow: hasIngredients ? "0 4px 18px rgba(37,99,235,0.45)" : "none",
               }}>
-              ⚗ EVALUATE RESULT
+              ⤴ SUBMIT RESULT
             </button>
           </div>
 
@@ -588,7 +645,7 @@ const EvaluationPanel: React.FC<Props> = ({
                 justifyContent:"center", height:"100%", color:"#4b5563", textAlign:"center", gap:14 }}>
                 <div style={{ fontSize:56 }}>⚗️</div>
                 <div style={{ fontSize:17, fontWeight:700, color:"#64748b" }}>
-                  Complete the procedure, then evaluate
+                  Complete the procedure, then submit
                 </div>
                 <div style={{ fontSize:13, color:"#4b5563", lineHeight:1.7, maxWidth:360 }}>
                   The simulation records everything you do:<br />
@@ -663,14 +720,14 @@ const EvaluationPanel: React.FC<Props> = ({
                     <div style={{ marginTop:12 }}>
                       <div style={{ display:"flex", justifyContent:"space-between", fontSize:11,
                         color:"#6b7280", marginBottom:4 }}>
-                        <span>SCORE</span>
+                        <span>SCORE{scorePenalty > 0 ? ` (−${scorePenalty} open lid)` : ""}</span>
                         <span style={{ color:resultColor, fontWeight:700 }}>
-                          {((activeResult?.score ?? 0) / 18 * 10).toFixed(1)} / 10
+                          {(penalizedScore / 18 * 10).toFixed(1)} / 10
                         </span>
                       </div>
                       <div style={{ height:9, background:"#1e293b", borderRadius:5, overflow:"hidden" }}>
                         <div style={{ height:"100%", borderRadius:5,
-                          width:`${Math.min((activeResult?.score ?? 0) / 18 * 100, 100)}%`,
+                          width:`${Math.min(penalizedScore / 18 * 100, 100)}%`,
                           background:resultColor, transition:"width 0.9s ease" }} />
                       </div>
                     </div>
@@ -744,12 +801,12 @@ const EvaluationPanel: React.FC<Props> = ({
                 )}
 
                 {/* ── Feedback / Congratulations ── */}
-                {(activeResult?.feedback ?? []).length > 0 ? (
+                {combinedFeedback.length > 0 ? (
                   <div style={{ background:"#1c1200", border:"1px solid #78350f",
                     borderRadius:12, padding:"14px 16px" }}>
                     <div style={{ color:"#fbbf24", fontSize:10, fontWeight:700,
                       letterSpacing:2, marginBottom:10 }}>WHAT TO FIX</div>
-                    {(activeResult?.feedback ?? []).map((msg, i) => (
+                    {combinedFeedback.map((msg, i) => (
                       <div key={i} style={{ display:"flex", gap:8, marginBottom:7,
                         fontSize:13, color:"#fcd34d" }}>
                         <span style={{ flexShrink:0 }}>▸</span><span>{msg}</span>

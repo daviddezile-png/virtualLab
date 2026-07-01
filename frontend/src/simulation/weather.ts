@@ -6,16 +6,16 @@
 // *towards*, Newton's law of cooling makes it the value that controls how fast a
 // beaker loses heat once it is taken off the hot plate.
 //
-// Location accuracy: we ask the browser for precise GPS coordinates first
-// (navigator.geolocation) — IP lookups only know the ISP's gateway city, which
-// can be a different town (e.g. Dar es Salaam when you are really in Dodoma).
-// GPS gives the true city.  If the user denies the prompt or GPS is unavailable
-// we fall back to IP geolocation, and finally to a 25 °C lab default so the
-// simulation always works offline.
+// Location accuracy: we use the browser's precise GPS coordinates only
+// (navigator.geolocation).  We deliberately do NOT fall back to IP geolocation:
+// an IP lookup only knows the ISP's gateway city, so when the device is on a
+// phone hotspot it reports the hotspot's location (often a different town, e.g.
+// Dar es Salaam when you are really in Dodoma).  GPS gives the true location.
+// If the user denies the prompt or GPS is unavailable we use a 25 °C lab
+// default so the simulation always works.
 //
 // All services used are free, CORS-enabled and need no API key:
 //   • GPS reverse-geocode → api.bigdatacloud.net
-//   • IP geolocation       → ipwho.is, ipapi.co
 //   • Current temperature  → api.open-meteo.com
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -72,35 +72,6 @@ async function reverseGeocode(p: GeoPoint, signal: AbortSignal): Promise<string 
   }
 }
 
-// ── IP geolocation — coarse fallback when GPS is unavailable ──────────────────
-async function fetchIpLocation(signal: AbortSignal): Promise<GeoPoint | null> {
-  // Primary: ipwho.is
-  try {
-    const r = await fetch("https://ipwho.is/", { signal });
-    if (r.ok) {
-      const d = await r.json();
-      if (d?.success && typeof d.latitude === "number" && typeof d.longitude === "number") {
-        return { latitude: d.latitude, longitude: d.longitude, city: d.city, country: d.country_code };
-      }
-    }
-  } catch {
-    /* fall through to backup */
-  }
-  // Backup: ipapi.co
-  try {
-    const r = await fetch("https://ipapi.co/json/", { signal });
-    if (r.ok) {
-      const d = await r.json();
-      if (typeof d.latitude === "number" && typeof d.longitude === "number") {
-        return { latitude: d.latitude, longitude: d.longitude, city: d.city, country: d.country_code };
-      }
-    }
-  } catch {
-    /* fall through to caller's fallback */
-  }
-  return null;
-}
-
 // ── Current temperature for a coordinate (Open-Meteo) ────────────────────────
 async function fetchTemperature(p: GeoPoint, signal: AbortSignal): Promise<number | null> {
   try {
@@ -125,17 +96,12 @@ export async function fetchAmbientWeather(timeoutMs = 9000): Promise<AmbientWeat
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    // 1) Try precise GPS first; reverse-geocode for the real city name.
-    let point = await fetchGpsPosition(timeoutMs);
-    let place: string | null = null;
-    if (point) {
-      place = await reverseGeocode(point, controller.signal);
-    } else {
-      // 2) Fall back to IP geolocation (coarser).
-      point = await fetchIpLocation(controller.signal);
-      if (point) place = [point.city, point.country].filter(Boolean).join(", ") || null;
-    }
+    // Use precise GPS only; reverse-geocode for the real city name.
+    // No IP fallback — IP geolocation reports the hotspot/ISP location, not
+    // where the device actually is, so we use the lab default instead.
+    const point = await fetchGpsPosition(timeoutMs);
     if (!point) return DEFAULT_AMBIENT;
+    const place = await reverseGeocode(point, controller.signal);
 
     const temp = await fetchTemperature(point, controller.signal);
     if (temp === null) return DEFAULT_AMBIENT;

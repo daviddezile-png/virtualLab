@@ -5439,7 +5439,7 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
         );
       })()}
 
-      {/* Evaluate Formulation Button — top bar, left of Lab Workbook button */}
+      {/* Submit Formulation Button — top bar, left of Lab Workbook button */}
       <button
         onClick={() => setShowEvaluationPanel(true)}
         style={{
@@ -5459,7 +5459,7 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
           zIndex: 50,
         }}
       >
-        ⚗ Evaluate
+        ⤴ Submit
       </button>
 
       {/* ── Undo button ─── */}
@@ -5523,6 +5523,7 @@ const InteractiveLabCanvas: React.FC<InteractiveLabCanvasProps> = ({
         apparatus={apparatus}
         practicalId={practicalId}
         assignment={assignment}
+        labExpired={labExpired}
         sessionStartAt={assignment ? (
           (() => { try { const k = "vlab_timer_" + assignment.token; const v = localStorage.getItem(k); return v ? parseInt(v,10) : null; } catch { return null; } })()
         ) : null}
